@@ -3,42 +3,37 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 const INNERTUBE_API_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-const INNERTUBE_CLIENT_VERSION = "20.10.38";
-const INNERTUBE_CONTEXT = {
-  client: { clientName: "ANDROID", clientVersion: INNERTUBE_CLIENT_VERSION },
-};
-const INNERTUBE_USER_AGENT = `com.google.android.youtube/${INNERTUBE_CLIENT_VERSION} (Linux; U; Android 14)`;
 
 export async function GET() {
   const youtubeId = "GtOGurrUPmQ";
   const results: Record<string, unknown> = {};
 
-  // Test 1: InnerTube API
+  // Test 1: InnerTube API with WEB client
   try {
     const resp = await fetch(INNERTUBE_API_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "User-Agent": INNERTUBE_USER_AGENT },
-      body: JSON.stringify({ context: INNERTUBE_CONTEXT, videoId: youtubeId }),
+      headers: { "Content-Type": "application/json", "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+      body: JSON.stringify({
+        context: { client: { clientName: "WEB", clientVersion: "2.20241001.00.00" } },
+        videoId: youtubeId,
+      }),
     });
-    results.innertube = { status: resp.status, ok: resp.ok };
-    if (resp.ok) {
-      const data = await resp.json();
-      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      results.captionTracks = Array.isArray(tracks) ? tracks.length : 0;
-      if (tracks?.[0]?.baseUrl) {
-        const trackResp = await fetch(tracks[0].baseUrl);
-        results.trackFetch = { status: trackResp.status, ok: trackResp.ok };
-        if (trackResp.ok) {
-          const xml = await trackResp.text();
-          results.xmlLength = xml.length;
-          results.xmlSample = xml.slice(0, 300);
-        }
+    const data = await resp.json();
+    const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+    results.webClient = { status: resp.status, trackCount: Array.isArray(tracks) ? tracks.length : 0 };
+    if (tracks?.[0]) {
+      results.firstTrack = { lang: tracks[0].languageCode, url: tracks[0].baseUrl?.slice(0, 80) };
+      const trackResp = await fetch(tracks[0].baseUrl);
+      if (trackResp.ok) {
+        const xml = await trackResp.text();
+        results.xmlLength = xml.length;
+        const matches = xml.match(/<text start="[^"]*" dur="[^"]*">[^<]*<\/text>/g);
+        results.segmentCount = matches?.length ?? 0;
+        results.xmlSample = xml.slice(0, 200);
       }
-    } else {
-      results.innertubeBody = await resp.text();
     }
   } catch (e: unknown) {
-    results.innertube = { error: e instanceof Error ? e.message : String(e) };
+    results.webClient = { error: e instanceof Error ? e.message : String(e) };
   }
 
   // Test 2: library
