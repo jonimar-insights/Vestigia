@@ -74,7 +74,7 @@ async function fetchPlaylistViaRSS(playlistId: string): Promise<PlaylistVideo[]>
       }
     }
 
-    if (entries.length < 50) break;
+    if (entries.length < 15) break;
     startIndex += entries.length;
   }
 
@@ -97,7 +97,7 @@ export async function POST(request: NextRequest) {
   // Primary: yt-dlp handles all pagination natively
   let videos = await fetchPlaylistViaYtdlp(url);
 
-  // Fallback: RSS (limited to ~150)
+  // Fallback: RSS (15 videos per page, max 40 pages = 600 videos)
   if (videos.length === 0) {
     videos = await fetchPlaylistViaRSS(playlistId);
   }
