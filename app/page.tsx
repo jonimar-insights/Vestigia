@@ -432,7 +432,9 @@ export default function Home() {
   const [playlistSelected, setPlaylistSelected] = useState<Set<string>>(new Set());
   const [playlistLoading, setPlaylistLoading] = useState(false);
   const [playlistImporting, setPlaylistImporting] = useState(false);
+  const [playlistImportProgress, setPlaylistImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [playlistError, setPlaylistError] = useState<string | null>(null);
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
 
   // ── Cliplist state ──
   const [cliplists, setCliplists] = useState<Cliplist[]>([]);
@@ -534,18 +536,28 @@ export default function Home() {
     setPlaylistVideos([]);
     setPlaylistSelected(new Set());
     try {
-      const res = await fetch("/api/playlists", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: playlistUrl }),
-      });
-      if (!res.ok) {
-        const data = await res.json();
+      const [playlistRes, videosRes] = await Promise.all([
+        fetch("/api/playlists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: playlistUrl }),
+        }),
+        fetch("/api/videos"),
+      ]);
+      if (!playlistRes.ok) {
+        const data = await playlistRes.json();
         throw new Error(data.error || "Failed to fetch playlist");
       }
-      const data = await res.json();
-      setPlaylistVideos(data.videos);
-      setPlaylistSelected(new Set(data.videos.map((v: PlaylistVideo) => v.id)));
+      const data = await playlistRes.json();
+      const vids: PlaylistVideo[] = data.videos;
+
+      const existing = videosRes.ok ? ((await videosRes.json()) as Video[]) : [];
+      const existSet = new Set(existing.map((v) => v.youtubeId));
+      setImportedIds(existSet);
+
+      const newOnly = vids.filter((v) => !existSet.has(v.id));
+      setPlaylistVideos(vids);
+      setPlaylistSelected(new Set(newOnly.map((v) => v.id)));
     } catch (err) {
       setPlaylistError(err instanceof Error ? err.message : "Failed to fetch playlist");
     } finally {
@@ -563,10 +575,11 @@ export default function Home() {
   }
 
   function toggleSelectAll() {
-    if (playlistSelected.size === playlistVideos.length) {
+    const importable = playlistVideos.filter((v) => !importedIds.has(v.id));
+    if (playlistSelected.size === importable.length) {
       setPlaylistSelected(new Set());
     } else {
-      setPlaylistSelected(new Set(playlistVideos.map((v) => v.id)));
+      setPlaylistSelected(new Set(importable.map((v) => v.id)));
     }
   }
 
@@ -574,27 +587,34 @@ export default function Home() {
     setPlaylistVideos([]);
     setPlaylistSelected(new Set());
     setPlaylistError(null);
+    setImportedIds(new Set());
+    setPlaylistImportProgress(null);
     setUrl("");
   }
 
   async function importSelectedVideos() {
-    const toImport = playlistVideos.filter((v) => playlistSelected.has(v.id));
+    const toImport = playlistVideos.filter((v) => playlistSelected.has(v.id) && !importedIds.has(v.id));
     if (!toImport.length) return;
     setPlaylistImporting(true);
+    setPlaylistImportProgress({ done: 0, total: toImport.length });
     try {
-      for (const v of toImport) {
-        await fetch("/api/videos", {
+      const newImported = new Set(importedIds);
+      for (let i = 0; i < toImport.length; i++) {
+        const v = toImport[i];
+        const res = await fetch("/api/videos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${v.id}` }),
         });
+        if (res.ok) newImported.add(v.id);
+        setPlaylistImportProgress({ done: i + 1, total: toImport.length });
       }
-      setPlaylistVideos([]);
+      setImportedIds(newImported);
       setPlaylistSelected(new Set());
-      setUrl("");
       await loadVideos();
     } finally {
       setPlaylistImporting(false);
+      setPlaylistImportProgress(null);
     }
   }
 
@@ -769,7 +789,11 @@ export default function Home() {
               <div className="mb-6 rounded-lg border border-border bg-surface">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                   <h3 className="text-sm font-medium">
-                    {playlistLoading ? "Loading playlist..." : `${playlistVideos.length} videos in playlist`}
+                    {playlistLoading
+                      ? "Loading playlist..."
+                      : importedIds.size > 0
+                        ? `${playlistVideos.length} videos — ${importedIds.size} already imported, ${playlistVideos.length - importedIds.size} new`
+                        : `${playlistVideos.length} videos in playlist`}
                   </h3>
                   <button onClick={cancelPlaylist} className="text-xs text-muted hover:text-foreground transition-colors">
                     Cancel
@@ -784,45 +808,62 @@ export default function Home() {
                       <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
                         <input
                           type="checkbox"
-                          checked={playlistSelected.size === playlistVideos.length}
+                          checked={playlistSelected.size === playlistVideos.filter((v) => !importedIds.has(v.id)).length && playlistVideos.some((v) => !importedIds.has(v.id))}
                           onChange={toggleSelectAll}
                           className="rounded border-border accent-accent"
                         />
-                        {playlistSelected.size}/{playlistVideos.length} selected
+                        {playlistSelected.size}/{playlistVideos.filter((v) => !importedIds.has(v.id)).length} new selected
                       </label>
                       <button
                         onClick={importSelectedVideos}
                         disabled={playlistImporting || playlistSelected.size === 0}
                         className="rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {playlistImporting
-                          ? "Importing..."
-                          : `Import ${playlistSelected.size} video${playlistSelected.size !== 1 ? "s" : ""}`}
+                        {playlistImportProgress
+                          ? `Importing ${playlistImportProgress.done}/${playlistImportProgress.total}...`
+                          : playlistImporting
+                            ? "Importing..."
+                            : `Import ${playlistSelected.size} video${playlistSelected.size !== 1 ? "s" : ""}`}
                       </button>
                     </div>
 
                     <div className="max-h-96 overflow-y-auto divide-y divide-border/50">
-                      {playlistVideos.map((v) => (
-                        <label
-                          key={v.id}
-                          className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
-                            playlistSelected.has(v.id) ? "bg-accent/5" : "hover:bg-surface-hover/50"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={playlistSelected.has(v.id)}
-                            onChange={() => togglePlaylistVideo(v.id)}
-                            className="rounded border-border accent-accent shrink-0"
-                          />
-                          <img
-                            src={v.thumbnail}
-                            alt={v.title}
-                            className="w-24 h-14 object-cover rounded shrink-0"
-                          />
-                          <span className="text-xs text-foreground line-clamp-2">{v.title}</span>
-                        </label>
-                      ))}
+                      {playlistVideos.map((v) => {
+                        const alreadyImported = importedIds.has(v.id);
+                        return (
+                          <label
+                            key={v.id}
+                            className={`flex items-center gap-3 px-4 py-2.5 transition-colors ${
+                              alreadyImported
+                                ? "opacity-50 cursor-default"
+                                : playlistSelected.has(v.id)
+                                  ? "bg-accent/5 cursor-pointer"
+                                  : "hover:bg-surface-hover/50 cursor-pointer"
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={playlistSelected.has(v.id)}
+                              disabled={alreadyImported}
+                              onChange={() => togglePlaylistVideo(v.id)}
+                              className="rounded border-border accent-accent shrink-0"
+                            />
+                            <img
+                              src={v.thumbnail}
+                              alt={v.title}
+                              className="w-24 h-14 object-cover rounded shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-foreground line-clamp-2">{v.title}</span>
+                              {alreadyImported && (
+                                <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 rounded">
+                                  Imported
+                                </span>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
                     </div>
                   </>
                 )}
