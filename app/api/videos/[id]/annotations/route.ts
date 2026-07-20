@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { annotations } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
@@ -8,6 +8,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -32,6 +33,7 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const session = await auth();
   const { id } = await params;
   const videoId = parseInt(id);
@@ -82,6 +84,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -139,6 +142,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, keyMoments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import {
@@ -11,6 +11,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -37,7 +38,6 @@ export async function POST(
 
   const allMoments = [];
 
-  // 1. Extract YouTube chapters
   const chapters = await extractYouTubeChapters(video.youtubeId);
   for (const ch of chapters) {
     const [inserted] = await db
@@ -54,10 +54,8 @@ export async function POST(
     allMoments.push(inserted);
   }
 
-  // 2. Extract transcript key moments
   const transcriptMoments = await extractTranscriptKeyMoments(video.youtubeId);
   for (const tm of transcriptMoments) {
-    // Avoid duplicates with chapters (within 3s)
     const tooClose = allMoments.some(
       (m) => Math.abs(m.timestamp - tm.timestamp) < 3,
     );
@@ -93,6 +91,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -112,6 +111,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 

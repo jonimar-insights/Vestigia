@@ -1,7 +1,9 @@
-import { db } from "../lib/db";
+import { getDb } from "../lib/db";
 import { users } from "../lib/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+
+const db = getDb();
 
 const args = process.argv.slice(2);
 const username = args[0];

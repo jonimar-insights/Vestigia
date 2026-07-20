@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { annotations, videos } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { formatTimestamp } from "@/lib/youtube";
@@ -8,6 +8,7 @@ export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 

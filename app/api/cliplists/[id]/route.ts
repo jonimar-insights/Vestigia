@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { cliplists, clipItems, videos } from "@/lib/schema";
 import { eq, desc } from "drizzle-orm";
 
@@ -7,6 +7,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {
@@ -25,7 +26,6 @@ export async function GET(
     .where(eq(clipItems.cliplistId, listId))
     .orderBy(desc(clipItems.createdAt));
 
-  // Attach video info to each item
   const videoIds = [...new Set(items.map((i) => i.videoId))];
   const videoMap = new Map<number, { title: string | null; thumbnailUrl: string | null }>();
   for (const vid of videoIds) {
@@ -51,6 +51,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {
@@ -65,6 +66,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {

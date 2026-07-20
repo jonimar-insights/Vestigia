@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
 import { eq, count } from "drizzle-orm";
@@ -7,6 +7,7 @@ import { auth } from "@/auth";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
 
 export async function GET() {
+  const db = getDb();
   const allVideos = await db.select().from(videos);
 
   const enriched = await Promise.all(
@@ -28,6 +29,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const db = getDb();
   const session = await auth();
   const body = await request.json();
   const { url } = body as { url: string };

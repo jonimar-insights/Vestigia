@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, transcripts } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
@@ -8,6 +8,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 

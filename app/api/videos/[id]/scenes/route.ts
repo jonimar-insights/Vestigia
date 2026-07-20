@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, scenes } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -21,6 +21,7 @@ export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -61,7 +62,7 @@ export async function POST(
 
   startSceneJob(videoId);
 
-  runSceneDetection(videoId, video.youtubeId, {
+  runSceneDetection(db, videoId, video.youtubeId, {
     threshold,
     minSceneDuration,
     maxScenes,
@@ -78,6 +79,7 @@ export async function POST(
 }
 
 async function runSceneDetection(
+  db: ReturnType<typeof getDb>,
   videoId: number,
   youtubeId: string,
   options: {
@@ -200,6 +202,7 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -224,6 +227,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 

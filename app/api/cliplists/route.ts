@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { cliplists, clipItems } from "@/lib/schema";
 import { eq, desc, count } from "drizzle-orm";
 
 export async function GET() {
+  const db = getDb();
   const lists = await db
     .select()
     .from(cliplists)
     .orderBy(desc(cliplists.updatedAt));
 
-  // Attach item count to each list
   const result = await Promise.all(
     lists.map(async (list) => {
       const [{ value: itemCount }] = await db
@@ -24,6 +24,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const db = getDb();
   const body = await request.json();
   const { name, description } = body;
 

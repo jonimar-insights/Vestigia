@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, annotations, scenes, keyMoments } from "@/lib/schema";
 import { like, or, eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
+  const db = getDb();
   const q = request.nextUrl.searchParams.get("q")?.trim();
 
   if (!q || q.length < 2) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { clipItems, cliplists } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -7,13 +7,13 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {
     return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
   }
 
-  // Verify cliplist exists
   const listRows = await db.select().from(cliplists).where(eq(cliplists.id, listId)).limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
@@ -40,7 +40,6 @@ export async function POST(
     })
     .returning();
 
-  // Update cliplist's updatedAt
   await db.update(cliplists)
     .set({ updatedAt: new Date().toISOString() })
     .where(eq(cliplists.id, listId));
@@ -52,6 +51,7 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {
@@ -68,7 +68,6 @@ export async function DELETE(
   await db.delete(clipItems)
     .where(and(eq(clipItems.id, itemId), eq(clipItems.cliplistId, listId)));
 
-  // Update cliplist's updatedAt
   await db.update(cliplists)
     .set({ updatedAt: new Date().toISOString() })
     .where(eq(cliplists.id, listId));

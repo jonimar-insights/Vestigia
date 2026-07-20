@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -64,17 +64,14 @@ function chunkByTime(segments: TranscriptSegment[], segmentDurationSec = 600): T
 function extractJsonFromResponse(text: string): Record<string, unknown> | null {
   let clean = text.trim();
 
-  // Strip markdown code fences
   if (clean.startsWith("```")) {
     clean = clean.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
   }
 
-  // Try direct parse
   try {
     return JSON.parse(clean);
   } catch { /* continue */ }
 
-  // Try to find JSON object in the text
   const firstBrace = clean.indexOf("{");
   const lastBrace = clean.lastIndexOf("}");
   if (firstBrace !== -1 && lastBrace > firstBrace) {
@@ -83,7 +80,6 @@ function extractJsonFromResponse(text: string): Record<string, unknown> | null {
     } catch { /* continue */ }
   }
 
-  // Try to find JSON array
   const firstBracket = clean.indexOf("[");
   const lastBracket = clean.lastIndexOf("]");
   if (firstBracket !== -1 && lastBracket > firstBracket) {
@@ -96,13 +92,11 @@ function extractJsonFromResponse(text: string): Record<string, unknown> | null {
 }
 
 function parseStreamResponse(raw: string): string {
-  // Try non-streaming first (JSON object)
   try {
     const obj = JSON.parse(raw);
     return obj.choices?.[0]?.message?.content ?? "";
   } catch { /* not JSON, try SSE */ }
 
-  // Try SSE stream
   const lines = raw.split("\n");
   let fullContent = "";
   for (const line of lines) {
@@ -118,11 +112,11 @@ function parseStreamResponse(raw: string): string {
   return fullContent;
 }
 
-// GET - load saved summaries
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
@@ -147,11 +141,11 @@ export async function GET(
   return NextResponse.json({ moments });
 }
 
-// POST - generate and save summaries
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
   const body = await request.json().catch(() => ({}));
@@ -165,7 +159,6 @@ export async function POST(
     return NextResponse.json({ error: "GROQ_API_KEY not configured" }, { status: 500 });
   }
 
-  // Test Groq connection
   try {
     const testRes = await fetch(`${GROQ_URL}/chat/completions`, {
       method: "POST",
@@ -203,7 +196,6 @@ export async function POST(
   }
   const video = videoRows[0];
 
-  // Check for existing saved summary
   const existing = await db
     .select()
     .from(keyMoments)
@@ -223,7 +215,6 @@ export async function POST(
     });
   }
 
-  // If regenerating, delete old ones
   if (regenerate && existing.length > 0) {
     await db.delete(keyMoments)
       .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai-summary")));
@@ -309,7 +300,6 @@ Rules:
 
           if (!res.ok) {
             const errBody = await res.text();
-            // Detect rate limit
             if (res.status === 429 || errBody.includes("rate_limit") || errBody.includes("tokens per day")) {
               const wait = (attempt + 1) * 10000;
               console.warn(`Rate limited on chunk ${i}, attempt ${attempt + 1}, waiting ${wait}ms...`);
@@ -356,12 +346,10 @@ Rules:
         for (const m of parsed.moments) {
           if (typeof m.timestamp !== "number" || typeof m.endTimestamp !== "number") continue;
 
-          // Reject moments outside chunk range instead of clamping
           if (m.timestamp < chunk.startSec || m.timestamp >= chunk.endSec) continue;
           if (m.endTimestamp <= m.timestamp) continue;
-          if (m.endTimestamp > chunk.endSec + 30) continue; // allow small overshoot
+          if (m.endTimestamp > chunk.endSec + 30) continue;
 
-          // Clamp endTimestamp to chunk range if slightly over
           m.endTimestamp = Math.min(m.endTimestamp, chunk.endSec);
 
           if (!m.title || typeof m.title !== "string") continue;
@@ -382,13 +370,11 @@ Rules:
       chunkErrors.push(`Chunk ${i + 1}: ${msg.slice(0, 120)}`);
     }
 
-    // Delay between chunks to respect rate limits
     if (i < chunks.length - 1) {
       await new Promise((r) => setTimeout(r, 2000));
     }
   }
 
-  // If every single chunk failed, return the errors
   if (allMoments.length === 0 && chunkErrors.length > 0) {
     return NextResponse.json(
       { error: "Summarization failed for all segments", details: chunkErrors },
@@ -396,7 +382,6 @@ Rules:
     );
   }
 
-  // Deduplicate by timestamp (within 10s), keep highest importance
   const deduped: SummarizedMoment[] = [];
   const importanceOrder = { high: 0, medium: 1, low: 2 };
   allMoments.sort((a, b) => a.timestamp - b.timestamp);
@@ -418,7 +403,6 @@ Rules:
 
   deduped.sort((a, b) => a.timestamp - b.timestamp);
 
-  // Save to key_moments table
   const saved = [];
   for (const m of deduped) {
     const confidence = m.importance === "high" ? 1.0 : m.importance === "medium" ? 0.7 : 0.4;
@@ -455,11 +439,11 @@ Rules:
   });
 }
 
-// DELETE - clear saved summaries
 export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
