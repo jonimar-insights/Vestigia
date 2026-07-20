@@ -1,6 +1,6 @@
 /**
  * Local script to extract transcripts for videos that failed on Vercel.
- * Run: npx tsx scripts/extract-transcripts.ts
+ * Run: npx tsx --env-file=.env scripts/extract-transcripts.ts
  *
  * Requires DATABASE_URL in .env
  */
