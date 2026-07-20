@@ -1,0 +1,1 @@
+ALTER TABLE `key_moments` ADD `end_timestamp` real;

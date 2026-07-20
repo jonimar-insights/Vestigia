@@ -1,0 +1,1 @@
+ALTER TABLE `clip_items` ADD `end_timestamp` real;

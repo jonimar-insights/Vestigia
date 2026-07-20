@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1783960047390,
+      "tag": "0000_gorgeous_layla_miller",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1783960414286,
+      "tag": "0001_steep_shiva",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783968019978,
+      "tag": "0002_loud_sharon_carter",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1783981156186,
+      "tag": "0003_left_moonstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1784198661045,
+      "tag": "0004_add_end_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1784374328594,
+      "tag": "0005_cliplists",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1784374604873,
+      "tag": "0006_clip_items_end_timestamp",
+      "breakpoints": true
+    }
+  ]
+}
