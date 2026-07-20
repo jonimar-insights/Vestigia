@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { callAI, checkAIProvider } from "@/lib/ai";
 
 export const maxDuration = 300;
-
-const GROQ_URL = "https://api.groq.com/openai/v1";
-const GROQ_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
 
 interface TranscriptSegment {
   start: number;
@@ -91,27 +88,6 @@ function extractJsonFromResponse(text: string): Record<string, unknown> | null {
   return null;
 }
 
-function parseStreamResponse(raw: string): string {
-  try {
-    const obj = JSON.parse(raw);
-    return obj.choices?.[0]?.message?.content ?? "";
-  } catch { /* not JSON, try SSE */ }
-
-  const lines = raw.split("\n");
-  let fullContent = "";
-  for (const line of lines) {
-    if (!line.startsWith("data: ")) continue;
-    const data = line.slice(6).trim();
-    if (data === "[DONE]") break;
-    try {
-      const chunk = JSON.parse(data);
-      const delta = chunk.choices?.[0]?.delta?.content;
-      if (delta) fullContent += delta;
-    } catch { /* skip malformed chunk */ }
-  }
-  return fullContent;
-}
-
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -155,39 +131,12 @@ export async function POST(
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
   }
 
-  if (!GROQ_KEY) {
-    return NextResponse.json({ error: "GROQ_API_KEY not configured" }, { status: 500 });
-  }
-
-  try {
-    const testRes = await fetch(`${GROQ_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${GROQ_KEY}`,
-      },
-      body: JSON.stringify({
-        model: GROQ_MODEL,
-        stream: false,
-        messages: [{ role: "user", content: "Say OK" }],
-        max_tokens: 5,
-      }),
-    });
-    if (!testRes.ok) {
-      const errText = await testRes.text();
-      let msg = errText;
-      try { const parsed = JSON.parse(errText); msg = parsed?.error?.message ?? errText; } catch { /* not JSON */ }
-      if (testRes.status === 429 || msg.includes("rate_limit") || msg.includes("tokens per day")) {
-        return NextResponse.json(
-          { error: "Groq daily token limit reached. Try again tomorrow or use a different API key." },
-          { status: 429 },
-        );
-      }
-      return NextResponse.json({ error: `Groq unavailable: ${msg.slice(0, 200)}` }, { status: 500 });
-    }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return NextResponse.json({ error: `Groq not reachable: ${msg.slice(0, 200)}` }, { status: 500 });
+  const health = await checkAIProvider();
+  if (!health.available) {
+    return NextResponse.json(
+      { error: `No AI provider available. Set one of: GROQ_API_KEY, GEMINI_API_KEY, CEREBRAS_API_KEY, OPENROUTER_API_KEY. ${health.error ?? ""}` },
+      { status: 500 },
+    );
   }
 
   const videoRows = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
@@ -246,27 +195,17 @@ export async function POST(
     const timeRange = `${formatTimestamp(chunk.startSec)} - ${formatTimestamp(chunk.endSec)}`;
     const chunkLabel = chunks.length > 1 ? ` (segment ${i + 1}/${chunks.length}: ${timeRange})` : "";
 
+    let text = "";
     try {
-      let text = "";
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const res = await fetch(`${GROQ_URL}/chat/completions`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${GROQ_KEY}`,
-            },
-            body: JSON.stringify({
-              model: GROQ_MODEL,
-              stream: false,
-              messages: [
-                {
-                  role: "system",
-                  content: "You are a video analysis assistant. Respond with JSON only, no markdown, no code blocks, no thinking.",
-                },
-                {
-                  role: "user",
-                  content: `Analyze this video transcript segment${chunkLabel} covering ${timeRange}.
+      const result = await callAI({
+        messages: [
+          {
+            role: "system",
+            content: "You are a video analysis assistant. Respond with JSON only, no markdown, no code blocks, no thinking.",
+          },
+          {
+            role: "user",
+            content: `Analyze this video transcript segment${chunkLabel} covering ${timeRange}.
 
 CRITICAL: Spread moments EVENLY across the ENTIRE time range from ${formatTimestamp(chunk.startSec)} to ${formatTimestamp(chunk.endSec)}. Do not cluster moments at one point.
 
@@ -291,43 +230,14 @@ Rules:
 - timestamp and endTimestamp MUST be between ${chunk.startSec} and ${chunk.endSec}
 - endTimestamp must be greater than timestamp
 - importance: "high", "medium", or "low"`,
-                },
-              ],
-              temperature: 0.3,
-              max_tokens: 4096,
-            }),
-          });
+          },
+        ],
+        temperature: 0.3,
+        maxTokens: 4096,
+      });
 
-          if (!res.ok) {
-            const errBody = await res.text();
-            if (res.status === 429 || errBody.includes("rate_limit") || errBody.includes("tokens per day")) {
-              const wait = (attempt + 1) * 10000;
-              console.warn(`Rate limited on chunk ${i}, attempt ${attempt + 1}, waiting ${wait}ms...`);
-              await new Promise((r) => setTimeout(r, wait));
-              continue;
-            }
-            throw new Error(`HTTP ${res.status}: ${errBody.slice(0, 200)}`);
-          }
-
-          const raw = await res.text();
-          text = parseStreamResponse(raw);
-          if (!text.trim()) {
-            console.warn(`Empty response on chunk ${i}, attempt ${attempt + 1}`);
-            await new Promise((r) => setTimeout(r, 3000));
-            continue;
-          }
-          break;
-        } catch (rateErr: unknown) {
-          const msg = rateErr instanceof Error ? rateErr.message : "";
-          if (msg.includes("429") || msg.includes("RESOURCE_EXHAUSTED") || msg.includes("rate") || msg.includes("503")) {
-            const wait = (attempt + 1) * 10000;
-            console.warn(`Rate limited on chunk ${i}, retrying in ${wait}ms...`);
-            await new Promise((r) => setTimeout(r, wait));
-            continue;
-          }
-          throw rateErr;
-        }
-      }
+      text = result.text;
+      console.log(`Chunk ${i + 1}: served by ${result.provider}`);
 
       if (!text.trim()) {
         chunkErrors.push(`Chunk ${i + 1}: Empty response after retries`);

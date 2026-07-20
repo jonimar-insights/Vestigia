@@ -1,8 +1,5 @@
 import fs from "fs";
-
-const GROQ_URL = "https://api.groq.com/openai/v1";
-const GROQ_KEY = process.env.GROQ_API_KEY || "";
-const GROQ_MODEL = "llama-3.3-70b-versatile";
+import { callAI } from "./ai";
 
 export interface SceneTag {
   description: string;
@@ -13,32 +10,6 @@ export interface SceneTag {
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function callGroq(
-  messages: Array<{ role: string; content: string | Array<{ type: string; [key: string]: unknown }> }>,
-): Promise<string> {
-  const res = await fetch(`${GROQ_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${GROQ_KEY}`,
-    },
-    body: JSON.stringify({
-      model: GROQ_MODEL,
-      stream: false,
-      messages,
-      temperature: 0.3,
-      max_tokens: 1024,
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Groq HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-
-  const body = await res.json();
-  return body.choices?.[0]?.message?.content ?? "";
 }
 
 async function retryWithBackoff<T>(
@@ -75,22 +46,23 @@ export async function tagSceneWithAI(
     ? ` This scene starts at ${Math.floor(context.timestamp)}s and lasts ${Math.floor(context.duration)}s.`
     : "";
 
-  const text = await retryWithBackoff(() =>
-    callGroq([
-      {
-        role: "system",
-        content: "You are a video frame analyzer. Respond with JSON only, no markdown.",
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "image_url",
-            image_url: { url: `data:image/jpeg;base64,${base64Image}` },
-          },
-          {
-            type: "text",
-            text: `Analyze this video frame.${contextStr} Respond with JSON only:
+  const text = await retryWithBackoff(async () => {
+    const result = await callAI({
+      messages: [
+        {
+          role: "system",
+          content: "You are a video frame analyzer. Respond with JSON only, no markdown.",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: { url: `data:image/jpeg;base64,${base64Image}` },
+            },
+            {
+              type: "text",
+              text: `Analyze this video frame.${contextStr} Respond with JSON only:
 {
   "description": "Brief description of what's in this frame (1-2 sentences)",
   "tags": ["tag1", "tag2", "tag3"],
@@ -99,11 +71,15 @@ export async function tagSceneWithAI(
 }
 
 Tags should be lowercase, specific, and useful for searching.`,
-          },
-        ],
-      },
-    ]),
-  );
+            },
+          ],
+        },
+      ],
+      temperature: 0.3,
+      maxTokens: 1024,
+    });
+    return result.text;
+  });
 
   try {
     let clean = text.trim();
@@ -155,12 +131,17 @@ export async function tagSceneWithMultipleFrames(
 Tags should be lowercase, specific, and useful for searching.`,
   });
 
-  const text = await retryWithBackoff(() =>
-    callGroq([
-      { role: "system", content: "You are a video frame analyzer. Respond with JSON only, no markdown." },
-      { role: "user", content },
-    ]),
-  );
+  const text = await retryWithBackoff(async () => {
+    const result = await callAI({
+      messages: [
+        { role: "system", content: "You are a video frame analyzer. Respond with JSON only, no markdown." },
+        { role: "user", content },
+      ],
+      temperature: 0.3,
+      maxTokens: 1024,
+    });
+    return result.text;
+  });
 
   try {
     let clean = text.trim();
