@@ -10,6 +10,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
     }),
   ],
+  logger: {
+    error(error) {
+      console.error("[AUTH ERROR]", error.name, error.message, error.stack);
+    },
+  },
   session: { strategy: "jwt" },
   pages: {
     signIn: "/signin",
