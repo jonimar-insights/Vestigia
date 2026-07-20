@@ -4,41 +4,40 @@ export const runtime = "nodejs";
 
 const INNERTUBE_API_URL = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
 
+const CLIENTS = [
+  { name: "WEB", context: { client: { clientName: "WEB", clientVersion: "2.20241001.00.00" } }, ua: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" },
+  { name: "ANDROID", context: { client: { clientName: "ANDROID", clientVersion: "20.10.38" } }, ua: "com.google.android.youtube/20.10.38 (Linux; U; Android 14)" },
+  { name: "IOS", context: { client: { clientName: "IOS", clientVersion: "20.10.38" } }, ua: "com.google.ios.youtube/20.10.38 (iPhone16,2; U; CPU iOS 18_2_1 like Mac OS X)" },
+  { name: "MWEB", context: { client: { clientName: "MWEB", clientVersion: "2.20241001.00.00" } }, ua: "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.86 Mobile Safari/537.36" },
+  { name: "TVHTML5_SIMPLY_EMBEDDED", context: { client: { clientName: "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion: "2.0" }, thirdParty: { embedUrl: "https://www.youtube.com" } }, ua: "Mozilla/5.0" },
+];
+
 export async function GET() {
+  const youtubeId = "GtOGurrUPmQ";
   const results: Record<string, unknown> = {};
 
-  // Test raw HTML for MIT video
-  try {
-    const resp = await fetch("https://www.youtube.com/watch?v=GtOGurrUPmQ", {
-      headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36" },
-    });
-    const html = await resp.text();
-    results.htmlLength = html.length;
-    results.hasPlayabilityStatus = html.includes('"playabilityStatus":');
-    results.hasYtInitial = html.includes("var ytInitialPlayerResponse = ");
-    results.hasRecaptcha = html.includes('class="g-recaptcha"');
-    // Check if captionTracks exist anywhere
-    const captionIdx = html.indexOf("captionTracks");
-    results.captionTracksInHtml = captionIdx !== -1;
-    if (captionIdx !== -1) {
-      results.captionContext = html.slice(Math.max(0, captionIdx - 50), captionIdx + 200);
-    }
-    // Check for consent/bot detection
-    results.hasConsent = html.includes("consent") || html.includes("CONSENT");
-    results.hasBeforeContent = html.includes("beforeContent");
-    // Sample the ytInitialPlayerResponse
-    const startToken = "var ytInitialPlayerResponse = ";
-    const startIdx = html.indexOf(startToken);
-    if (startIdx !== -1) {
-      const jsonStart = startIdx + startToken.length;
-      let depth = 0;
-      for (let i = jsonStart; i < html.length && i < jsonStart + 50000; i++) {
-        if (html[i] === "{") depth++;
-        else if (html[i] === "}") { depth--; if (depth === 0) { try { const obj = JSON.parse(html.slice(jsonStart, i + 1)); results.playabilityStatus = obj?.playabilityStatus?.status; results.hasCaptions = !!obj?.captions; } catch {} break; } }
+  for (const client of CLIENTS) {
+    try {
+      const resp = await fetch(INNERTUBE_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "User-Agent": client.ua },
+        body: JSON.stringify({ context: client.context, videoId: youtubeId }),
+      });
+      const data = await resp.json();
+      const tracks = data?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+      const trackCount = Array.isArray(tracks) ? tracks.length : 0;
+      results[client.name] = { trackCount, status: data?.playabilityStatus?.status, firstLang: tracks?.[0]?.languageCode ?? null };
+      if (trackCount > 0 && tracks[0].baseUrl) {
+        const tr = await fetch(tracks[0].baseUrl);
+        if (tr.ok) {
+          const xml = await tr.text();
+          const segs = xml.match(/<text start="[^"]*"/g);
+          results[`${client.name}_segments`] = segs?.length ?? 0;
+        }
       }
+    } catch (e: unknown) {
+      results[client.name] = { error: e instanceof Error ? e.message : String(e) };
     }
-  } catch (e: unknown) {
-    results.htmlError = e instanceof Error ? e.message : String(e);
   }
 
   return NextResponse.json(results);
