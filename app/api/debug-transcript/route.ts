@@ -48,7 +48,7 @@ export async function GET() {
         "Cookie": "CONSENT=PENDING+987; SOCS=CAESEwgDEgk2MjQ2NTg4ODMaAmVuIAEaBgiA_LyaBg",
       },
     });
-    const html = await pageResp.html;
+    const html = await pageResp.text();
     results.hasCaptionsInPage = html.includes("captionTracks");
     const playMatch = html.match(/"playabilityStatus":\{[^}]*"status":"([^"]*)"/);
     results.playabilityStatus = playMatch?.[1] ?? "not found";
