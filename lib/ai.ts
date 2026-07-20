@@ -35,20 +35,19 @@ const providers: ProviderConfig[] = [
     name: "Gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKey: process.env.GEMINI_API_KEY || "",
-    model: "gemini-2.5-flash",
-    maxTokens: 8192,
+    model: "gemini-2.0-flash",
   },
   {
     name: "Cerebras",
     baseUrl: "https://api.cerebras.ai/v1",
     apiKey: process.env.CEREBRAS_API_KEY || "",
-    model: "llama-3.3-70b",
+    model: "gemma-4-31b",
   },
   {
     name: "OpenRouter",
     baseUrl: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENROUTER_API_KEY || "",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
+    model: "nvidia/nemotron-3-ultra-550b-a55b:free",
   },
 ];
 
