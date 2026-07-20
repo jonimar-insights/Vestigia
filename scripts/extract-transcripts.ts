@@ -5,7 +5,6 @@
  * Requires DATABASE_URL in .env
  */
 
-import "dotenv/config";
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { videos, transcripts } from "../lib/schema";
