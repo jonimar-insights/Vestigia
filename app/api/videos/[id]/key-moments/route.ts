@@ -5,6 +5,7 @@ import { eq, and } from "drizzle-orm";
 import {
   extractYouTubeChapters,
   extractTranscriptKeyMoments,
+  extractAIKeyMoments,
 } from "@/lib/key-moments";
 
 export async function POST(
@@ -75,6 +76,24 @@ export async function POST(
     }
   }
 
+  if (allMoments.length === 0) {
+    const aiMoments = await extractAIKeyMoments(video.youtubeId);
+    for (const am of aiMoments) {
+      const [inserted] = await db
+        .insert(keyMoments)
+        .values({
+          videoId,
+          timestamp: am.timestamp,
+          title: am.title,
+          description: am.description,
+          source: "ai",
+          confidence: am.confidence,
+        })
+        .returning();
+      allMoments.push(inserted);
+    }
+  }
+
   allMoments.sort((a, b) => a.timestamp - b.timestamp);
 
   return NextResponse.json({
@@ -83,6 +102,7 @@ export async function POST(
     sources: {
       chapters: chapters.length,
       transcript: allMoments.filter((m) => m.source === "transcript").length,
+      ai: allMoments.filter((m) => m.source === "ai").length,
     },
   });
 }

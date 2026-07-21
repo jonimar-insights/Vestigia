@@ -1,10 +1,11 @@
 import { fetchTranscript } from "youtube-transcript";
+import { callAI } from "./ai";
 
 export interface KeyMoment {
   timestamp: number;
   title: string;
   description?: string;
-  source: "chapter" | "storyboard" | "transcript";
+  source: "chapter" | "storyboard" | "transcript" | "ai";
   thumbnailUrl?: string;
   confidence: number;
 }
@@ -295,6 +296,95 @@ export async function extractTranscriptKeyMoments(
     return deduped;
   } catch (e) {
     console.error("Failed to extract transcript key moments:", e);
+    return [];
+  }
+}
+
+async function fetchVideoMetadata(
+  youtubeId: string,
+): Promise<{ title: string; description: string; duration: number } | null> {
+  try {
+    const apiKey = process.env.YOUTUBE_API_KEY;
+    if (!apiKey) return null;
+
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${youtubeId}&key=${apiKey}`,
+    );
+    const data = await res.json();
+    const item = data.items?.[0];
+    if (!item) return null;
+
+    const durationStr = item.contentDetails?.duration || "PT0S";
+    const durationMatch = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+    const hours = parseInt(durationMatch?.[1] || "0");
+    const minutes = parseInt(durationMatch?.[2] || "0");
+    const seconds = parseInt(durationMatch?.[3] || "0");
+    const duration = hours * 3600 + minutes * 60 + seconds;
+
+    return {
+      title: item.snippet?.title || "",
+      description: item.snippet?.description || "",
+      duration,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function extractAIKeyMoments(
+  youtubeId: string,
+): Promise<KeyMoment[]> {
+  const meta = await fetchVideoMetadata(youtubeId);
+  if (!meta) return [];
+
+  const descPreview = meta.description.length > 2000
+    ? meta.description.slice(0, 2000) + "..."
+    : meta.description;
+
+  const prompt = `You are analyzing a YouTube video to identify its key moments.
+
+Title: "${meta.title}"
+Duration: ${Math.floor(meta.duration / 60)}m ${meta.duration % 60}s
+Description:
+${descPreview}
+
+Based on the title and description, identify the key moments, sections, or topics covered in this video. For each moment, provide:
+- timestamp: estimated start time in seconds (be realistic based on the duration)
+- title: short descriptive title (max 60 chars)
+- description: 1-2 sentence explanation
+- confidence: 0.0-1.0 (how confident you are this is a real moment, lower for videos with vague descriptions)
+
+Return a JSON array. Aim for 5-15 moments spread across the video duration. Do not repeat the same topic.`;
+
+  try {
+    const result = await callAI({
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.4,
+      maxTokens: 2048,
+    });
+
+    const text = result.text;
+    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    if (!jsonMatch) return [];
+
+    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      timestamp: number;
+      title: string;
+      description?: string;
+      confidence?: number;
+    }>;
+
+    return parsed
+      .map((item) => ({
+        timestamp: Math.min(Math.max(0, item.timestamp), meta.duration),
+        title: (item.title || "").slice(0, 60),
+        description: item.description || "",
+        source: "ai" as const,
+        confidence: Math.min(1, Math.max(0, item.confidence ?? 0.5)),
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp);
+  } catch (e) {
+    console.error("Failed to extract AI key moments:", e);
     return [];
   }
 }
