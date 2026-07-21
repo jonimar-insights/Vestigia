@@ -297,13 +297,21 @@ export async function extractTranscriptKeyMoments(
 
 async function fetchVideoMetadata(
   youtubeId: string,
-): Promise<{ title: string; description: string; duration: number } | null> {
+): Promise<{
+  title: string;
+  description: string;
+  duration: number;
+  channelTitle: string;
+  category: string;
+  tags: string[];
+  viewCount: number;
+} | null> {
   try {
     const apiKey = process.env.YOUTUBE_API_KEY;
     if (!apiKey) return null;
 
     const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&id=${youtubeId}&key=${apiKey}`,
+      `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${youtubeId}&key=${apiKey}`,
     );
     const data = await res.json();
     const item = data.items?.[0];
@@ -320,11 +328,60 @@ async function fetchVideoMetadata(
       title: item.snippet?.title || "",
       description: item.snippet?.description || "",
       duration,
+      channelTitle: item.snippet?.channelTitle || "",
+      category: item.snippet?.categoryId || "",
+      tags: item.snippet?.tags || [],
+      viewCount: parseInt(item.statistics?.viewCount || "0"),
     };
   } catch {
     return null;
   }
 }
+
+function parseDescriptionChapters(
+  description: string,
+): { timestamp: number; title: string }[] {
+  const chapters: { timestamp: number; title: string }[] = [];
+  const lines = description.split("\n");
+
+  for (const line of lines) {
+    const match = line.match(
+      /^(\d{1,2}:\d{2}(?::\d{2})?)\s+(.+)/,
+    );
+    if (match) {
+      const timeParts = match[1].split(":").map(Number);
+      let ts = 0;
+      if (timeParts.length === 3) {
+        ts = timeParts[0] * 3600 + timeParts[1] * 60 + timeParts[2];
+      } else {
+        ts = timeParts[0] * 60 + timeParts[1];
+      }
+      chapters.push({ timestamp: ts, title: match[2].trim() });
+    }
+  }
+
+  return chapters;
+}
+
+const CATEGORY_MAP: Record<string, string> = {
+  "1": "Film & Animation",
+  "2": "Autos & Vehicles",
+  "10": "Music",
+  "15": "Pets & Animals",
+  "17": "Sports",
+  "18": "Short Movies",
+  "19": "Travel & Events",
+  "20": "Gaming",
+  "21": "Videoblogging",
+  "22": "People & Blogs",
+  "23": "Comedy",
+  "24": "Entertainment",
+  "25": "News & Politics",
+  "26": "Howto & Style",
+  "27": "Education",
+  "28": "Science & Technology",
+  "29": "Nonprofits & Activism",
+};
 
 export async function extractAIKeyMoments(
   youtubeId: string,
@@ -332,52 +389,115 @@ export async function extractAIKeyMoments(
   const meta = await fetchVideoMetadata(youtubeId);
   if (!meta) return [];
 
-  const descPreview = meta.description.length > 2000
-    ? meta.description.slice(0, 2000) + "..."
+  const descPreview = meta.description.length > 3000
+    ? meta.description.slice(0, 3000) + "..."
     : meta.description;
 
-  const prompt = `You are analyzing a YouTube video to identify its key moments.
+  const descriptionChapters = parseDescriptionChapters(meta.description);
+  const hasDescriptionChapters = descriptionChapters.length >= 2;
 
-Title: "${meta.title}"
-Duration: ${Math.floor(meta.duration / 60)}m ${meta.duration % 60}s
-Description:
+  const categoryName = CATEGORY_MAP[meta.category] || "Unknown";
+  const tagStr = meta.tags.length > 0
+    ? meta.tags.slice(0, 15).join(", ")
+    : "none";
+
+  const durationMin = Math.floor(meta.duration / 60);
+  const durationSec = meta.duration % 60;
+  const momentCount = meta.duration > 3600 ? "10-20" : meta.duration > 1800 ? "8-15" : "5-10";
+
+  let chapterSection = "";
+  if (hasDescriptionChapters) {
+    chapterSection = `
+Description chapters (use as reference, but expand each into more specific sub-moments):
+${descriptionChapters.map((c) => `  [${c.timestamp}s] ${c.title}`).join("\n")}
+`;
+  }
+
+  const prompt = `You are an expert video analyst. Your task is to identify the key moments in this YouTube video.
+
+VIDEO METADATA:
+- Title: "${meta.title}"
+- Channel: "${meta.channelTitle}"
+- Category: ${categoryName}
+- Tags: ${tagStr}
+- Duration: ${durationMin}m ${durationSec}s (${meta.duration} seconds)
+- Views: ${meta.viewCount.toLocaleString()}
+${chapterSection}
+VIDEO DESCRIPTION:
 ${descPreview}
 
-Based on the title and description, identify the key moments, sections, or topics covered in this video. For each moment, provide:
-- timestamp: estimated start time in seconds (be realistic based on the duration)
-- title: short descriptive title (max 60 chars)
-- description: 1-2 sentence explanation
-- confidence: 0.0-1.0 (how confident you are this is a real moment, lower for videos with vague descriptions)
+INSTRUCTIONS:
+1. Analyze the title, channel, category, tags, and description to understand the video's content.
+${hasDescriptionChapters ? "2. Use the description chapters as a starting point, then expand each into more specific sub-moments with precise timestamps." : "2. Infer the video's structure from the title and description. Educational videos typically follow: intro → topic 1 → topic 2 → ... → conclusion."}
+3. For each moment, provide:
+   - timestamp: start time in SECONDS (must be between 0 and ${meta.duration})
+   - title: concise descriptive title (max 60 chars, start with a verb or noun, be specific)
+   - description: 1-2 sentences explaining what happens or is discussed
+   - confidence: 0.0-1.0 (higher = more certain this is a real distinct moment)
+4. Spread moments across the full duration. Don't cluster them all in the first half.
+5. For educational content: identify concept introductions, worked examples, key derivations, important results, and demonstrations.
+6. For entertainment: identify plot points,高潮 moments, transitions, and highlights.
 
-Return a JSON array. Aim for 5-15 moments spread across the video duration. Do not repeat the same topic.`;
+Return ONLY a JSON array. No other text. Example format:
+[{"timestamp":0,"title":"Introduction","description":"Opening remarks","confidence":0.8}]`;
 
   try {
     const result = await callAI({
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.4,
-      maxTokens: 2048,
+      messages: [
+        {
+          role: "system",
+          content: "You are a precise video content analyst. Always return valid JSON arrays. Never include markdown code fences or explanatory text outside the JSON.",
+        },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.3,
+      maxTokens: 3000,
     });
 
     const text = result.text;
-    const jsonMatch = text.match(/\[[\s\S]*\]/);
+    const jsonMatch = text.match(/\[[\s\S]*?\]/);
     if (!jsonMatch) return [];
 
-    const parsed = JSON.parse(jsonMatch[0]) as Array<{
+    let parsed: Array<{
       timestamp: number;
       title: string;
       description?: string;
       confidence?: number;
     }>;
 
-    return parsed
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {
+      const fixed = jsonMatch[0]
+        .replace(/,\s*]/g, "]")
+        .replace(/,\s*}/g, "}");
+      parsed = JSON.parse(fixed);
+    }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) return [];
+
+    const deduped = parsed
       .map((item) => ({
-        timestamp: Math.min(Math.max(0, item.timestamp), meta.duration),
-        title: (item.title || "").slice(0, 60),
-        description: item.description || "",
+        timestamp: Math.min(Math.max(0, Number(item.timestamp) || 0), meta.duration),
+        title: String(item.title || "").slice(0, 60).trim(),
+        description: String(item.description || "").trim(),
         source: "ai" as const,
-        confidence: Math.min(1, Math.max(0, item.confidence ?? 0.5)),
+        confidence: Math.min(1, Math.max(0, Number(item.confidence) || 0.5)),
       }))
+      .filter((item) => item.title.length > 0)
       .sort((a, b) => a.timestamp - b.timestamp);
+
+    const final: typeof deduped = [];
+    for (const moment of deduped) {
+      const tooClose = final.some(
+        (f) => Math.abs(f.timestamp - moment.timestamp) < 5,
+      );
+      if (!tooClose) {
+        final.push(moment);
+      }
+    }
+
+    return final;
   } catch (e) {
     console.error("Failed to extract AI key moments:", e);
     return [];
