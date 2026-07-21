@@ -1,4 +1,3 @@
-import { fetchTranscript } from "youtube-transcript";
 import { callAI } from "./ai";
 
 export interface KeyMoment {
@@ -182,16 +181,12 @@ export async function extractStoryboards(
 
 export async function extractTranscriptKeyMoments(
   youtubeId: string,
+  preloadedSegments?: { start: number; duration: number; text: string }[],
 ): Promise<KeyMoment[]> {
   try {
-    const transcript = await fetchTranscript(youtubeId);
-    if (!transcript || transcript.length === 0) return [];
-
-    const segments = transcript.map((t) => ({
-      start: t.offset / 1000,
-      duration: t.duration / 1000,
-      text: t.text.replace(/\n/g, " ").replace(/\s+/g, " ").trim(),
-    }));
+    const segments = preloadedSegments ?? (() => {
+      throw new Error("No segments provided and fetch not implemented here");
+    })();
 
     const keyMoments: KeyMoment[] = [];
 

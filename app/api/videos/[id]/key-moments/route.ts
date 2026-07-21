@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { videos, keyMoments } from "@/lib/schema";
+import { videos, keyMoments, transcripts } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import {
   extractYouTubeChapters,
   extractTranscriptKeyMoments,
   extractAIKeyMoments,
 } from "@/lib/key-moments";
+import { fetchTranscriptWithFallback } from "@/lib/transcript";
 
 export async function POST(
   _request: NextRequest,
@@ -55,24 +56,49 @@ export async function POST(
     allMoments.push(inserted);
   }
 
-  const transcriptMoments = await extractTranscriptKeyMoments(video.youtubeId);
-  for (const tm of transcriptMoments) {
-    const tooClose = allMoments.some(
-      (m) => Math.abs(m.timestamp - tm.timestamp) < 3,
-    );
-    if (!tooClose) {
-      const [inserted] = await db
-        .insert(keyMoments)
-        .values({
-          videoId,
-          timestamp: tm.timestamp,
-          title: tm.title,
-          description: tm.description,
-          source: "transcript",
-          confidence: tm.confidence,
-        })
-        .returning();
-      allMoments.push(inserted);
+  const existingTranscript = await db
+    .select()
+    .from(transcripts)
+    .where(eq(transcripts.videoId, videoId))
+    .limit(1);
+
+  let transcriptSegments: { start: number; duration: number; text: string }[] = [];
+
+  if (existingTranscript[0]) {
+    transcriptSegments = JSON.parse(existingTranscript[0].segments);
+  } else {
+    const fetched = await fetchTranscriptWithFallback(video.youtubeId);
+    if (fetched) {
+      await db.insert(transcripts).values({
+        videoId,
+        segments: JSON.stringify(fetched.segments),
+        language: fetched.language,
+        source: fetched.source,
+      });
+      transcriptSegments = fetched.segments;
+    }
+  }
+
+  if (transcriptSegments.length > 0) {
+    const transcriptMoments = await extractTranscriptKeyMoments(video.youtubeId, transcriptSegments);
+    for (const tm of transcriptMoments) {
+      const tooClose = allMoments.some(
+        (m) => Math.abs(m.timestamp - tm.timestamp) < 3,
+      );
+      if (!tooClose) {
+        const [inserted] = await db
+          .insert(keyMoments)
+          .values({
+            videoId,
+            timestamp: tm.timestamp,
+            title: tm.title,
+            description: tm.description,
+            source: "transcript",
+            confidence: tm.confidence,
+          })
+          .returning();
+        allMoments.push(inserted);
+      }
     }
   }
 
@@ -104,6 +130,7 @@ export async function POST(
       transcript: allMoments.filter((m) => m.source === "transcript").length,
       ai: allMoments.filter((m) => m.source === "ai").length,
     },
+    transcriptStored: transcriptSegments.length > 0 && existingTranscript.length === 0,
   });
 }
 
