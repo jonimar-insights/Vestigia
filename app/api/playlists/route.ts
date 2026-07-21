@@ -21,6 +21,41 @@ interface PlaylistVideo {
   position: number;
 }
 
+async function fetchPlaylistViaYouTubeAPI(playlistId: string): Promise<PlaylistVideo[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (!apiKey) return [];
+
+  const videos: PlaylistVideo[] = [];
+  let pageToken = "";
+
+  for (let page = 0; page < 50; page++) {
+    const pageUrl = `https://www.googleapis.com/youtube/v3/playlistItems?playlistId=${playlistId}&part=snippet&maxResults=50&key=${apiKey}${pageToken ? `&pageToken=${pageToken}` : ""}`;
+    const res = await fetch(pageUrl);
+    if (!res.ok) break;
+
+    const data = await res.json();
+    const items = data.items ?? [];
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      const snippet = item.snippet;
+      if (!snippet?.resourceId?.videoId) continue;
+      if (snippet.resourceId.kind !== "youtube#video") continue;
+      videos.push({
+        id: snippet.resourceId.videoId,
+        title: snippet.title ?? "Untitled",
+        thumbnail: snippet.thumbnails?.medium?.url ?? snippet.thumbnails?.default?.url ?? `https://i.ytimg.com/vi/${snippet.resourceId.videoId}/hqdefault.jpg`,
+        position: videos.length,
+      });
+    }
+
+    pageToken = data.nextPageToken ?? "";
+    if (!pageToken) break;
+  }
+
+  return videos;
+}
+
 async function fetchPlaylistViaYtdlp(playlistUrl: string): Promise<PlaylistVideo[]> {
   try {
     const { stdout } = await execFileAsync("yt-dlp", [
@@ -98,10 +133,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid YouTube playlist URL" }, { status: 400 });
   }
 
-  // Primary: yt-dlp handles all pagination natively
-  let videos = await fetchPlaylistViaYtdlp(url);
+  // Primary: YouTube Data API v3 (complete pagination, 50 per page)
+  let videos = await fetchPlaylistViaYouTubeAPI(playlistId);
 
-  // Fallback: RSS (15 videos per page, max 40 pages = 600 videos)
+  // Fallback 1: yt-dlp (works locally, fails on Vercel)
+  if (videos.length === 0) {
+    videos = await fetchPlaylistViaYtdlp(url);
+  }
+
+  // Fallback 2: RSS (loops on pagination, deduped)
   if (videos.length === 0) {
     videos = await fetchPlaylistViaRSS(playlistId);
   }
