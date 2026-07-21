@@ -144,9 +144,93 @@ export async function fetchWhisperTranscript(
 
 export async function fetchTranscriptWithFallback(
   youtubeId: string,
+  accessToken?: string,
 ): Promise<TranscriptResult | null> {
+  // Try YouTube Data API v3 with OAuth token first (works from any IP)
+  if (accessToken) {
+    const yt = await fetchYouTubeTranscriptViaAPI(youtubeId, accessToken);
+    if (yt) return yt;
+  }
+
   const yt = await fetchYouTubeTranscript(youtubeId);
   if (yt) return yt;
 
   return fetchWhisperTranscript(youtubeId);
+}
+
+async function fetchYouTubeTranscriptViaAPI(
+  youtubeId: string,
+  accessToken: string,
+): Promise<TranscriptResult | null> {
+  try {
+    // Step 1: List available captions
+    const listRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/captions?videoId=${youtubeId}&part=snippet`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!listRes.ok) return null;
+    const listData = (await listRes.json()) as { items?: Array<{ id: string; snippet: { language: string; trackKind: string } }> };
+    const items = listData.items ?? [];
+    if (items.length === 0) return null;
+
+    // Prefer ASR (auto-generated), then standard
+    const asr = items.find((i) => i.snippet.trackKind === "asr");
+    const captionId = (asr ?? items[0]).id;
+
+    // Step 2: Download the caption track
+    const dlRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/captions/${captionId}?tfmt=json3`,
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
+    if (!dlRes.ok) {
+      // If json3 not supported, try default format
+      const dlRes2 = await fetch(
+        `https://www.googleapis.com/youtube/v3/captions/${captionId}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } },
+      );
+      if (!dlRes2.ok) return null;
+      const text = await dlRes2.text();
+      return parseSrtOrVtt(text);
+    }
+    const captionData = (await dlRes.json()) as {
+      events?: Array<{ tStartMs: number; dMs: number; segs?: Array<{ utf8: string }> }>;
+    };
+    const segments: TranscriptSegment[] = (captionData.events ?? [])
+      .filter((e) => e.segs)
+      .map((e) => ({
+        start: e.tStartMs / 1000,
+        duration: (e.dMs ?? 0) / 1000,
+        text: e.segs!.map((s) => s.utf8 ?? "").join("").trim(),
+      }))
+      .filter((s) => s.text);
+    if (segments.length === 0) return null;
+    return { segments, source: "auto-caption", language: asr?.snippet.language ?? "en" };
+  } catch (e) {
+    console.error("YouTube API transcript fetch failed:", e);
+    return null;
+  }
+}
+
+function parseSrtOrVtt(text: string): TranscriptResult | null {
+  const segments: TranscriptSegment[] = [];
+  // Parse SRT/VTT format: number, timestamp, text
+  const blocks = text.split(/\n\n+/);
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    if (lines.length < 2) continue;
+    // Find timestamp line
+    const tsLine = lines.find((l) => l.includes("-->"));
+    if (!tsLine) continue;
+    const match = tsLine.match(/(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s*-->\s*(\d{2}):(\d{2}):(\d{2})[.,](\d{3})/);
+    if (!match) continue;
+    const start = parseInt(match[1]) * 3600 + parseInt(match[2]) * 60 + parseInt(match[3]) + parseInt(match[4]) / 1000;
+    const end = parseInt(match[5]) * 3600 + parseInt(match[6]) * 60 + parseInt(match[7]) + parseInt(match[8]) / 1000;
+    const textLines = lines.filter((l) => !l.includes("-->") && !/^\d+$/.test(l.trim()));
+    const text = textLines.join(" ").replace(/<[^>]+>/g, "").trim();
+    if (text) {
+      segments.push({ start, duration: end - start, text });
+    }
+  }
+  if (segments.length === 0) return null;
+  return { segments, source: "auto-caption", language: "en" };
 }

@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
-import { eq, count } from "drizzle-orm";
+import { eq, count, notInArray } from "drizzle-orm";
 import { auth } from "@/auth";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
+import { folderVideos } from "@/lib/schema";
 
 export async function GET() {
   const db = getDb();
-  const allVideos = await db.select().from(videos);
+
+  const folderedVideoIds = db.select({ videoId: folderVideos.videoId }).from(folderVideos);
+
+  const allVideos = await db.select().from(videos).where(notInArray(videos.id, folderedVideoIds));
 
   const enriched = await Promise.all(
     allVideos.map(async (v) => {

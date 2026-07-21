@@ -23,6 +23,10 @@ interface Video {
   title: string | null;
   thumbnailUrl: string | null;
   createdAt: string;
+  annotationCount?: number;
+  sceneCount?: number;
+  momentCount?: number;
+  hasTranscript?: boolean;
 }
 
 interface PlaylistVideo {
@@ -72,7 +76,7 @@ interface CliplistWithItems extends Cliplist {
   items: ClipItem[];
 }
 
-type Tab = "import" | "search" | "cliplists";
+type Tab = "import" | "search" | "cliplists" | "settings";
 
 function isPlaylistUrl(u: string) {
   return /[?&]list=/.test(u);
@@ -446,6 +450,28 @@ export default function Home() {
   const [creatingCliplist, setCreatingCliplist] = useState(false);
   const [slideshowItems, setSlideshowItems] = useState<ClipItem[] | null>(null);
 
+  // ── Settings state ──
+  const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
+  const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; testing: boolean; error?: string }>>({});
+  const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Folder state ──
+  const [folderList, setFolderList] = useState<Array<{ id: number; name: string; videoCount: number; color?: string | null }>>([]);
+  const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
+  const [folderVideos, setFolderVideos] = useState<Video[]>([]);
+  const [folderVideosLoading, setFolderVideosLoading] = useState(false);
+  const [showCreateFolder, setShowCreateFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [creatingFolder, setCreatingFolder] = useState(false);
+  const [folderDropdown, setFolderDropdown] = useState<{ videoId: number; open: boolean }>({ videoId: -1, open: false });
+  const [editingFolderId, setEditingFolderId] = useState<number | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState("");
+  const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set());
+  const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
+
   // "Add to cliplist" dropdown per search result
   const [addToDropdown, setAddToDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
   const addToRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -454,15 +480,30 @@ export default function Home() {
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       const openIdx = addToDropdown.index;
-      if (openIdx < 0) return;
-      const ref = addToRefs.current.get(openIdx);
-      if (ref && !ref.contains(e.target as Node)) {
-        setAddToDropdown({ index: -1, open: false });
+      if (openIdx >= 0) {
+        const ref = addToRefs.current.get(openIdx);
+        if (ref && !ref.contains(e.target as Node)) {
+          setAddToDropdown({ index: -1, open: false });
+        }
+      }
+      // Close folder dropdown on outside click
+      if (folderDropdown.open) {
+        const target = e.target as HTMLElement;
+        if (!target.closest("[data-folder-dropdown]")) {
+          setFolderDropdown({ videoId: -1, open: false });
+        }
+      }
+      // Close bulk folder dropdown on outside click
+      if (bulkFolderDropdown) {
+        const target = e.target as HTMLElement;
+        if (!target.closest("[data-folder-dropdown]")) {
+          setBulkFolderDropdown(false);
+        }
       }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [addToDropdown.index]);
+  }, [addToDropdown.index, folderDropdown.open, bulkFolderDropdown]);
 
   const loadVideos = useCallback(async () => {
     try {
@@ -473,9 +514,39 @@ export default function Home() {
     }
   }, []);
 
+  // ── Load folders ──
+  const loadFolders = useCallback(async () => {
+    try {
+      const res = await fetch("/api/folders");
+      if (res.ok) setFolderList(await res.json());
+    } catch {}
+  }, []);
+
+  const loadFolderVideos = useCallback(async (folderId: number) => {
+    setFolderVideosLoading(true);
+    try {
+      const res = await fetch(`/api/folders/${folderId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFolderVideos(data.videos ?? []);
+      }
+    } finally {
+      setFolderVideosLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadVideos();
-  }, [loadVideos]);
+    loadFolders();
+  }, [loadVideos, loadFolders]);
+
+  useEffect(() => {
+    if (selectedFolderId !== null) {
+      loadFolderVideos(selectedFolderId);
+    } else {
+      setFolderVideos([]);
+    }
+  }, [selectedFolderId, loadFolderVideos]);
 
   // ── Load cliplists ──
   const loadCliplists = useCallback(async () => {
@@ -488,11 +559,80 @@ export default function Home() {
     }
   }, []);
 
+  // ── Load settings ──
+  const loadSettings = useCallback(async () => {
+    setSettingsLoading(true);
+    try {
+      const res = await fetch("/api/settings");
+      if (res.ok) {
+        const data = await res.json();
+        const keys = data.aiKeys ?? {};
+        // API returns masked keys — extract which providers have keys configured
+        const configured = new Set<string>();
+        for (const [provider, masked] of Object.entries(keys)) {
+          if (masked && masked !== "****" && typeof masked === "string" && masked.length > 0) {
+            configured.add(provider);
+          }
+        }
+        setConfiguredProviders(configured);
+        // Don't populate inputs with masked keys — start empty
+        setSettings({ aiKeys: {}, preferredProvider: data.preferredProvider ?? null });
+      }
+    } finally {
+      setSettingsLoading(false);
+    }
+  }, []);
+
+  const saveSettings = useCallback(async (newSettings: { aiKeys: Record<string, string>; preferredProvider: string | null }) => {
+    setSettingsSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newSettings),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const keys = data.aiKeys ?? {};
+        const configured = new Set<string>();
+        for (const [provider, masked] of Object.entries(keys)) {
+          if (masked && masked !== "****" && typeof masked === "string" && masked.length > 0) {
+            configured.add(provider);
+          }
+        }
+        setConfiguredProviders(configured);
+        setSettings({ aiKeys: {}, preferredProvider: data.preferredProvider ?? null });
+      }
+    } finally {
+      setSettingsSaving(false);
+    }
+  }, []);
+
+  const testProvider = useCallback(async (provider: string) => {
+    setTestResults(prev => ({ ...prev, [provider]: { success: false, testing: true } }));
+    try {
+      const res = await fetch("/api/settings/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const data = await res.json();
+      setTestResults(prev => ({ ...prev, [provider]: { success: data.success, testing: false, error: data.error } }));
+      // If test failed, remove from configuredProviders (key is broken)
+      if (!data.success) {
+        setConfiguredProviders(prev => { const next = new Set(prev); next.delete(provider); return next; });
+      }
+    } catch (e) {
+      setTestResults(prev => ({ ...prev, [provider]: { success: false, testing: false, error: "Network error" } }));
+    }
+  }, []);
+
   // Load cliplists when switching to the cliplists tab
   const switchToTab = useCallback((newTab: Tab) => {
     setTab(newTab);
     if (newTab === "cliplists") loadCliplists();
-  }, [loadCliplists]);
+    if (newTab === "settings") loadSettings();
+  }, [loadCliplists, loadSettings]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -529,6 +669,91 @@ export default function Home() {
     await fetch(`/api/videos/${id}`, { method: "DELETE" });
     await loadVideos();
   }
+
+  // ── Folder management ──
+  async function createFolder() {
+    if (!newFolderName.trim()) return;
+    setCreatingFolder(true);
+    try {
+      await fetch("/api/folders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newFolderName.trim() }),
+      });
+      setNewFolderName("");
+      setShowCreateFolder(false);
+      await loadFolders();
+    } finally {
+      setCreatingFolder(false);
+    }
+  }
+
+  async function renameFolder(folderId: number) {
+    if (!editingFolderName.trim()) return;
+    await fetch(`/api/folders/${folderId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editingFolderName.trim() }),
+    });
+    setEditingFolderId(null);
+    await loadFolders();
+  }
+
+  async function deleteFolder(folderId: number) {
+    if (!confirm("Delete this folder? Videos will not be deleted.")) return;
+    await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+    if (selectedFolderId === folderId) setSelectedFolderId(null);
+    await loadFolders();
+  }
+
+  async function addVideoToFolder(folderId: number, videoId: number) {
+    await fetch(`/api/folders/${folderId}/videos`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId }),
+    });
+    await loadFolders();
+    if (selectedFolderId === folderId) await loadFolderVideos(folderId);
+    setFolderDropdown({ videoId: -1, open: false });
+  }
+
+  async function removeVideoFromFolder(folderId: number, videoId: number) {
+    await fetch(`/api/folders/${folderId}/videos`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId }),
+    });
+    await loadFolders();
+    if (selectedFolderId === folderId) await loadFolderVideos(folderId);
+    setFolderDropdown({ videoId: -1, open: false });
+  }
+
+  async function bulkAddToFolder(folderId: number) {
+    const ids = Array.from(selectedVideoIds);
+    for (const videoId of ids) {
+      await fetch(`/api/folders/${folderId}/videos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ videoId }),
+      });
+    }
+    setSelectedVideoIds(new Set());
+    setBulkFolderDropdown(false);
+    await loadFolders();
+    if (selectedFolderId === folderId) await loadFolderVideos(folderId);
+  }
+
+  function toggleVideoSelection(videoId: number) {
+    setSelectedVideoIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(videoId)) next.delete(videoId);
+      else next.add(videoId);
+      return next;
+    });
+  }
+
+  const currentVideoList = selectedFolderId !== null ? folderVideos : videos;
+  const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
   async function fetchPlaylist(playlistUrl: string) {
     setPlaylistLoading(true);
@@ -742,6 +967,7 @@ export default function Home() {
             { key: "import", label: "Import", icon: "+" },
             { key: "search", label: "Search", icon: "\u2315" },
             { key: "cliplists", label: "Cliplists", icon: "\ud83d\udccb" },
+            { key: "settings", label: "Settings", icon: "\u2699\ufe0f" },
           ] as const).map((t) => (
             <button
               key={t.key}
@@ -759,7 +985,126 @@ export default function Home() {
         </nav>
       </div>
 
-      <main className="mx-auto max-w-5xl w-full px-6 py-6 flex-1">
+      <div className="mx-auto max-w-5xl w-full px-6 py-6 flex-1 flex gap-6">
+        {/* ── SIDEBAR: Folders ── */}
+        <aside className="w-52 shrink-0">
+          <div className="sticky top-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">Folders</h2>
+              <button
+                onClick={() => setShowCreateFolder(true)}
+                className="text-muted hover:text-accent transition-colors"
+                title="New folder"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-0.5">
+              {/* All Videos */}
+              <button
+                onClick={() => setSelectedFolderId(null)}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  selectedFolderId === null
+                    ? "bg-accent/10 text-accent font-medium"
+                    : "text-muted hover:text-foreground hover:bg-surface"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span>All Videos</span>
+                  <span className="text-[10px] text-muted/60">{videos.length}</span>
+                </div>
+              </button>
+
+              {/* Folder list */}
+              {folderList.map((folder) => (
+                <div key={folder.id} className="group">
+                  {editingFolderId === folder.id ? (
+                    <form
+                      onSubmit={(e) => { e.preventDefault(); renameFolder(folder.id); }}
+                      className="flex items-center gap-1"
+                    >
+                      <input
+                        autoFocus
+                        value={editingFolderName}
+                        onChange={(e) => setEditingFolderName(e.target.value)}
+                        onBlur={() => renameFolder(folder.id)}
+                        className="flex-1 rounded px-2 py-1 text-sm bg-background border border-accent outline-none"
+                      />
+                    </form>
+                  ) : (
+                    <button
+                      onClick={() => setSelectedFolderId(folder.id)}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                        selectedFolderId === folder.id
+                          ? "bg-accent/10 text-accent font-medium"
+                          : "text-muted hover:text-foreground hover:bg-surface"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="truncate">{folder.name}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] text-muted/60">{folder.videoCount}</span>
+                          <div className="hidden group-hover:flex items-center gap-0.5">
+                            <span
+                              onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
+                              className="text-muted hover:text-foreground cursor-pointer p-0.5"
+                              title="Rename"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                            </span>
+                            <span
+                              onClick={(e) => { e.stopPropagation(); deleteFolder(folder.id); }}
+                              className="text-muted hover:text-danger cursor-pointer p-0.5"
+                              title="Delete"
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  )}
+                </div>
+              ))}
+
+              {/* Create folder form */}
+              {showCreateFolder && (
+                <form
+                  onSubmit={(e) => { e.preventDefault(); createFolder(); }}
+                  className="flex items-center gap-1 mt-1"
+                >
+                  <input
+                    autoFocus
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    placeholder="Folder name"
+                    className="flex-1 rounded px-2 py-1 text-sm bg-background border border-border focus:border-accent outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={creatingFolder || !newFolderName.trim()}
+                    className="text-accent disabled:opacity-30"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowCreateFolder(false); setNewFolderName(""); }}
+                    className="text-muted hover:text-foreground"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </aside>
+
+        {/* ── MAIN CONTENT ── */}
+        <main className="flex-1 min-w-0">
         {/* ── IMPORT TAB ── */}
         {tab === "import" && (
           <div>
@@ -872,12 +1217,119 @@ export default function Home() {
 
             {fetching ? (
               <p className="text-center text-muted py-12">Loading videos...</p>
+            ) : selectedFolderId !== null ? (
+              folderVideosLoading ? (
+                <p className="text-center text-muted py-12">Loading folder...</p>
+              ) : folderVideos.length === 0 ? (
+                <div className="rounded-lg border border-dashed border-border py-16 text-center">
+                  <p className="text-muted">No videos in this folder yet.</p>
+                  <p className="text-xs text-muted/60 mt-1">Click the folder icon on a video card to add it.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Select all bar */}
+                  <div className="flex items-center justify-between mb-4">
+                    <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        onChange={() => {
+                          if (allSelected) setSelectedVideoIds(new Set());
+                          else setSelectedVideoIds(new Set(currentVideoList.map((v) => v.id)));
+                        }}
+                        className="rounded border-border accent-accent"
+                      />
+                      {selectedVideoIds.size > 0
+                        ? `${selectedVideoIds.size} selected`
+                        : `Select all (${currentVideoList.length})`}
+                    </label>
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {folderVideos.map((video) => (
+                    <Link
+                      key={video.id}
+                      href={`/video/${video.id}`}
+                      className="group rounded-lg border border-border bg-surface hover:border-accent/50 transition-colors overflow-hidden"
+                    >
+                      {video.thumbnailUrl && (
+                        <div className="aspect-video w-full overflow-hidden bg-muted relative">
+                          <img src={video.thumbnailUrl} alt={video.title ?? "Video"} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
+                            className="absolute top-2 left-2 w-5 h-5 rounded border border-white/40 bg-black/30 backdrop-blur-sm flex items-center justify-center transition-colors hover:bg-black/50"
+                          >
+                            {selectedVideoIds.has(video.id) && (
+                              <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                      <div className="p-3 flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            {(video.momentCount ?? 0) > 0 && (
+                              <span className="shrink-0 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`${video.momentCount} key moment${video.momentCount !== 1 ? "s" : ""}`}>
+                                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                                {video.momentCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-0.5">
+                          {/* Remove from folder */}
+                          {selectedFolderId !== null && (
+                            <button
+                              onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                              className="text-muted hover:text-accent transition-colors p-1 rounded"
+                              title="Remove from folder"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
+                            className="text-muted hover:text-danger transition-colors p-1 rounded"
+                            title="Delete"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                </>
+              )
             ) : videos.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border py-16 text-center">
                 <p className="text-muted">No videos yet. Paste a YouTube URL above to get started.</p>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              <>
+                <div className="flex items-center justify-between mb-4">
+                  <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={() => {
+                        if (allSelected) setSelectedVideoIds(new Set());
+                        else setSelectedVideoIds(new Set(currentVideoList.map((v) => v.id)));
+                      }}
+                      className="rounded border-border accent-accent"
+                    />
+                    {selectedVideoIds.size > 0
+                      ? `${selectedVideoIds.size} selected`
+                      : `Select all (${currentVideoList.length})`}
+                  </label>
+                </div>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {videos.map((video) => (
                   <Link
                     key={video.id}
@@ -885,33 +1337,119 @@ export default function Home() {
                     className="group rounded-lg border border-border bg-surface hover:border-accent/50 transition-colors overflow-hidden"
                   >
                     {video.thumbnailUrl && (
-                      <div className="aspect-video w-full overflow-hidden bg-muted">
+                      <div className="aspect-video w-full overflow-hidden bg-muted relative">
                         <img
                           src={video.thumbnailUrl}
                           alt={video.title ?? "Video"}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                         />
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
+                          className="absolute top-2 left-2 w-5 h-5 rounded border border-white/40 bg-black/30 backdrop-blur-sm flex items-center justify-center transition-colors hover:bg-black/50"
+                        >
+                          {selectedVideoIds.has(video.id) && (
+                            <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                            </svg>
+                          )}
+                        </button>
                       </div>
                     )}
                     <div className="p-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
-                        <p className="text-xs text-muted mt-1 truncate">{video.youtubeId}</p>
+                        <div className="flex items-center gap-2 mt-1">
+                          {(video.momentCount ?? 0) > 0 && (
+                            <span className="shrink-0 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`${video.momentCount} key moment${video.momentCount !== 1 ? "s" : ""}`}>
+                              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                              {video.momentCount}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      <button
-                        onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
-                        className="shrink-0 text-muted hover:text-danger transition-colors p-1 rounded"
-                        title="Delete"
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      <div className="flex items-center gap-0.5">
+                        {/* Folder button */}
+                        {folderList.length > 0 && (
+                          <div className="relative" data-folder-dropdown>
+                            <button
+                              onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
+                              className="text-muted hover:text-accent transition-colors p-1 rounded"
+                              title="Add to folder"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                            </button>
+                            {folderDropdown.open && folderDropdown.videoId === video.id && (
+                              <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Add to folder</div>
+                                {folderList.map((folder) => (
+                                  <button
+                                    key={folder.id}
+                                    onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                                  >
+                                    {folder.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <button
+                          onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
+                          className="text-muted hover:text-danger transition-colors p-1 rounded"
+                          title="Delete"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </Link>
                 ))}
-              </div>
+                </div>
+              </>
             )}
+          </div>
+        )}
+
+        {/* ── BULK ACTION BAR ── */}
+        {selectedVideoIds.size > 0 && (tab === "import" || tab === "cliplists") && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl border border-border bg-surface shadow-2xl px-5 py-3 flex items-center gap-4">
+            <span className="text-sm font-medium">{selectedVideoIds.size} video{selectedVideoIds.size !== 1 ? "s" : ""} selected</span>
+            <div className="relative" data-folder-dropdown>
+              <button
+                onClick={() => setBulkFolderDropdown(!bulkFolderDropdown)}
+                className="text-sm px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/80 transition-colors"
+              >
+                Add to folder
+              </button>
+              {bulkFolderDropdown && (
+                <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                  <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Select folder</div>
+                  {folderList.map((folder) => (
+                    <button
+                      key={folder.id}
+                      onClick={() => bulkAddToFolder(folder.id)}
+                      className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                    >
+                      {folder.name}
+                    </button>
+                  ))}
+                  {folderList.length === 0 && (
+                    <div className="px-3 py-2 text-sm text-muted">No folders yet</div>
+                  )}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setSelectedVideoIds(new Set())}
+              className="text-sm text-muted hover:text-foreground transition-colors"
+            >
+              Deselect all
+            </button>
           </div>
         )}
 
@@ -1220,7 +1758,222 @@ export default function Home() {
             )}
           </div>
         )}
+
+        {/* ── SETTINGS TAB ── */}
+        {tab === "settings" && (
+          <div>
+            {!session ? (
+              <div className="rounded-lg border border-dashed border-border py-16 text-center">
+                <p className="text-muted text-sm">Sign in to manage your API keys.</p>
+                <a href="/signin" className="text-xs text-accent hover:text-accent-hover mt-2 inline-block transition-colors">
+                  Sign in with Google
+                </a>
+              </div>
+            ) : settingsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Header */}
+                <div>
+                  <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">AI Providers</h2>
+                  <p className="text-xs text-muted/60 mt-1">
+                    Add your own API keys to use your own quota. Keys are stored encrypted and never shared.
+                  </p>
+                </div>
+
+                {/* Provider cards */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {[
+                    { id: "groq", name: "Groq", model: "Llama 3.3 70B", color: "bg-purple-500", keyPrefix: "gsk_", free: true },
+                    { id: "mistral", name: "Mistral", model: "Mistral Small 4", color: "bg-orange-400", keyPrefix: "jUX", free: true },
+                    { id: "openrouter", name: "OpenRouter", model: "Nemotron Ultra", color: "bg-cyan-500", keyPrefix: "sk-or-", free: true },
+                    { id: "gemini", name: "Google Gemini", model: "Gemini 2.5 Flash", color: "bg-blue-500", keyPrefix: "AIza", free: true },
+                    { id: "cerebras", name: "Cerebras", model: "Gemma 4 31B", color: "bg-pink-500", keyPrefix: "csk-", free: true },
+                    { id: "github", name: "GitHub Models", model: "GPT-4o", color: "bg-gray-500", keyPrefix: "ghp_", free: true },
+                    { id: "anthropic", name: "Anthropic", model: "Claude Sonnet 4", color: "bg-orange-600", keyPrefix: "sk-ant-" },
+                    { id: "openai", name: "OpenAI", model: "GPT-4.1", color: "bg-emerald-500", keyPrefix: "sk-" },
+                  ].map((p) => {
+                    const isConfigured = configuredProviders.has(p.id);
+                    const isPreferred = settings.preferredProvider === p.id;
+                    const test = testResults[p.id];
+                    const inputValue = settings.aiKeys[p.id] ?? "";
+
+                    return (
+                      <div
+                        key={p.id}
+                        className={`rounded-xl border bg-surface p-4 transition-all ${
+                          isPreferred ? "border-accent/50 ring-1 ring-accent/20" : "border-border"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-3 h-3 rounded-full ${p.color}`} />
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <h3 className="text-sm font-semibold">{p.name}</h3>
+                                {p.free && (
+                                  <span className="text-[9px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">Free</span>
+                                )}
+                              </div>
+                              <p className="text-[10px] text-muted/60">{p.model}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {isConfigured && (
+                              <button
+                                onClick={() => {
+                                  const newKeys = { ...settings.aiKeys };
+                                  delete newKeys[p.id];
+                                  const newSettings = { ...settings, aiKeys: newKeys };
+                                  setSettings(newSettings);
+                                  setConfiguredProviders(prev => { const next = new Set(prev); next.delete(p.id); return next; });
+                                  saveSettings(newSettings);
+                                }}
+                                className="text-[10px] text-danger/60 hover:text-danger transition-colors"
+                                title="Remove key"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            )}
+                            <button
+                              onClick={() => {
+                                saveSettings({
+                                  ...settings,
+                                  preferredProvider: isPreferred ? null : p.id,
+                                });
+                              }}
+                              className={`p-1 rounded transition-colors ${
+                                isPreferred
+                                  ? "text-accent bg-accent/10"
+                                  : "text-muted/40 hover:text-accent hover:bg-accent/5"
+                              }`}
+                              title={isPreferred ? "Preferred (click to unset)" : "Set as preferred"}
+                            >
+                              <svg className="w-3.5 h-3.5" fill={isPreferred ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* API Key input */}
+                        <div className="space-y-2">
+                          <div className="relative">
+                            <input
+                              type="password"
+                              value={inputValue}
+                              onChange={(e) => {
+                                const newKeys = { ...settings.aiKeys, [p.id]: e.target.value };
+                                const newSettings = { ...settings, aiKeys: newKeys };
+                                setSettings(newSettings);
+                                // Debounced save
+                                if (settingsSaveTimerRef.current) clearTimeout(settingsSaveTimerRef.current);
+                                settingsSaveTimerRef.current = setTimeout(() => {
+                                  // If input is empty, remove the key
+                                  if (!e.target.value.trim()) {
+                                    const cleaned = { ...newSettings.aiKeys };
+                                    delete cleaned[p.id];
+                                    const cleanedSettings = { ...newSettings, aiKeys: cleaned };
+                                    setSettings(cleanedSettings);
+                                    setConfiguredProviders(prev => { const next = new Set(prev); next.delete(p.id); return next; });
+                                    saveSettings(cleanedSettings);
+                                  } else {
+                                    saveSettings(newSettings);
+                                  }
+                                }, 800);
+                              }}
+                              placeholder={isConfigured ? "Key saved — enter new key to replace" : `Enter ${p.name} API key (${p.keyPrefix}...)`}
+                              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                            />
+                          </div>
+
+                          {/* Test button + result */}
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => testProvider(p.id)}
+                              disabled={!isConfigured || test?.testing}
+                              className="rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-muted hover:text-foreground hover:border-accent/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            >
+                              {test?.testing ? "Testing..." : "Test"}
+                            </button>
+                            {test && !test.testing && (
+                              <span className={`text-[10px] font-medium ${test.success ? "text-emerald-500" : "text-danger"}`}>
+                                {test.success ? "Connected" : "Failed"}
+                              </span>
+                            )}
+                            {isConfigured && !test && (
+                              <span className="text-[10px] text-emerald-500/60 font-medium">Configured</span>
+                            )}
+                          </div>
+                          {/* Warning banner when test fails */}
+                          {test && !test.testing && !test.success && (
+                            <div className="mt-2 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-[10px] text-danger/80 leading-relaxed">
+                                  {test.error?.slice(0, 80) ?? "Connection failed"} — this key won't be used for AI calls.
+                                </p>
+                                <button
+                                  onClick={() => {
+                                    const newKeys = { ...settings.aiKeys };
+                                    delete newKeys[p.id];
+                                    const newSettings = { ...settings, aiKeys: newKeys };
+                                    setSettings(newSettings);
+                                    setConfiguredProviders(prev => { const next = new Set(prev); next.delete(p.id); return next; });
+                                    setTestResults(prev => { const next = { ...prev }; delete next[p.id]; return next; });
+                                    saveSettings(newSettings);
+                                  }}
+                                  className="shrink-0 text-[10px] text-danger/60 hover:text-danger font-medium transition-colors"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Status bar */}
+                <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <span className="text-[10px] text-muted">
+                      {configuredProviders.size} provider{configuredProviders.size !== 1 ? "s" : ""} configured
+                    </span>
+                    {settings.preferredProvider && (
+                      <span className="text-[10px] text-accent font-medium">
+                        Preferred: {settings.preferredProvider}
+                      </span>
+                    )}
+                    {settingsSaving && (
+                      <span className="text-[10px] text-muted/50 animate-pulse">Saving...</span>
+                    )}
+                  </div>
+                  {configuredProviders.size > 0 && (
+                    <button
+                      onClick={() => {
+                        if (confirm("Remove all API keys?")) {
+                          setConfiguredProviders(new Set());
+                          saveSettings({ aiKeys: {}, preferredProvider: null });
+                        }
+                      }}
+                      className="text-[10px] text-danger/60 hover:text-danger transition-colors"
+                    >
+                      Clear all
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </main>
+      </div>
 
       {/* ── Video Playlist overlay ── */}
       {slideshowItems && (

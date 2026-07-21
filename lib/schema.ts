@@ -101,6 +101,17 @@ export const clipItems = pgTable("clip_items", {
     .$defaultFn(() => new Date().toISOString()),
 });
 
+export const userSettings = pgTable("user_settings", {
+  userId: text("user_id").primaryKey(),
+  settings: text("settings").notNull().default("{}"), // JSON: { aiKeys: Record<string,string>, preferredProvider?: string }
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const keyMoments = pgTable("key_moments", {
   id: serial("id").primaryKey(),
   videoId: integer("video_id")
@@ -114,6 +125,32 @@ export const keyMoments = pgTable("key_moments", {
   thumbnailUrl: text("thumbnail_url"),
   confidence: real("confidence").notNull().default(0.5),
   createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const folders = pgTable("folders", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  color: text("color").default("bg-accent"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+  updatedAt: text("updated_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
+export const folderVideos = pgTable("folder_videos", {
+  id: serial("id").primaryKey(),
+  folderId: integer("folder_id")
+    .notNull()
+    .references(() => folders.id, { onDelete: "cascade" }),
+  videoId: integer("video_id")
+    .notNull()
+    .references(() => videos.id, { onDelete: "cascade" }),
+  addedAt: text("added_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });

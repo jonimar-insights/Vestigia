@@ -1,4 +1,4 @@
-import { callAI } from "./ai";
+import { callAIWithUserKeys } from "./ai";
 
 export interface KeyMoment {
   timestamp: number;
@@ -385,6 +385,8 @@ const CATEGORY_MAP: Record<string, string> = {
 
 export async function extractAIKeyMoments(
   youtubeId: string,
+  userKeys?: Record<string, string>,
+  preferred?: string | null,
 ): Promise<KeyMoment[]> {
   const meta = await fetchVideoMetadata(youtubeId);
   if (!meta) return [];
@@ -442,7 +444,7 @@ Return ONLY a JSON array. No other text. Example format:
 [{"timestamp":0,"title":"Introduction","description":"Opening remarks","confidence":0.8}]`;
 
   try {
-    const result = await callAI({
+    const result = await callAIWithUserKeys({
       messages: [
         {
           role: "system",
@@ -452,7 +454,7 @@ Return ONLY a JSON array. No other text. Example format:
       ],
       temperature: 0.3,
       maxTokens: 3000,
-    });
+    }, userKeys, preferred);
 
     const text = result.text;
     const jsonMatch = text.match(/\[[\s\S]*?\]/);

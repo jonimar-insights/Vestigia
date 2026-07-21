@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { videos, transcripts } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
+import { auth } from "@/auth";
 
 export async function POST(
   _request: NextRequest,
@@ -29,7 +30,9 @@ export async function POST(
     });
   }
 
-  const transcript = await fetchTranscriptWithFallback(videoRows[0].youtubeId);
+  const session = await auth();
+  const accessToken = (session as any)?.accessToken;
+  const transcript = await fetchTranscriptWithFallback(videoRows[0].youtubeId, accessToken);
 
   if (!transcript || transcript.segments.length === 0) {
     return NextResponse.json(

@@ -8,6 +8,8 @@ import {
   extractAIKeyMoments,
 } from "@/lib/key-moments";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
+import { auth } from "@/auth";
+import { getDecryptedSettings } from "@/lib/user-settings";
 
 export async function POST(
   _request: NextRequest,
@@ -56,6 +58,10 @@ export async function POST(
     allMoments.push(inserted);
   }
 
+  // Get session early for YouTube API access
+  const session = await auth();
+  const accessToken = (session as any)?.accessToken;
+
   const existingTranscript = await db
     .select()
     .from(transcripts)
@@ -67,7 +73,7 @@ export async function POST(
   if (existingTranscript[0]) {
     transcriptSegments = JSON.parse(existingTranscript[0].segments);
   } else {
-    const fetched = await fetchTranscriptWithFallback(video.youtubeId);
+    const fetched = await fetchTranscriptWithFallback(video.youtubeId, accessToken);
     if (fetched) {
       await db.insert(transcripts).values({
         videoId,
@@ -103,7 +109,16 @@ export async function POST(
   }
 
   if (allMoments.length === 0) {
-    const aiMoments = await extractAIKeyMoments(video.youtubeId);
+    // Fetch user AI keys if authenticated
+    let userKeys: Record<string, string> | undefined;
+    let preferred: string | null = null;
+    if (session?.user?.id) {
+      const settings = await getDecryptedSettings(session.user.id);
+      userKeys = Object.keys(settings.aiKeys).length > 0 ? settings.aiKeys : undefined;
+      preferred = settings.preferredProvider ?? null;
+    }
+
+    const aiMoments = await extractAIKeyMoments(video.youtubeId, userKeys, preferred);
     for (const am of aiMoments) {
       const [inserted] = await db
         .insert(keyMoments)

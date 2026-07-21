@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
-import { callAI, checkAIProvider } from "@/lib/ai";
+import { callAIWithUserKeys, checkAIProvider } from "@/lib/ai";
+import { auth } from "@/auth";
+import { getDecryptedSettings } from "@/lib/user-settings";
+import { fetchTranscriptWithFallback } from "@/lib/transcript";
 
 export const maxDuration = 300;
 
@@ -174,10 +177,25 @@ export async function POST(
     .from(transcripts)
     .where(eq(transcripts.videoId, videoId))
     .limit(1);
-  const transcript = transcriptRows[0] ?? null;
+  let transcript = transcriptRows[0] ?? null;
+
+  // Get session early for YouTube API access
+  const session = await auth();
+  const accessToken = (session as any)?.accessToken;
 
   if (!transcript) {
-    return NextResponse.json({ error: "No transcript available. Extract transcript first." }, { status: 404 });
+    const fetched = await fetchTranscriptWithFallback(video.youtubeId, accessToken);
+    if (fetched && fetched.segments.length > 0) {
+      const [inserted] = await db.insert(transcripts).values({
+        videoId,
+        segments: JSON.stringify(fetched.segments),
+        language: fetched.language,
+        source: fetched.source,
+      }).returning();
+      transcript = inserted;
+    } else {
+      return NextResponse.json({ error: "No transcript available. Extract transcript first." }, { status: 404 });
+    }
   }
 
   const segments: TranscriptSegment[] = JSON.parse(transcript.segments);
@@ -189,6 +207,15 @@ export async function POST(
   const allMoments: SummarizedMoment[] = [];
   const chunkErrors: string[] = [];
 
+  // Fetch user AI keys if authenticated
+  let userKeys: Record<string, string> | undefined;
+  let preferred: string | null = null;
+  if (session?.user?.id) {
+    const settings = await getDecryptedSettings(session.user.id);
+    userKeys = Object.keys(settings.aiKeys).length > 0 ? settings.aiKeys : undefined;
+    preferred = settings.preferredProvider ?? null;
+  }
+
   for (let i = 0; i < chunks.length; i++) {
     const chunk = chunks[i];
     const chunkText = chunk.lines.join("\n");
@@ -197,7 +224,7 @@ export async function POST(
 
     let text = "";
     try {
-      const result = await callAI({
+      const result = await callAIWithUserKeys({
         messages: [
           {
             role: "system",
@@ -234,7 +261,7 @@ Rules:
         ],
         temperature: 0.3,
         maxTokens: 4096,
-      });
+      }, userKeys, preferred);
 
       text = result.text;
       console.log(`Chunk ${i + 1}: served by ${result.provider}`);
