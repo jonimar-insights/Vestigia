@@ -9,9 +9,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientId: process.env.AUTH_GOOGLE_ID,
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
       authorization: {
-        url: new URL(
-          "https://accounts.google.com/o/oauth2/v2/auth?scope=openid+email+profile+https://www.googleapis.com/auth/youtube"
-        ),
+        params: {
+          scope: "openid email profile https://www.googleapis.com/auth/youtube",
+        },
       },
     }),
   ],
