@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   try {
     const isClaude = provider === "anthropic";
     let url = `${config.baseUrl}/chat/completions`;
-    let headers: Record<string, string> = { "Content-Type": "application/json" };
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
     let reqBody: Record<string, unknown>;
 
     if (isClaude) {

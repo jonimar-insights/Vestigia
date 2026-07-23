@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos } from "@/lib/schema";
 import { eq, desc, count } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const allFolders = await db.select().from(folders).orderBy(desc(folders.updatedAt));
 
@@ -21,6 +26,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const body = await request.json();
   const { name, description, color } = body as { name: string; description?: string; color?: string };

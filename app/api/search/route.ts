@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, annotations, scenes, keyMoments } from "@/lib/schema";
 import { like, or, eq } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function GET(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const q = request.nextUrl.searchParams.get("q")?.trim();
 

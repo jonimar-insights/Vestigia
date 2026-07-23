@@ -16,9 +16,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Path is required" }, { status: 400 });
   }
 
-  const resolvedPath = path.resolve(filePath);
+  let resolvedPath: string;
+  try {
+    resolvedPath = fs.realpathSync(path.resolve(filePath));
+  } catch {
+    return NextResponse.json({ error: "File not found" }, { status: 404 });
+  }
 
-  if (!resolvedPath.startsWith(THUMBNAILS_ROOT)) {
+  let realRoot: string;
+  try {
+    realRoot = fs.realpathSync(THUMBNAILS_ROOT);
+  } catch {
+    return NextResponse.json({ error: "Thumbnails directory not found" }, { status: 404 });
+  }
+
+  if (!resolvedPath.startsWith(realRoot + path.sep) && resolvedPath !== realRoot) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

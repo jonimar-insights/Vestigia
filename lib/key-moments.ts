@@ -405,8 +405,6 @@ export async function extractAIKeyMoments(
 
   const durationMin = Math.floor(meta.duration / 60);
   const durationSec = meta.duration % 60;
-  const momentCount = meta.duration > 3600 ? "10-20" : meta.duration > 1800 ? "8-15" : "5-10";
-
   let chapterSection = "";
   if (hasDescriptionChapters) {
     chapterSection = `

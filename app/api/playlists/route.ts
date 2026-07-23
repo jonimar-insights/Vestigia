@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { auth } from "@/auth";
 
 const execFileAsync = promisify(execFile);
 
@@ -121,6 +122,10 @@ async function fetchPlaylistViaRSS(playlistId: string): Promise<PlaylistVideo[]>
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const body = await request.json();
   const { url } = body as { url: string };
 

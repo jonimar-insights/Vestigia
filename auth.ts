@@ -38,6 +38,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (session as any).accessToken = token.accessToken;
       return session;
     },

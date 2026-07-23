@@ -241,7 +241,7 @@ async function callProvider(
   options: ChatOptions,
 ): Promise<{ text: string; provider: string }> {
   let url = `${provider.baseUrl}/chat/completions`;
-  let headers: Record<string, string> = {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
   let body: Record<string, unknown>;
@@ -494,7 +494,7 @@ export async function checkAIProvider(): Promise<{ available: boolean; provider:
     if (!isAvailable(provider.name)) continue;
     try {
       let url = `${provider.baseUrl}/chat/completions`;
-      let headers: Record<string, string> = { "Content-Type": "application/json" };
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
       let body: Record<string, unknown>;
 
       if (provider.name === "Claude") {

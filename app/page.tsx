@@ -114,7 +114,6 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
   const timeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const item = items[currentIdx];
@@ -155,7 +154,7 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
         return next;
       });
     });
-  }, [items]); // eslint-disable-line
+  }, [items]);  
 
   function clearTimeInterval() {
     if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
@@ -294,9 +293,9 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
     if (currentTime >= end) {
       advancedRef.current = true;
       if (currentIdx < items.length - 1) {
-        setCurrentIdx((prev) => prev + 1);
+        setCurrentIdx((prev) => prev + 1); // eslint-disable-line react-hooks/set-state-in-effect
       } else {
-        setCurrentIdx(0);
+        setCurrentIdx(0);  
       }
     }
   }, [currentTime, playing]); // eslint-disable-line
@@ -536,15 +535,15 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    loadVideos();
-    loadFolders();
+    loadVideos();  
+    loadFolders(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadVideos, loadFolders]);
 
   useEffect(() => {
     if (selectedFolderId !== null) {
-      loadFolderVideos(selectedFolderId);
+      loadFolderVideos(selectedFolderId); // eslint-disable-line react-hooks/set-state-in-effect
     } else {
-      setFolderVideos([]);
+      setFolderVideos([]);  
     }
   }, [selectedFolderId, loadFolderVideos]);
 
@@ -622,7 +621,7 @@ export default function Home() {
       if (!data.success) {
         setConfiguredProviders(prev => { const next = new Set(prev); next.delete(provider); return next; });
       }
-    } catch (e) {
+    } catch {
       setTestResults(prev => ({ ...prev, [provider]: { success: false, testing: false, error: "Network error" } }));
     }
   }, []);
@@ -1914,7 +1913,7 @@ export default function Home() {
                             <div className="mt-2 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="text-[10px] text-danger/80 leading-relaxed">
-                                  {test.error?.slice(0, 80) ?? "Connection failed"} — this key won't be used for AI calls.
+                                  {test.error?.slice(0, 80) ?? "Connection failed"} &mdash; this key won&#39;t be used for AI calls.
                                 </p>
                                 <button
                                   onClick={() => {

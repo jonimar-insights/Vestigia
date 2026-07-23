@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { formatTimestamp } from "@/lib/youtube";
+import { formatTimestamp, sanitizeHtml } from "@/lib/youtube";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -44,7 +44,8 @@ interface VideoData {
 }
 
 function renderNote(text: string): string {
-  return text
+  const safe = sanitizeHtml(text);
+  return safe
     .replace(/\$(.+?)\$/g, '<span class="text-accent font-mono">$1</span>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
@@ -223,7 +224,7 @@ export default function VideoPage() {
     }, 100);
 
     return () => { destroyed = true; clearInterval(poll); if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
-  }, [video]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [video]);  
 
   // ── Player control helpers ──
   function seekTo(seconds: number) {

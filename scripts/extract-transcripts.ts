@@ -8,7 +8,6 @@
 import { neon } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-http";
 import { videos, transcripts } from "../lib/schema";
-import { eq } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "../lib/transcript";
 
 async function main() {

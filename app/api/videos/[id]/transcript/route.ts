@@ -31,6 +31,7 @@ export async function POST(
   }
 
   const session = await auth();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accessToken = (session as any)?.accessToken;
   const transcript = await fetchTranscriptWithFallback(videoRows[0].youtubeId, accessToken);
 

@@ -19,5 +19,3 @@ export function getDb() {
   }
   return globalForDb.db;
 }
-
-if (process.env.NODE_ENV !== "production") globalForDb.db = undefined;

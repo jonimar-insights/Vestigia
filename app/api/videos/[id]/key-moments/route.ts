@@ -60,6 +60,7 @@ export async function POST(
 
   // Get session early for YouTube API access
   const session = await auth();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accessToken = (session as any)?.accessToken;
 
   const existingTranscript = await db
