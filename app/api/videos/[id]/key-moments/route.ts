@@ -109,18 +109,21 @@ export async function POST(
     }
   }
 
-  if (allMoments.length === 0) {
-    // Fetch user AI keys if authenticated
-    let userKeys: Record<string, string> | undefined;
-    let preferred: string | null = null;
-    if (session?.user?.id) {
-      const settings = await getDecryptedSettings(session.user.id);
-      userKeys = Object.keys(settings.aiKeys).length > 0 ? settings.aiKeys : undefined;
-      preferred = settings.preferredProvider ?? null;
-    }
+  // Always attempt AI extraction to enrich results with AI-identified key moments
+  let userKeys: Record<string, string> | undefined;
+  let preferred: string | null = null;
+  if (session?.user?.id) {
+    const settings = await getDecryptedSettings(session.user.id);
+    userKeys = Object.keys(settings.aiKeys).length > 0 ? settings.aiKeys : undefined;
+    preferred = settings.preferredProvider ?? null;
+  }
 
-    const aiMoments = await extractAIKeyMoments(video.youtubeId, userKeys, preferred);
-    for (const am of aiMoments) {
+  const aiMoments = await extractAIKeyMoments(video.youtubeId, userKeys, preferred);
+  for (const am of aiMoments) {
+    const tooClose = allMoments.some(
+      (m) => Math.abs(m.timestamp - am.timestamp) < 3,
+    );
+    if (!tooClose) {
       const [inserted] = await db
         .insert(keyMoments)
         .values({

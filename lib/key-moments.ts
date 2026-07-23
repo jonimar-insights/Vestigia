@@ -295,6 +295,12 @@ export async function extractTranscriptKeyMoments(
   }
 }
 
+/**
+ * Fetch video metadata with fallback chain:
+ *   1. YouTube Data API v3 (requires YOUTUBE_API_KEY env var)
+ *   2. YouTube oEmbed endpoint (no key needed, limited data)
+ *   3. Scrape video page directly
+ */
 async function fetchVideoMetadata(
   youtubeId: string,
 ): Promise<{
@@ -306,34 +312,96 @@ async function fetchVideoMetadata(
   tags: string[];
   viewCount: number;
 } | null> {
+  // Attempt 1: YouTube Data API v3
+  const apiKey = process.env.YOUTUBE_API_KEY;
+  if (apiKey) {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${youtubeId}&key=${apiKey}`,
+      );
+      const data = await res.json();
+      const item = data.items?.[0];
+      if (item) {
+        const durationStr = item.contentDetails?.duration || "PT0S";
+        const durationMatch = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+        const hours = parseInt(durationMatch?.[1] || "0");
+        const minutes = parseInt(durationMatch?.[2] || "0");
+        const seconds = parseInt(durationMatch?.[3] || "0");
+        const duration = hours * 3600 + minutes * 60 + seconds;
+
+        return {
+          title: item.snippet?.title || "",
+          description: item.snippet?.description || "",
+          duration,
+          channelTitle: item.snippet?.channelTitle || "",
+          category: item.snippet?.categoryId || "",
+          tags: item.snippet?.tags || [],
+          viewCount: parseInt(item.statistics?.viewCount || "0"),
+        };
+      }
+    } catch (e) {
+      console.warn("YouTube Data API failed, trying fallback:", e);
+    }
+  }
+
+  // Attempt 2: oEmbed (no key needed)
   try {
-    const apiKey = process.env.YOUTUBE_API_KEY;
-    if (!apiKey) return null;
-
-    const res = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails,statistics&id=${youtubeId}&key=${apiKey}`,
+    const oembedRes = await fetch(
+      `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`,
     );
-    const data = await res.json();
-    const item = data.items?.[0];
-    if (!item) return null;
+    if (oembedRes.ok) {
+      const oembed = await oembedRes.json();
+      return {
+        title: oembed.title || "",
+        description: oembed.author_name || "",
+        duration: 600,
+        channelTitle: oembed.author_name || "",
+        category: "",
+        tags: [],
+        viewCount: 0,
+      };
+    }
+  } catch (e) {
+    console.warn("oEmbed fallback failed, trying page scrape:", e);
+  }
 
-    const durationStr = item.contentDetails?.duration || "PT0S";
-    const durationMatch = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-    const hours = parseInt(durationMatch?.[1] || "0");
-    const minutes = parseInt(durationMatch?.[2] || "0");
-    const seconds = parseInt(durationMatch?.[3] || "0");
-    const duration = hours * 3600 + minutes * 60 + seconds;
+  // Attempt 3: scrape video page for title and description
+  try {
+    const pageRes = await fetch(`https://www.youtube.com/watch?v=${youtubeId}`);
+    const html = await pageRes.text();
+
+    const titleMatch = html.match(/<title>([^<]*)<\/title>/);
+    const title = titleMatch ? titleMatch[1].replace(" - YouTube", "").trim() : "";
+
+    const descMatch = html.match(/"shortDescription":"([\s\S]*?)"(?:,|})/);
+    const description = descMatch
+      ? descMatch[1].replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\")
+      : "";
+
+    // Try to extract duration from ytInitialData
+    let duration = 600;
+    const dataMatch = html.match(/var ytInitialData = ([\s\S]*?);<\/script>/);
+    if (dataMatch) {
+      try {
+        const data = JSON.parse(dataMatch[1]);
+        const lengthSeconds = data?.videoDetails?.lengthSeconds;
+        if (lengthSeconds) {
+          duration = parseInt(lengthSeconds);
+        }
+      } catch {}
+    }
 
     return {
-      title: item.snippet?.title || "",
-      description: item.snippet?.description || "",
+      title,
+      description,
       duration,
-      channelTitle: item.snippet?.channelTitle || "",
-      category: item.snippet?.categoryId || "",
-      tags: item.snippet?.tags || [],
-      viewCount: parseInt(item.statistics?.viewCount || "0"),
+      channelTitle: "",
+      category: "",
+      tags: [],
+      viewCount: 0,
     };
-  } catch {
+  } catch (e) {
+    console.error("All metadata fetch methods failed:", e);
     return null;
   }
 }
@@ -398,7 +466,7 @@ export async function extractAIKeyMoments(
   const descriptionChapters = parseDescriptionChapters(meta.description);
   const hasDescriptionChapters = descriptionChapters.length >= 2;
 
-  const categoryName = CATEGORY_MAP[meta.category] || "Unknown";
+  const categoryName = CATEGORY_MAP[meta.category] || (meta.category ? "Unknown" : "Unknown");
   const tagStr = meta.tags.length > 0
     ? meta.tags.slice(0, 15).join(", ")
     : "none";
@@ -436,7 +504,7 @@ ${hasDescriptionChapters ? "2. Use the description chapters as a starting point,
    - confidence: 0.0-1.0 (higher = more certain this is a real distinct moment)
 4. Spread moments across the full duration. Don't cluster them all in the first half.
 5. For educational content: identify concept introductions, worked examples, key derivations, important results, and demonstrations.
-6. For entertainment: identify plot points,高潮 moments, transitions, and highlights.
+6. For entertainment: identify plot points, climax moments, transitions, and highlights.
 
 Return ONLY a JSON array. No other text. Example format:
 [{"timestamp":0,"title":"Introduction","description":"Opening remarks","confidence":0.8}]`;
