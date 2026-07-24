@@ -826,12 +826,14 @@ export default function Home() {
       const newImported = new Set(importedIds);
       for (let i = 0; i < toImport.length; i++) {
         const v = toImport[i];
-        const res = await fetch("/api/videos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${v.id}` }),
-        });
-        if (res.ok) newImported.add(v.id);
+        try {
+          const res = await fetch("/api/videos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${v.id}` }),
+          });
+          if (res.ok) newImported.add(v.id);
+        } catch {}
         setPlaylistImportProgress({ done: i + 1, total: toImport.length });
       }
       setImportedIds(newImported);

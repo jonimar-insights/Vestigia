@@ -104,16 +104,16 @@ export async function POST(request: NextRequest) {
     })
     .returning();
 
-  const transcript = await fetchTranscriptWithFallback(youtubeId);
-
-  if (transcript && transcript.segments.length > 0) {
-    await db.insert(transcripts).values({
-      videoId: video.id,
-      segments: JSON.stringify(transcript.segments),
-      language: transcript.language,
-      source: transcript.source,
-    });
-  }
+  fetchTranscriptWithFallback(youtubeId).then((transcript) => {
+    if (transcript && transcript.segments.length > 0) {
+      db.insert(transcripts).values({
+        videoId: video.id,
+        segments: JSON.stringify(transcript.segments),
+        language: transcript.language,
+        source: transcript.source,
+      }).catch((e) => console.error("[transcript insert]", e));
+    }
+  }).catch((e) => console.error("[transcript fetch]", e));
 
   return NextResponse.json(video, { status: 201 });
 }
