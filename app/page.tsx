@@ -439,6 +439,10 @@ export default function Home() {
   const [playlistImportProgress, setPlaylistImportProgress] = useState<{ done: number; total: number } | null>(null);
   const [playlistError, setPlaylistError] = useState<string | null>(null);
   const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
+  const [playlistTargetFolder, setPlaylistTargetFolder] = useState<number | null>(null);
+  const [playlistNewFolderName, setPlaylistNewFolderName] = useState("");
+  const [playlistCreatingFolder, setPlaylistCreatingFolder] = useState(false);
+  const [playlistFolderDropdownOpen, setPlaylistFolderDropdownOpen] = useState(false);
 
   // ── Cliplist state ──
   const [cliplists, setCliplists] = useState<Cliplist[]>([]);
@@ -500,10 +504,17 @@ export default function Home() {
           setBulkFolderDropdown(false);
         }
       }
+      // Close playlist folder dropdown on outside click
+      if (playlistFolderDropdownOpen) {
+        const target = e.target as HTMLElement;
+        if (!target.closest("[data-folder-dropdown]")) {
+          setPlaylistFolderDropdownOpen(false);
+        }
+      }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [addToDropdown.index, folderDropdown.open, bulkFolderDropdown]);
+  }, [addToDropdown.index, folderDropdown.open, bulkFolderDropdown, playlistFolderDropdownOpen]);
 
   const loadVideos = useCallback(async () => {
     try {
@@ -814,6 +825,9 @@ export default function Home() {
     setPlaylistError(null);
     setImportedIds(new Set());
     setPlaylistImportProgress(null);
+    setPlaylistTargetFolder(null);
+    setPlaylistNewFolderName("");
+    setPlaylistFolderDropdownOpen(false);
     setUrl("");
   }
 
@@ -822,6 +836,7 @@ export default function Home() {
     if (!toImport.length) return;
     setPlaylistImporting(true);
     setPlaylistImportProgress({ done: 0, total: toImport.length });
+    const targetFolderId = playlistTargetFolder && playlistTargetFolder > 0 ? playlistTargetFolder : null;
     try {
       const newImported = new Set(importedIds);
       for (let i = 0; i < toImport.length; i++) {
@@ -832,13 +847,24 @@ export default function Home() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${v.id}` }),
           });
-          if (res.ok) newImported.add(v.id);
+          if (res.ok) {
+            const video = await res.json();
+            newImported.add(v.id);
+            if (targetFolderId && video.id) {
+              await fetch(`/api/folders/${targetFolderId}/videos`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ videoId: video.id }),
+              });
+            }
+          }
         } catch {}
         setPlaylistImportProgress({ done: i + 1, total: toImport.length });
       }
       setImportedIds(newImported);
       setPlaylistSelected(new Set());
       await loadVideos();
+      if (targetFolderId) await loadFolders();
     } finally {
       setPlaylistImporting(false);
       setPlaylistImportProgress(null);
@@ -1172,6 +1198,132 @@ export default function Home() {
                             ? "Importing..."
                             : `Import ${playlistSelected.size} video${playlistSelected.size !== 1 ? "s" : ""}`}
                       </button>
+                    </div>
+
+                    {/* Folder picker */}
+                    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50">
+                      <span className="text-[10px] uppercase tracking-wider text-muted/60 shrink-0">Add to</span>
+                      <div className="relative" data-folder-dropdown>
+                        <button
+                          type="button"
+                          onClick={() => setPlaylistFolderDropdownOpen(!playlistFolderDropdownOpen)}
+                          className="flex items-center gap-1.5 rounded-md border border-border/60 bg-surface-hover/30 px-2.5 py-1 text-xs text-foreground hover:border-border transition-colors"
+                        >
+                          <svg className="w-3 h-3 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
+                          {playlistTargetFolder === null
+                            ? "No folder"
+                            : folderList.find((f) => f.id === playlistTargetFolder)?.name ?? "Select..."}
+                          <svg className="w-3 h-3 text-muted/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
+                        </button>
+                        {playlistFolderDropdownOpen && (
+                          <div className="absolute z-50 top-full left-0 mt-1 w-56 rounded-lg border border-border bg-surface shadow-lg py-1">
+                            <button
+                              type="button"
+                              onClick={() => { setPlaylistTargetFolder(null); setPlaylistFolderDropdownOpen(false); }}
+                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover/50 transition-colors ${
+                                playlistTargetFolder === null ? "text-accent font-medium" : "text-foreground"
+                              }`}
+                            >
+                              No folder
+                            </button>
+                            {folderList.map((f) => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                onClick={() => { setPlaylistTargetFolder(f.id); setPlaylistFolderDropdownOpen(false); setPlaylistNewFolderName(""); }}
+                                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover/50 transition-colors ${
+                                  playlistTargetFolder === f.id ? "text-accent font-medium" : "text-foreground"
+                                }`}
+                              >
+                                {f.name}
+                              </button>
+                            ))}
+                            {folderList.length > 0 && <div className="my-1 border-t border-border/40" />}
+                            {playlistNewFolderName !== "" || playlistTargetFolder === -1 ? (
+                              <div className="px-3 py-1.5">
+                                <div className="flex items-center gap-1.5">
+                                  <input
+                                    autoFocus
+                                    type="text"
+                                    value={playlistNewFolderName}
+                                    onChange={(e) => setPlaylistNewFolderName(e.target.value)}
+                                    onKeyDown={async (e) => {
+                                      if (e.key === "Enter" && playlistNewFolderName.trim()) {
+                                        setPlaylistCreatingFolder(true);
+                                        try {
+                                          const res = await fetch("/api/folders", {
+                                            method: "POST",
+                                            headers: { "Content-Type": "application/json" },
+                                            body: JSON.stringify({ name: playlistNewFolderName.trim() }),
+                                          });
+                                          if (res.ok) {
+                                            const folder = await res.json();
+                                            await loadFolders();
+                                            setPlaylistTargetFolder(folder.id);
+                                            setPlaylistNewFolderName("");
+                                            setPlaylistFolderDropdownOpen(false);
+                                          }
+                                        } finally {
+                                          setPlaylistCreatingFolder(false);
+                                        }
+                                      } else if (e.key === "Escape") {
+                                        setPlaylistTargetFolder(null);
+                                        setPlaylistNewFolderName("");
+                                      }
+                                    }}
+                                    placeholder="Folder name..."
+                                    disabled={playlistCreatingFolder}
+                                    className="flex-1 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      if (!playlistNewFolderName.trim()) return;
+                                      setPlaylistCreatingFolder(true);
+                                      try {
+                                        const res = await fetch("/api/folders", {
+                                          method: "POST",
+                                          headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ name: playlistNewFolderName.trim() }),
+                                        });
+                                        if (res.ok) {
+                                          const folder = await res.json();
+                                          await loadFolders();
+                                          setPlaylistTargetFolder(folder.id);
+                                          setPlaylistNewFolderName("");
+                                          setPlaylistFolderDropdownOpen(false);
+                                        }
+                                      } finally {
+                                        setPlaylistCreatingFolder(false);
+                                      }
+                                    }}
+                                    disabled={!playlistNewFolderName.trim() || playlistCreatingFolder}
+                                    className="text-accent hover:text-accent-hover disabled:opacity-30"
+                                  >
+                                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6 9 17l-5-5" /></svg>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => { setPlaylistTargetFolder(null); setPlaylistNewFolderName(""); }}
+                                    className="text-muted hover:text-foreground"
+                                  >
+                                    <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12" /></svg>
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setPlaylistTargetFolder(-1)}
+                                className="w-full text-left px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-surface-hover/50 transition-colors flex items-center gap-1.5"
+                              >
+                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
+                                New folder...
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="max-h-96 overflow-y-auto divide-y divide-border/50">
