@@ -14,7 +14,7 @@ export const users = pgTable("users", {
 export const videos = pgTable("videos", {
   id: serial("id").primaryKey(),
   youtubeUrl: text("youtube_url").notNull(),
-  youtubeId: text("youtube_id").notNull().unique(),
+  youtubeId: text("youtube_id").notNull(),
   title: text("title"),
   thumbnailUrl: text("thumbnail_url"),
   durationSeconds: integer("duration_seconds"),

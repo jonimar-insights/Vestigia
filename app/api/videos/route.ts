@@ -91,18 +91,25 @@ export async function POST(request: NextRequest) {
     }
   } catch {}
 
-  const [video] = await db
-    .insert(videos)
-    .values({
-      youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
-      youtubeId,
-      title,
-      thumbnailUrl,
-      durationSeconds,
-      createdBy: session?.user?.name ?? "anonymous",
-      userId: session?.user?.id ?? null,
-    })
-    .returning();
+  let video;
+  try {
+    [video] = await db
+      .insert(videos)
+      .values({
+        youtubeUrl: `https://www.youtube.com/watch?v=${youtubeId}`,
+        youtubeId,
+        title,
+        thumbnailUrl,
+        durationSeconds,
+        createdBy: session?.user?.name ?? "anonymous",
+        userId: session?.user?.id ?? null,
+      })
+      .returning();
+  } catch (e: unknown) {
+    console.error("[video insert]", e);
+    const msg = e instanceof Error ? e.message : "Insert failed";
+    return NextResponse.json({ error: msg }, { status: 500 });
+  }
 
   fetchTranscriptWithFallback(youtubeId).then((transcript) => {
     if (transcript && transcript.segments.length > 0) {
