@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
+import { videos, transcripts, annotations, scenes, keyMoments, folders, folderVideos } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
 import { eq, count, notInArray, and } from "drizzle-orm";
 import { auth } from "@/auth";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
-import { folderVideos } from "@/lib/schema";
 
 export async function GET() {
   const session = await auth();
@@ -14,7 +13,11 @@ export async function GET() {
   }
   const db = getDb();
 
-  const folderedVideoIds = db.select({ videoId: folderVideos.videoId }).from(folderVideos);
+  const folderedVideoIds = db
+    .select({ videoId: folderVideos.videoId })
+    .from(folderVideos)
+    .innerJoin(folders, eq(folders.id, folderVideos.folderId))
+    .where(eq(folders.userId, session.user.id as string));
 
   const allVideos = await db
     .select()
@@ -45,8 +48,11 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
-  const db = getDb();
   const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const db = getDb();
   const body = await request.json();
   const { url } = body as { url: string };
 
