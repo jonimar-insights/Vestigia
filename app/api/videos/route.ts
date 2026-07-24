@@ -54,7 +54,7 @@ export async function POST(request: NextRequest) {
   }
   const db = getDb();
   const body = await request.json();
-  const { url } = body as { url: string };
+  const { url, title: clientTitle, thumbnailUrl: clientThumbnail } = body as { url: string; title?: string; thumbnailUrl?: string };
 
   if (!url) {
     return NextResponse.json({ error: "URL is required" }, { status: 400 });
@@ -74,22 +74,27 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(existingRows[0]);
   }
 
-  let title: string | null = null;
-  let thumbnailUrl: string | null = null;
+  let title: string | null = clientTitle ?? null;
+  let thumbnailUrl: string | null = clientThumbnail ?? null;
   const durationSeconds: number | null = null;
 
-  try {
-    const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`;
-    const oembedRes = await fetch(oembedUrl);
-    if (oembedRes.ok) {
-      const oembedData = (await oembedRes.json()) as {
-        title?: string;
-        thumbnail_url?: string;
-      };
-      title = oembedData.title ?? null;
-      thumbnailUrl = oembedData.thumbnail_url ?? null;
-    }
-  } catch {}
+  if (!title || !thumbnailUrl) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const oembedUrl = `https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${youtubeId}&format=json`;
+      const oembedRes = await fetch(oembedUrl, { signal: controller.signal });
+      clearTimeout(timeout);
+      if (oembedRes.ok) {
+        const oembedData = (await oembedRes.json()) as {
+          title?: string;
+          thumbnail_url?: string;
+        };
+        title = title ?? oembedData.title ?? null;
+        thumbnailUrl = thumbnailUrl ?? oembedData.thumbnail_url ?? null;
+      }
+    } catch {}
+  }
 
   let video;
   try {

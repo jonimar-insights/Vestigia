@@ -845,7 +845,11 @@ export default function Home() {
           const res = await fetch("/api/videos", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${v.id}` }),
+            body: JSON.stringify({
+              url: `https://www.youtube.com/watch?v=${v.id}`,
+              title: v.title,
+              thumbnailUrl: v.thumbnail,
+            }),
           });
           if (res.ok) {
             const video = await res.json();
@@ -857,8 +861,12 @@ export default function Home() {
                 body: JSON.stringify({ videoId: video.id }),
               });
             }
+          } else {
+            console.error(`[import] POST /api/videos failed for ${v.id}: ${res.status}`, await res.text().catch(() => ""));
           }
-        } catch {}
+        } catch (e) {
+          console.error(`[import] error for ${v.id}:`, e);
+        }
         setPlaylistImportProgress({ done: i + 1, total: toImport.length });
       }
       setImportedIds(newImported);
