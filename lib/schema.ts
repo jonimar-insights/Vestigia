@@ -22,6 +22,7 @@ export const videos = pgTable("videos", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by").notNull().default("anonymous"),
+  userId: text("user_id"),
 });
 
 export const transcripts = pgTable("transcripts", {
@@ -54,6 +55,7 @@ export const annotations = pgTable("annotations", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by").notNull().default("anonymous"),
+  userId: text("user_id"),
 });
 
 export const scenes = pgTable("scenes", {
@@ -82,6 +84,7 @@ export const cliplists = pgTable("cliplists", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by").notNull().default("anonymous"),
+  userId: text("user_id"),
 });
 
 export const clipItems = pgTable("clip_items", {
@@ -140,6 +143,7 @@ export const folders = pgTable("folders", {
   updatedAt: text("updated_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+  userId: text("user_id"),
 });
 
 export const folderVideos = pgTable("folder_videos", {

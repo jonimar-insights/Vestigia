@@ -1,13 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { cliplists, clipItems } from "@/lib/schema";
-import { eq, desc, count } from "drizzle-orm";
+import { eq, desc, count, and } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function GET() {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const lists = await db
     .select()
     .from(cliplists)
+    .where(eq(cliplists.userId, session.user.id as string))
     .orderBy(desc(cliplists.updatedAt));
 
   const result = await Promise.all(
@@ -24,6 +30,10 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const body = await request.json();
   const { name, description } = body;
@@ -40,6 +50,7 @@ export async function POST(request: NextRequest) {
       description: description?.trim() || null,
       createdAt: now,
       updatedAt: now,
+      userId: session.user.id as string,
     })
     .returning();
 

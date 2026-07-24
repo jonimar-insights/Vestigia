@@ -1,6 +1,6 @@
 {
   "version": "6",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "id": "f8f2fe68-226e-44aa-b880-f8ddf9ea39fa",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {

@@ -68,6 +68,7 @@ export async function POST(
       tags: tags ? JSON.stringify(tags) : null,
       note: note ?? null,
       createdBy: session?.user?.name ?? "anonymous",
+      userId: session?.user?.id ?? null,
     })
     .returning();
 

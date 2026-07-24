@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, annotations, scenes, keyMoments } from "@/lib/schema";
-import { like, or, eq } from "drizzle-orm";
+import { like, or, eq, and, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(request: NextRequest) {
@@ -18,6 +18,17 @@ export async function GET(request: NextRequest) {
 
   const pattern = `%${q}%`;
 
+  // Get user's video IDs first
+  const userVideoIds = await db
+    .select({ id: videos.id })
+    .from(videos)
+    .where(eq(videos.userId, session.user.id as string));
+  const userVideoIdArr = userVideoIds.map((v) => v.id);
+
+  if (userVideoIdArr.length === 0) {
+    return NextResponse.json({ results: [] });
+  }
+
   const matchedAnnotations = await db
     .select({
       type: annotations.id,
@@ -31,10 +42,13 @@ export async function GET(request: NextRequest) {
     })
     .from(annotations)
     .where(
-      or(
-        like(annotations.label, pattern),
-        like(annotations.note, pattern),
-        like(annotations.tags, pattern),
+      and(
+        or(
+          like(annotations.label, pattern),
+          like(annotations.note, pattern),
+          like(annotations.tags, pattern),
+        ),
+        inArray(annotations.videoId, userVideoIdArr),
       ),
     );
 
@@ -47,9 +61,12 @@ export async function GET(request: NextRequest) {
     })
     .from(scenes)
     .where(
-      or(
-        like(scenes.aiDescription, pattern),
-        like(scenes.aiTags, pattern),
+      and(
+        or(
+          like(scenes.aiDescription, pattern),
+          like(scenes.aiTags, pattern),
+        ),
+        inArray(scenes.videoId, userVideoIdArr),
       ),
     );
 
@@ -62,9 +79,12 @@ export async function GET(request: NextRequest) {
     })
     .from(keyMoments)
     .where(
-      or(
-        like(keyMoments.title, pattern),
-        like(keyMoments.description, pattern),
+      and(
+        or(
+          like(keyMoments.title, pattern),
+          like(keyMoments.description, pattern),
+        ),
+        inArray(keyMoments.videoId, userVideoIdArr),
       ),
     );
 

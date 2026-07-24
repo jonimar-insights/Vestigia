@@ -1,6 +1,6 @@
 {
   "version": "7",
-  "dialect": "sqlite",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
@@ -49,6 +49,13 @@
       "version": "6",
       "when": 1784374604873,
       "tag": "0006_clip_items_end_timestamp",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784960000000,
+      "tag": "0007_user_scoping",
       "breakpoints": true
     }
   ]

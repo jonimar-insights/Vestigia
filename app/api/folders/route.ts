@@ -10,7 +10,11 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const db = getDb();
-  const allFolders = await db.select().from(folders).orderBy(desc(folders.updatedAt));
+  const allFolders = await db
+    .select()
+    .from(folders)
+    .where(eq(folders.userId, session.user.id as string))
+    .orderBy(desc(folders.updatedAt));
 
   const result = await Promise.all(
     allFolders.map(async (f) => {
@@ -47,6 +51,7 @@ export async function POST(request: NextRequest) {
       color: color || "bg-accent",
       createdAt: now,
       updatedAt: now,
+      userId: session.user.id as string,
     })
     .returning();
 

@@ -1,12 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { cliplists, clipItems, videos } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
@@ -14,7 +19,11 @@ export async function GET(
     return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
   }
 
-  const listRows = await db.select().from(cliplists).where(eq(cliplists.id, listId)).limit(1);
+  const listRows = await db
+    .select()
+    .from(cliplists)
+    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
   }
@@ -51,6 +60,10 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
@@ -58,7 +71,9 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
   }
 
-  await db.delete(cliplists).where(eq(cliplists.id, listId));
+  await db.delete(cliplists).where(
+    and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string))
+  );
   return NextResponse.json({ success: true });
 }
 
@@ -66,6 +81,10 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
@@ -80,7 +99,9 @@ export async function PATCH(
   if (name !== undefined) updateData.name = name.trim();
   if (description !== undefined) updateData.description = description?.trim() || null;
 
-  await db.update(cliplists).set(updateData).where(eq(cliplists.id, listId));
+  await db.update(cliplists).set(updateData).where(
+    and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string))
+  );
   const updatedRows = await db.select().from(cliplists).where(eq(cliplists.id, listId)).limit(1);
   return NextResponse.json(updatedRows[0]);
 }

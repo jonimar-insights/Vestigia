@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos, videos } from "@/lib/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -16,7 +16,11 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   }
 
   const db = getDb();
-  const [folder] = await db.select().from(folders).where(eq(folders.id, folderId)).limit(1);
+  const [folder] = await db
+    .select()
+    .from(folders)
+    .where(and(eq(folders.id, folderId), eq(folders.userId, session.user.id as string)))
+    .limit(1);
   if (!folder) {
     return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
@@ -54,7 +58,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   if (description !== undefined) updates.description = description?.trim() || null;
   if (color !== undefined) updates.color = color;
 
-  await db.update(folders).set(updates).where(eq(folders.id, folderId));
+  await db.update(folders).set(updates).where(
+    and(eq(folders.id, folderId), eq(folders.userId, session.user.id as string))
+  );
   const [updated] = await db.select().from(folders).where(eq(folders.id, folderId)).limit(1);
 
   return NextResponse.json(updated);
@@ -72,7 +78,9 @@ export async function DELETE(_request: NextRequest, { params }: { params: Promis
   }
 
   const db = getDb();
-  await db.delete(folders).where(eq(folders.id, folderId));
+  await db.delete(folders).where(
+    and(eq(folders.id, folderId), eq(folders.userId, session.user.id as string))
+  );
 
   return NextResponse.json({ ok: true });
 }
