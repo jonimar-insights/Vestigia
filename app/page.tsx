@@ -873,6 +873,7 @@ export default function Home() {
       setPlaylistSelected(new Set());
       await loadVideos();
       if (targetFolderId) await loadFolders();
+      cancelPlaylist();
     } finally {
       setPlaylistImporting(false);
       setPlaylistImportProgress(null);
