@@ -65,10 +65,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
   }
 
+  // Check across all users — unique constraint on youtube_id was dropped to allow
+  // multiple users to import the same video
   const existingRows = await db
     .select()
     .from(videos)
-    .where(and(eq(videos.youtubeId, youtubeId), eq(videos.userId, session?.user?.id as string)))
+    .where(eq(videos.youtubeId, youtubeId))
     .limit(1);
   if (existingRows[0]) {
     return NextResponse.json(existingRows[0]);
