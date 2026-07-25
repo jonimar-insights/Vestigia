@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
+import { videos, transcripts, annotations, scenes, keyMoments, folderVideos } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
 
@@ -80,6 +80,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
+  // Remove from folders first, then delete cascade-safe children, then the video itself
+  await db.delete(folderVideos).where(eq(folderVideos.videoId, videoId));
   await db.delete(annotations).where(eq(annotations.videoId, videoId));
   await db.delete(keyMoments).where(eq(keyMoments.videoId, videoId));
   await db.delete(scenes).where(eq(scenes.videoId, videoId));
