@@ -1069,30 +1069,6 @@ export default function Home() {
           </div>
           {session?.user && (
             <div className="flex items-center gap-3">
-              {/* Translate titles button */}
-              {translatedLang ? (
-                <button
-                  onClick={clearTitleTranslations}
-                  className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 transition-all flex items-center gap-1.5"
-                  title="Clear translation"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-                  {translatedLang === "pt" ? "EN" : "PT"}
-                </button>
-              ) : (
-                <button
-                  onClick={translateTitles}
-                  disabled={translating}
-                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent/50 disabled:opacity-50 transition-all flex items-center gap-1.5"
-                >
-                  {translating ? (
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                  ) : (
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-                  )}
-                  PT
-                </button>
-              )}
               <span className="text-sm text-muted">{session.user.name}</span>
               <button
                 onClick={() => signOut({ callbackUrl: "/signin" })}
@@ -1535,7 +1511,15 @@ export default function Home() {
                         ? `${selectedVideoIds.size} selected`
                         : `Select all (${currentVideoList.length})`}
                     </label>
-                    <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center rounded-lg border border-border bg-surface p-0.5">
+                        <button onClick={() => { if (translatedLang) clearTitleTranslations(); else translateTitles(); }}
+                          disabled={translating}
+                          className={`px-2.5 py-1.5 text-[10px] font-medium transition-all ${translatedLang ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}>
+                          {translating ? "..." : translatedLang ? "EN →" : "PT →"}
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
                       <button
                         onClick={() => setViewMode("grid")}
                         className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
@@ -1554,6 +1538,7 @@ export default function Home() {
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                         </svg>
                       </button>
+                    </div>
                     </div>
                   </div>
                   {viewMode === "grid" ? (
@@ -1703,7 +1688,15 @@ export default function Home() {
                       ? `${selectedVideoIds.size} selected`
                       : `Select all (${currentVideoList.length})`}
                   </label>
-                  <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center rounded-lg border border-border bg-surface p-0.5">
+                      <button onClick={() => { if (translatedLang) clearTitleTranslations(); else translateTitles(); }}
+                        disabled={translating}
+                        className={`px-2.5 py-1.5 text-[10px] font-medium transition-all ${translatedLang ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}>
+                        {translating ? "..." : translatedLang ? "EN →" : "PT →"}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
                     <button
                       onClick={() => setViewMode("grid")}
                       className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
@@ -1722,6 +1715,7 @@ export default function Home() {
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                       </svg>
                     </button>
+                  </div>
                   </div>
                 </div>
                 {viewMode === "grid" ? (

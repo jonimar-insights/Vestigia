@@ -754,30 +754,6 @@ export default function VideoPage() {
             <span className="hidden md:inline text-[10px] text-muted bg-surface-hover rounded px-1.5 py-0.5 font-mono">
               <kbd>A</kbd> annotate &middot; <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> seek &middot; <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> prev/next
             </span>
-            {/* Translate button — EN↔PT */}
-            {translatedLang ? (
-              <button
-                onClick={clearTranslations}
-                className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 transition-all flex items-center gap-1.5"
-                title="Clear translation"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-                {translatedLang === "pt" ? "EN" : "PT"}
-              </button>
-            ) : (
-              <button
-                onClick={translateAll}
-                disabled={translating}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent/50 disabled:opacity-50 transition-all flex items-center gap-1.5"
-              >
-                {translating ? (
-                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                ) : (
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-                )}
-                PT
-              </button>
-            )}
             <button onClick={() => {
                 const t = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
                 const dur = duration || 3600;
@@ -990,6 +966,25 @@ export default function VideoPage() {
                 <kbd className="bg-surface-hover border border-border/60 rounded px-1.5 py-0.5 text-[9px] text-muted font-mono">A</kbd>
               </button>
             )}
+
+            {/* ── Translation toolbar ── */}
+            <div className="flex items-center gap-2 mb-3 px-2 py-1.5 rounded-lg border border-border/60 bg-surface">
+              <svg className="w-3.5 h-3.5 text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+              <span className="text-[10px] text-muted font-medium">Translate</span>
+              <div className="flex items-center ml-auto rounded-md border border-border/60 overflow-hidden">
+                <button onClick={() => { if (translatedLang) clearTranslations(); }}
+                  disabled={!translatedLang}
+                  className={`px-2.5 py-1 text-[10px] font-medium transition-all ${translatedLang ? "bg-accent text-white" : "text-muted/40"}`}>
+                  EN
+                </button>
+                <div className="w-px h-3 bg-border/60" />
+                <button onClick={() => { if (!translatedLang) translateAll(); }}
+                  disabled={!!translatedLang}
+                  className={`px-2.5 py-1 text-[10px] font-medium transition-all ${!translatedLang ? "text-muted hover:text-foreground" : "bg-accent text-white"}`}>
+                  PT
+                </button>
+              </div>
+            </div>
 
             {/* ── AI Summary ── */}
             {!showForm && (
