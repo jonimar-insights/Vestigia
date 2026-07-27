@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: "system",
-          content: `You are a professional translator. Translate the following numbered items to ${targetLanguage}. Keep the numbering. Return ONLY the translated items, one per line, with the same numbering. Do not add explanations.`,
+          content: `You are a professional translator. Translate the following numbered items to ${targetLanguage} (European Portuguese from Portugal, not Brazilian Portuguese). Use European Portuguese vocabulary, grammar, and spelling (e.g. "telemóvel" not "celular", "autocarro" not "ônibus", "pequeno-almoço" not "café da manhã"). Keep the numbering. Return ONLY the translated items, one per line, with the same numbering. Do not add explanations.`,
         },
         {
           role: "user",
