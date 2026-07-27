@@ -93,7 +93,8 @@ function formatTs(s: number) {
 
 function highlight(text: string, query: string) {
   if (!query) return text;
-  const parts = text.split(new RegExp(`(${query})`, "gi"));
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
   return (
     <>{
       parts.map((part, i) =>
@@ -425,6 +426,7 @@ export default function Home() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [extractKeyMoments, setExtractKeyMoments] = useState(false);
   const [videos, setVideos] = useState<Video[]>([]);
   const [fetching, setFetching] = useState(true);
 
@@ -453,6 +455,8 @@ export default function Home() {
   const [newCliplistDesc, setNewCliplistDesc] = useState("");
   const [creatingCliplist, setCreatingCliplist] = useState(false);
   const [slideshowItems, setSlideshowItems] = useState<ClipItem[] | null>(null);
+  const [editingCliplistId, setEditingCliplistId] = useState<number | null>(null);
+  const [editingCliplistName, setEditingCliplistName] = useState("");
 
   // ── Settings state ──
   const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
@@ -475,6 +479,8 @@ export default function Home() {
   const [editingFolderName, setEditingFolderName] = useState("");
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set());
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   // "Add to cliplist" dropdown per search result
   const [addToDropdown, setAddToDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
@@ -549,6 +555,14 @@ export default function Home() {
   useEffect(() => {
     loadVideos();  
     loadFolders(); // eslint-disable-line react-hooks/set-state-in-effect
+
+    // Auto-select folder from URL ?folder= param
+    const params = new URLSearchParams(window.location.search);
+    const folderParam = params.get("folder");
+    if (folderParam) {
+      const fid = parseInt(folderParam);
+      if (!isNaN(fid)) setSelectedFolderId(fid);
+    }
   }, [loadVideos, loadFolders]);
 
   useEffect(() => {
@@ -660,7 +674,7 @@ export default function Home() {
       const res = await fetch("/api/videos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: url.trim() }),
+        body: JSON.stringify({ url: url.trim(), extractKeyMoments }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -724,6 +738,7 @@ export default function Home() {
       body: JSON.stringify({ videoId }),
     });
     await loadFolders();
+    await loadVideos();
     if (selectedFolderId === folderId) await loadFolderVideos(folderId);
     setFolderDropdown({ videoId: -1, open: false });
   }
@@ -735,6 +750,7 @@ export default function Home() {
       body: JSON.stringify({ videoId }),
     });
     await loadFolders();
+    await loadVideos();
     if (selectedFolderId === folderId) await loadFolderVideos(folderId);
     setFolderDropdown({ videoId: -1, open: false });
   }
@@ -751,7 +767,23 @@ export default function Home() {
     setSelectedVideoIds(new Set());
     setBulkFolderDropdown(false);
     await loadFolders();
+    await loadVideos();
     if (selectedFolderId === folderId) await loadFolderVideos(folderId);
+  }
+
+  async function bulkDeleteSelected() {
+    const ids = Array.from(selectedVideoIds);
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} video${ids.length !== 1 ? "s" : ""} and all their data?`)) return;
+    setBulkDeleteProgress({ done: 0, total: ids.length });
+    for (let i = 0; i < ids.length; i++) {
+      await fetch(`/api/videos/${ids[i]}`, { method: "DELETE" });
+      setBulkDeleteProgress({ done: i + 1, total: ids.length });
+    }
+    setBulkDeleteProgress(null);
+    setSelectedVideoIds(new Set());
+    await loadVideos();
+    if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
   }
 
   function toggleVideoSelection(videoId: number) {
@@ -849,6 +881,7 @@ export default function Home() {
               url: `https://www.youtube.com/watch?v=${v.id}`,
               title: v.title,
               thumbnailUrl: v.thumbnail,
+              extractKeyMoments,
             }),
           });
           if (res.ok) {
@@ -959,6 +992,20 @@ export default function Home() {
     await loadCliplists();
   }
 
+  async function renameCliplist(id: number, newName: string) {
+    if (!newName.trim()) return;
+    await fetch(`/api/cliplists/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newName.trim() }),
+    });
+    setEditingCliplistId(null);
+    await loadCliplists();
+    if (selectedCliplist?.id === id) {
+      setSelectedCliplist((prev) => prev ? { ...prev, name: newName.trim() } : null);
+    }
+  }
+
   async function removeClipItem(cliplistId: number, itemId: number) {
     await fetch(`/api/cliplists/${cliplistId}/items`, {
       method: "DELETE",
@@ -979,7 +1026,7 @@ export default function Home() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-border px-6 py-4 shrink-0">
-        <div className="mx-auto max-w-5xl flex items-center justify-between">
+        <div className="mx-auto w-full flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold">MARGINALIA: Vestigia</h1>
             <p className="text-sm text-muted">Import, annotate, and search video content</p>
@@ -998,7 +1045,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl w-full px-6 pt-6">
+      <div className="mx-auto w-full px-6 pt-6">
         <nav className="flex gap-1 border-b border-border">
           {([
             { key: "import", label: "Import", icon: "+" },
@@ -1022,7 +1069,7 @@ export default function Home() {
         </nav>
       </div>
 
-      <div className="mx-auto max-w-5xl w-full px-6 py-6 flex-1 flex gap-6">
+      <div className="mx-auto w-full px-6 py-6 flex-1 flex gap-6">
         {/* ── SIDEBAR: Folders ── */}
         <aside className="w-52 shrink-0">
           <div className="sticky top-6">
@@ -1163,6 +1210,15 @@ export default function Home() {
                   {loading ? "Adding..." : playlistLoading ? "Loading..." : "Import"}
                 </button>
               </div>
+              <label className="flex items-center gap-2 mt-2 text-xs text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={extractKeyMoments}
+                  onChange={(e) => setExtractKeyMoments(e.target.checked)}
+                  className="rounded border-border accent-accent"
+                />
+                Extract key moments on import
+              </label>
               {error && <p className="mt-2 text-sm text-danger">{error}</p>}
             </form>
 
@@ -1209,8 +1265,18 @@ export default function Home() {
                       </button>
                     </div>
 
-                    {/* Folder picker */}
-                    <div className="flex items-center gap-2 px-4 py-2 border-b border-border/50">
+                    {/* Folder picker + key moments toggle */}
+                    <div className="flex items-center gap-3 px-4 py-2 border-b border-border/50">
+                      <label className="flex items-center gap-2 text-xs text-muted cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={extractKeyMoments}
+                          onChange={(e) => setExtractKeyMoments(e.target.checked)}
+                          className="rounded border-border accent-accent"
+                        />
+                        Key moments
+                      </label>
+                      <div className="w-px h-3 bg-border/50" />
                       <span className="text-[10px] uppercase tracking-wider text-muted/60 shrink-0">Add to</span>
                       <div className="relative" data-folder-dropdown>
                         <button
@@ -1409,8 +1475,29 @@ export default function Home() {
                         ? `${selectedVideoIds.size} selected`
                         : `Select all (${currentVideoList.length})`}
                     </label>
+                    <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                      <button
+                        onClick={() => setViewMode("grid")}
+                        className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                        title="Thumbnail view"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={() => setViewMode("list")}
+                        className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                        title="Detail list view"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {viewMode === "grid" ? (
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {folderVideos.map((video) => (
                     <Link
                       key={video.id}
@@ -1436,12 +1523,10 @@ export default function Home() {
                         <div className="min-w-0">
                           <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
                           <div className="flex items-center gap-2 mt-1">
-                            {(video.momentCount ?? 0) > 0 && (
-                              <span className="shrink-0 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`${video.momentCount} key moment${video.momentCount !== 1 ? "s" : ""}`}>
-                                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
-                                {video.momentCount}
-                              </span>
-                            )}
+                            <span className={`shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5 ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`} title={`${video.momentCount ?? 0} key moment${(video.momentCount ?? 0) !== 1 ? "s" : ""}`}>
+                              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+                              {video.momentCount ?? 0}
+                            </span>
                           </div>
                         </div>
                         <div className="flex items-center gap-0.5">
@@ -1471,6 +1556,70 @@ export default function Home() {
                     </Link>
                   ))}
                 </div>
+                  ) : (
+                  <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
+                    {folderVideos.map((video) => (
+                    <Link
+                      key={video.id}
+                      href={`/video/${video.id}`}
+                      className="group flex items-center gap-4 px-4 py-3 bg-surface hover:bg-surface-hover transition-colors"
+                    >
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
+                        className="w-5 h-5 shrink-0 rounded border border-border bg-background flex items-center justify-center transition-colors hover:border-accent"
+                      >
+                        {selectedVideoIds.has(video.id) && (
+                          <svg className="w-3 h-3 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                      {video.thumbnailUrl && (
+                        <div className="relative w-40 h-[56px] shrink-0 overflow-hidden rounded bg-muted">
+                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-medium truncate">{video.title ?? "Untitled"}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          {(video.annotationCount ?? 0) > 0 && (
+                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
+                          )}
+                          {(video.sceneCount ?? 0) > 0 && (
+                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} scenes</span>
+                          )}
+                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} moments</span>
+                          {video.hasTranscript && (
+                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">transcript</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {selectedFolderId !== null && (
+                          <button
+                            onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                            className="text-muted hover:text-accent transition-colors p-1.5 rounded"
+                            title="Remove from folder"
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
+                            </svg>
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
+                          className="text-muted hover:text-danger transition-colors p-1.5 rounded"
+                          title="Delete"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                  )}
                 </>
               )
             ) : videos.length === 0 ? (
@@ -1494,8 +1643,29 @@ export default function Home() {
                       ? `${selectedVideoIds.size} selected`
                       : `Select all (${currentVideoList.length})`}
                   </label>
+                  <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                    <button
+                      onClick={() => setViewMode("grid")}
+                      className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                      title="Thumbnail view"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+                      </svg>
+                    </button>
+                    <button
+                      onClick={() => setViewMode("list")}
+                      className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                      title="Detail list view"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {viewMode === "grid" ? (
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {videos.map((video) => (
                   <Link
                     key={video.id}
@@ -1577,46 +1747,146 @@ export default function Home() {
                   </Link>
                 ))}
                 </div>
+                ) : (
+                <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
+                  {videos.map((video) => (
+                    <Link
+                      key={video.id}
+                      href={`/video/${video.id}`}
+                      className="group flex items-center gap-4 px-4 py-3 bg-surface hover:bg-surface-hover transition-colors"
+                    >
+                      <button
+                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
+                        className="w-5 h-5 shrink-0 rounded border border-border bg-background flex items-center justify-center transition-colors hover:border-accent"
+                      >
+                        {selectedVideoIds.has(video.id) && (
+                          <svg className="w-3 h-3 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                      {video.thumbnailUrl && (
+                        <div className="relative w-40 h-[56px] shrink-0 overflow-hidden rounded bg-muted">
+                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <h3 className="text-sm font-medium truncate">{video.title ?? "Untitled"}</h3>
+                        <div className="flex items-center gap-2 mt-1">
+                          {(video.annotationCount ?? 0) > 0 && (
+                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
+                          )}
+                          {(video.sceneCount ?? 0) > 0 && (
+                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} scenes</span>
+                          )}
+                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} moments</span>
+                          {video.hasTranscript && (
+                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">transcript</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-0.5 shrink-0">
+                        {folderList.length > 0 && (
+                          <div className="relative" data-folder-dropdown>
+                            <button
+                              onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
+                              className="text-muted hover:text-accent transition-colors p-1.5 rounded"
+                              title="Add to folder"
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                            </button>
+                            {folderDropdown.open && folderDropdown.videoId === video.id && (
+                              <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Add to folder</div>
+                                {folderList.map((folder) => (
+                                  <button
+                                    key={folder.id}
+                                    onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                                  >
+                                    {folder.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        <button
+                          onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
+                          className="text-muted hover:text-danger transition-colors p-1.5 rounded"
+                          title="Delete"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                )}
               </>
             )}
           </div>
         )}
 
         {/* ── BULK ACTION BAR ── */}
-        {selectedVideoIds.size > 0 && (tab === "import" || tab === "cliplists") && (
+        {(selectedVideoIds.size > 0 || bulkDeleteProgress) && (
           <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 rounded-xl border border-border bg-surface shadow-2xl px-5 py-3 flex items-center gap-4">
-            <span className="text-sm font-medium">{selectedVideoIds.size} video{selectedVideoIds.size !== 1 ? "s" : ""} selected</span>
-            <div className="relative" data-folder-dropdown>
-              <button
-                onClick={() => setBulkFolderDropdown(!bulkFolderDropdown)}
-                className="text-sm px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/80 transition-colors"
-              >
-                Add to folder
-              </button>
-              {bulkFolderDropdown && (
-                <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                  <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Select folder</div>
-                  {folderList.map((folder) => (
-                    <button
-                      key={folder.id}
-                      onClick={() => bulkAddToFolder(folder.id)}
-                      className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                    >
-                      {folder.name}
-                    </button>
-                  ))}
-                  {folderList.length === 0 && (
-                    <div className="px-3 py-2 text-sm text-muted">No folders yet</div>
+            {bulkDeleteProgress ? (
+              <div className="flex items-center gap-3 min-w-[280px]">
+                <div className="flex-1 h-2 rounded-full bg-surface-hover overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-danger transition-all duration-300"
+                    style={{ width: `${(bulkDeleteProgress.done / bulkDeleteProgress.total) * 100}%` }}
+                  />
+                </div>
+                <span className="text-sm text-muted whitespace-nowrap">Deleting {bulkDeleteProgress.done}/{bulkDeleteProgress.total}</span>
+              </div>
+            ) : (
+              <>
+                <span className="text-sm font-medium">{selectedVideoIds.size} video{selectedVideoIds.size !== 1 ? "s" : ""} selected</span>
+                <div className="relative" data-folder-dropdown>
+                  <button
+                    onClick={() => setBulkFolderDropdown(!bulkFolderDropdown)}
+                    className="text-sm px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/80 transition-colors"
+                  >
+                    Add to folder
+                  </button>
+                  {bulkFolderDropdown && (
+                    <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                      <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Select folder</div>
+                      {folderList.map((folder) => (
+                        <button
+                          key={folder.id}
+                          onClick={() => bulkAddToFolder(folder.id)}
+                          className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                        >
+                          {folder.name}
+                        </button>
+                      ))}
+                      {folderList.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-muted">No folders yet</div>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
-            </div>
-            <button
-              onClick={() => setSelectedVideoIds(new Set())}
-              className="text-sm text-muted hover:text-foreground transition-colors"
-            >
-              Deselect all
-            </button>
+                <button
+                  onClick={bulkDeleteSelected}
+                  className="text-sm px-3 py-1.5 rounded-lg bg-danger/10 text-danger hover:bg-danger/20 transition-colors"
+                >
+                  Delete
+                </button>
+                <button
+                  onClick={() => setSelectedVideoIds(new Set())}
+                  className="text-sm text-muted hover:text-foreground transition-colors"
+                >
+                  Deselect all
+                </button>
+              </>
+            )}
           </div>
         )}
 
@@ -1828,14 +2098,45 @@ export default function Home() {
 
                 <div className="rounded-xl border border-border bg-surface overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-                    <div>
-                      <h3 className="text-sm font-semibold">{selectedCliplist.name}</h3>
-                      {selectedCliplist.description && (
-                        <p className="text-[10px] text-muted mt-0.5">{selectedCliplist.description}</p>
+                    <div className="min-w-0 flex-1">
+                      {editingCliplistId === selectedCliplist.id ? (
+                        <form onSubmit={(e) => { e.preventDefault(); renameCliplist(selectedCliplist.id, editingCliplistName); }} className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            type="text"
+                            value={editingCliplistName}
+                            onChange={(e) => setEditingCliplistName(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Escape") setEditingCliplistId(null); }}
+                            className="flex-1 rounded border border-border bg-background px-2 py-1 text-sm font-semibold focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                          />
+                          <button type="submit" disabled={!editingCliplistName.trim()}
+                            className="rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all">
+                            Save
+                          </button>
+                          <button type="button" onClick={() => setEditingCliplistId(null)}
+                            className="rounded px-2 py-1 text-[10px] text-muted hover:text-foreground transition-colors">
+                            Cancel
+                          </button>
+                        </form>
+                      ) : (
+                        <>
+                          <h3 className="text-sm font-semibold">{selectedCliplist.name}</h3>
+                          {selectedCliplist.description && (
+                            <p className="text-[10px] text-muted mt-0.5">{selectedCliplist.description}</p>
+                          )}
+                          <p className="text-[10px] text-muted/50 mt-0.5">{selectedCliplist.items.length} item{selectedCliplist.items.length !== 1 ? "s" : ""}</p>
+                        </>
                       )}
-                      <p className="text-[10px] text-muted/50 mt-0.5">{selectedCliplist.items.length} item{selectedCliplist.items.length !== 1 ? "s" : ""}</p>
                     </div>
                     <div className="flex items-center gap-2">
+                      {editingCliplistId !== selectedCliplist.id && (
+                        <button
+                          onClick={() => { setEditingCliplistId(selectedCliplist.id); setEditingCliplistName(selectedCliplist.name); }}
+                          className="text-xs text-muted hover:text-accent transition-colors"
+                        >
+                          Rename
+                        </button>
+                      )}
                       {selectedCliplist.items.length > 0 && (
                         <button
                           onClick={() => setSlideshowItems(selectedCliplist.items)}
@@ -1902,6 +2203,33 @@ export default function Home() {
               /* ── Cliplist grid ── */
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {cliplists.map((cl) => (
+                  editingCliplistId === cl.id ? (
+                    <div key={cl.id} className="rounded-xl border border-accent bg-surface p-4">
+                      <form
+                        onSubmit={(e) => { e.preventDefault(); renameCliplist(cl.id, editingCliplistName); }}
+                        className="space-y-2"
+                      >
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editingCliplistName}
+                          onChange={(e) => setEditingCliplistName(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === "Escape") setEditingCliplistId(null); }}
+                          className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
+                        />
+                        <div className="flex items-center gap-2">
+                          <button type="submit" disabled={!editingCliplistName.trim()}
+                            className="rounded-md bg-accent px-3 py-1 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all">
+                            Save
+                          </button>
+                          <button type="button" onClick={() => setEditingCliplistId(null)}
+                            className="rounded-md px-3 py-1 text-[10px] text-muted hover:text-foreground transition-colors">
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    </div>
+                  ) : (
                   <button
                     key={cl.id}
                     onClick={() => openCliplist(cl.id)}
@@ -1914,13 +2242,23 @@ export default function Home() {
                           <p className="text-[10px] text-muted mt-0.5 line-clamp-2">{cl.description}</p>
                         )}
                       </div>
-                      <span className="text-[10px] font-mono text-muted/50 shrink-0 mt-0.5">{cl.itemCount}</span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-[10px] font-mono text-muted/50 mt-0.5">{cl.itemCount}</span>
+                        <button
+                          onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingCliplistId(cl.id); setEditingCliplistName(cl.name); }}
+                          className="opacity-0 group-hover:opacity-100 text-muted hover:text-accent transition-all p-0.5 rounded"
+                          title="Rename"
+                        >
+                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                        </button>
+                      </div>
                     </div>
                     <div className="flex items-center gap-2 mt-3 text-[9px] text-muted/40">
                       <span>{new Date(cl.updatedAt).toLocaleDateString()}</span>
                     </div>
                   </button>
-                ))}
+                  ))
+                )}
               </div>
             )}
           </div>

@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folderVideos, folders } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await params;
   const folderId = parseInt(id);
   if (isNaN(folderId)) {
@@ -18,8 +23,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return NextResponse.json({ error: "videoId is required" }, { status: 400 });
   }
 
-  // Check folder exists
-  const [folder] = await db.select().from(folders).where(eq(folders.id, folderId)).limit(1);
+  // Check folder exists and belongs to user
+  const [folder] = await db
+    .select()
+    .from(folders)
+    .where(and(eq(folders.id, folderId), eq(folders.userId, session.user.id as string)))
+    .limit(1);
   if (!folder) {
     return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
@@ -48,6 +57,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 }
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const { id } = await params;
   const folderId = parseInt(id);
   if (isNaN(folderId)) {
@@ -60,6 +73,16 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
 
   if (!videoId) {
     return NextResponse.json({ error: "videoId is required" }, { status: 400 });
+  }
+
+  // Verify folder belongs to user
+  const [folder] = await db
+    .select()
+    .from(folders)
+    .where(and(eq(folders.id, folderId), eq(folders.userId, session.user.id as string)))
+    .limit(1);
+  if (!folder) {
+    return NextResponse.json({ error: "Folder not found" }, { status: 404 });
   }
 
   await db

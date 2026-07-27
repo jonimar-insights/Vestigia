@@ -40,6 +40,7 @@ interface VideoData {
   youtubeId: string;
   title: string | null;
   thumbnailUrl: string | null;
+  folderId: number | null;
   annotations: Annotation[];
 }
 
@@ -140,6 +141,29 @@ export default function VideoPage() {
   const [newCliplistName, setNewCliplistName] = useState("");
   const [creatingCliplist, setCreatingCliplist] = useState(false);
   const [pendingMomentIdx, setPendingMomentIdx] = useState<number | null>(null);
+  const [momentSort, setMomentSort] = useState<"time" | "importance">("time");
+  const [siblingVideos, setSiblingVideos] = useState<Array<{ id: number; title: string | null; thumbnailUrl: string | null }>>([]);
+  const [panelRatio, setPanelRatio] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("annotationPanelRatio");
+      if (saved) { const n = parseFloat(saved); if (!isNaN(n) && n >= 25 && n <= 75) return n; }
+    }
+    return 55;
+  });
+  const [isDraggingPanel, setIsDraggingPanel] = useState(false);
+  const [translatedMoments, setTranslatedMoments] = useState<Map<number, { title: string; summary: string }>>(new Map());
+  const [translatedAnnotations, setTranslatedAnnotations] = useState<Map<number, { label: string; note: string }>>(new Map());
+  const [translating, setTranslating] = useState(false);
+  const [translatedLang, setTranslatedLang] = useState<"pt" | "en" | null>(null);
+  const dragStartX = useRef(0);
+  const dragStartRatio = useRef(0);
+
+  const handlePanelDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsDraggingPanel(true);
+    dragStartX.current = e.clientX;
+    dragStartRatio.current = panelRatio;
+  }, [panelRatio]);
 
   const scrubberRef = useRef<HTMLDivElement>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -284,19 +308,83 @@ export default function VideoPage() {
         const t = Math.min(duration, playerRef.current.getCurrentTime() + 5);
         seekTo(t);
       }
+      // Shift+ArrowLeft/Right for prev/next video
+      if (e.shiftKey && e.key === "ArrowLeft") {
+        e.preventDefault();
+        const idx = siblingVideos.findIndex((v) => v.id === Number(videoId));
+        if (idx > 0) router.push(`/video/${siblingVideos[idx - 1].id}`);
+      }
+      if (e.shiftKey && e.key === "ArrowRight") {
+        e.preventDefault();
+        const idx = siblingVideos.findIndex((v) => v.id === Number(videoId));
+        if (idx >= 0 && idx < siblingVideos.length - 1) router.push(`/video/${siblingVideos[idx + 1].id}`);
+      }
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showForm, duration]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showForm, duration, siblingVideos, videoId, router]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Panel resize drag ──
+  useEffect(() => {
+    if (!isDraggingPanel) return;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    function onMove(e: MouseEvent) {
+      const container = document.querySelector("main > div > div:first-child")?.parentElement;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      const delta = e.clientX - dragStartX.current;
+      const newRatio = Math.min(75, Math.max(25, dragStartRatio.current + (delta / rect.width) * 100));
+      setPanelRatio(newRatio);
+    }
+    function onUp() {
+      setIsDraggingPanel(false);
+      localStorage.setItem("annotationPanelRatio", String(panelRatio));
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [isDraggingPanel, panelRatio]);
 
   // ── Data loading ──
+  const loadVideoCancelRef = useRef<AbortController | null>(null);
+
   const loadVideo = useCallback(async () => {
+    // Cancel any previous in-flight load
+    loadVideoCancelRef.current?.abort();
+    const controller = new AbortController();
+    loadVideoCancelRef.current = controller;
+
     try {
-      const res = await fetch(`/api/videos/${videoId}`);
+      const res = await fetch(`/api/videos/${videoId}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
       if (!res.ok) { router.push("/"); return; }
-      setVideo(await res.json());
-    } finally { setLoading(false); }
-  }, [videoId, router]);
+      const data = await res.json();
+      if (controller.signal.aborted) return;
+      setVideo(data);
+      setLoading(false);
+      // Fetch sibling videos for prev/next navigation (fire-and-forget)
+      fetch(data.folderId ? `/api/folders/${data.folderId}` : "/api/videos")
+        .then((r) => r.ok ? r.json() : null)
+        .then((listData) => {
+          if (controller.signal.aborted || !listData) return;
+          const list = data.folderId ? (listData.videos ?? []) : listData;
+          setSiblingVideos(list.map((v: { id: number; title: string | null; thumbnailUrl: string | null }) => ({ id: v.id, title: v.title, thumbnailUrl: v.thumbnailUrl })));
+        })
+        .catch(() => {});
+    } catch {
+      if (!controller.signal.aborted) setLoading(false);
+    }
+  }, [videoId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { loadVideo(); }, [loadVideo]);
 
   useEffect(() => { loadVideo(); }, [loadVideo]);
 
@@ -454,6 +542,56 @@ export default function VideoPage() {
     } catch {}
   }
 
+  async function translateAll() {
+    setTranslating(true);
+    try {
+      const target = translatedLang === "pt" ? "English" : "Portuguese";
+      const newLang = translatedLang === "pt" ? "en" : "pt";
+      // Translate key moments
+      if (summaryMoments.length > 0) {
+        const momentTexts = summaryMoments.flatMap((m) => [m.title, m.summary || ""]);
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: momentTexts, targetLanguage: target }),
+        });
+        if (res.ok) {
+          const { translated } = await res.json();
+          const newMap = new Map<number, { title: string; summary: string }>();
+          summaryMoments.forEach((m, i) => {
+            newMap.set(i, { title: translated[i * 2] || m.title, summary: translated[i * 2 + 1] || m.summary || "" });
+          });
+          setTranslatedMoments(newMap);
+        }
+      }
+      // Translate annotations
+      if (video && video.annotations.length > 0) {
+        const annotTexts = video.annotations.flatMap((a) => [a.label, a.note || ""]);
+        const res = await fetch("/api/translate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: annotTexts, targetLanguage: target }),
+        });
+        if (res.ok) {
+          const { translated } = await res.json();
+          const newMap = new Map<number, { label: string; note: string }>();
+          video.annotations.forEach((a, i) => {
+            newMap.set(i, { label: translated[i * 2] || a.label, note: translated[i * 2 + 1] || a.note || "" });
+          });
+          setTranslatedAnnotations(newMap);
+        }
+      }
+      setTranslatedLang(newLang);
+    } catch {}
+    setTranslating(false);
+  }
+
+  function clearTranslations() {
+    setTranslatedMoments(new Map());
+    setTranslatedAnnotations(new Map());
+    setTranslatedLang(null);
+  }
+
   async function importAllKeyMoments() {
     if (!summaryMoments.length) return;
     const withEnd = summaryMoments.filter(m => m.endTimestamp && m.endTimestamp > m.timestamp);
@@ -576,10 +714,37 @@ export default function VideoPage() {
       <header className="border-b border-border shrink-0">
         <div className="mx-auto max-w-[1600px] px-6 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0">
-            <button onClick={() => router.push("/")}
+            <button onClick={() => router.push(video.folderId ? `/?folder=${video.folderId}` : "/")}
               className="shrink-0 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-colors">
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
             </button>
+            {(() => {
+              const idx = siblingVideos.findIndex((v) => v.id === video?.id);
+              if (idx < 0 || siblingVideos.length <= 1) return null;
+              const prev = idx > 0 ? siblingVideos[idx - 1] : null;
+              const next = idx < siblingVideos.length - 1 ? siblingVideos[idx + 1] : null;
+              return (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => prev && router.push(`/video/${prev.id}`)}
+                    disabled={!prev}
+                    className="shrink-0 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+                    title={prev?.title ?? "Previous video"}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v14M5 12h14" /></svg>
+                  </button>
+                  <span className="text-[10px] text-muted tabular-nums">{idx + 1}/{siblingVideos.length}</span>
+                  <button
+                    onClick={() => next && router.push(`/video/${next.id}`)}
+                    disabled={!next}
+                    className="shrink-0 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
+                    title={next?.title ?? "Next video"}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5v14" /></svg>
+                  </button>
+                </div>
+              );
+            })()}
             <div className="min-w-0">
               <h1 className="text-sm font-semibold truncate">{video.title ?? "Untitled video"}</h1>
               <p className="text-[10px] text-muted truncate">{video.annotations.length} annotations &middot; {uniqueLabels.length} categories</p>
@@ -587,8 +752,32 @@ export default function VideoPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden md:inline text-[10px] text-muted bg-surface-hover rounded px-1.5 py-0.5 font-mono">
-              <kbd>A</kbd> annotate &middot; <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> seek
+              <kbd>A</kbd> annotate &middot; <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> seek &middot; <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> prev/next
             </span>
+            {/* Translate button — EN↔PT */}
+            {translatedLang ? (
+              <button
+                onClick={clearTranslations}
+                className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 transition-all flex items-center gap-1.5"
+                title="Clear translation"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                {translatedLang === "pt" ? "EN" : "PT"}
+              </button>
+            ) : (
+              <button
+                onClick={translateAll}
+                disabled={translating}
+                className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent/50 disabled:opacity-50 transition-all flex items-center gap-1.5"
+              >
+                {translating ? (
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                ) : (
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                )}
+                PT
+              </button>
+            )}
             <button onClick={() => {
                 const t = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
                 const dur = duration || 3600;
@@ -608,10 +797,10 @@ export default function VideoPage() {
 
       {/* ── MAIN ── */}
       <main className="flex-1 mx-auto max-w-[1600px] w-full px-6 py-5">
-        <div className="flex gap-5 flex-col lg:flex-row">
+        <div className="flex gap-4 lg:gap-0 flex-col lg:flex-row">
 
           {/* ═══ LEFT: Video + Timeline ═══ */}
-          <div className="lg:w-[55%] xl:w-[50%] flex flex-col gap-4 min-w-0">
+          <div style={{ width: `${panelRatio}%` }} className="flex flex-col gap-4 min-w-0">
             {/* Video Player */}
             <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
               <div ref={playerContainerRef} className="w-full h-full" />
@@ -737,8 +926,17 @@ export default function VideoPage() {
             </div>
           </div>
 
+          {/* ═══ Resize Handle ═══ */}
+          <div
+            onMouseDown={handlePanelDragStart}
+            className="hidden lg:flex w-2 shrink-0 cursor-col-resize items-center justify-center group/drag hover:bg-accent/10 transition-colors"
+            title="Drag to resize panels"
+          >
+            <div className="w-0.5 h-8 rounded-full bg-border group-hover/drag:bg-accent/40 transition-colors" />
+          </div>
+
           {/* ═══ RIGHT: Annotation Panel ═══ */}
-          <div className="lg:w-[45%] xl:w-[50%] flex flex-col min-h-0 min-w-0">
+          <div style={{ width: `${100 - panelRatio}%` }} className="flex flex-col min-h-0 min-w-0">
 
             {/* ── Inline Create Form ── */}
             {showForm ? (
@@ -810,6 +1008,15 @@ export default function VideoPage() {
                         <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">Key Moments</span>
                         {summaryMoments.length > 0 && <span className="text-[10px] text-muted/50">{summaryMoments.length}</span>}
                         {summaryMoments.length > 0 && (
+                          <button
+                            onClick={() => setMomentSort(momentSort === "time" ? "importance" : "time")}
+                            className="text-[9px] text-muted/60 hover:text-accent transition-colors px-1 py-0.5 rounded hover:bg-surface-hover/50"
+                            title={`Sort by ${momentSort === "time" ? "importance" : "time"}`}
+                          >
+                            {momentSort === "time" ? "↕ time" : "↕ importance"}
+                          </button>
+                        )}
+                        {summaryMoments.length > 0 && (
                           <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">saved</span>
                         )}
                       </div>
@@ -856,7 +1063,16 @@ export default function VideoPage() {
                           <p className="text-[10px] text-muted">No key moments found</p>
                         </div>
                       )}
-                      {summaryMoments.map((m, i) => {
+                      {summaryMoments.slice().sort((a, b) => {
+                        if (momentSort === "importance") {
+                          const order: Record<string, number> = { high: 0, medium: 1, low: 2 };
+                          const diff = (order[a.importance] ?? 3) - (order[b.importance] ?? 3);
+                          return diff !== 0 ? diff : a.timestamp - b.timestamp;
+                        }
+                        return a.timestamp - b.timestamp;
+                      }).map((m, i) => {
+                        const originalIdx = summaryMoments.indexOf(m);
+                        const translated = translatedMoments.get(originalIdx);
                         const dur = m.endTimestamp ? m.endTimestamp - m.timestamp : undefined;
                         return (
                           <div key={i} className="px-3 py-2 hover:bg-surface-hover/50 transition-colors border-b border-border/20 last:border-0 group/row">
@@ -876,9 +1092,9 @@ export default function VideoPage() {
                                     {dur != null && dur > 0 && (
                                       <span className="text-[9px] font-mono text-muted/40">({Math.round(dur)}s)</span>
                                     )}
-                                    <span className="text-[11px] font-medium text-foreground truncate">{m.title}</span>
+                                    <span className="text-[11px] font-medium text-foreground truncate">{translated?.title || m.title}</span>
                                   </div>
-                                  <p className="text-[10px] text-muted/70 leading-relaxed mt-0.5 line-clamp-2">{m.summary}</p>
+                                  <p className="text-[10px] text-muted/70 leading-relaxed mt-0.5 line-clamp-2">{translated?.summary || m.summary}</p>
                                 </div>
                               </div>
                             </button>
@@ -994,9 +1210,9 @@ export default function VideoPage() {
                       <span>{getEmoji(l)}</span>{l}
                       <span className="opacity-50">{labelCounts[l]}</span>
                     </button>
-                  );
-                })}
-              </div>
+                        );
+                      })}
+                    </div>
             )}
 
             {/* Feed header */}
@@ -1092,6 +1308,7 @@ export default function VideoPage() {
                         const isExpanded = expandedNotes.has(ann.id);
                         const isEditing = editingId === ann.id;
                         const annDuration = ann.timestampEnd - ann.timestampStart;
+                        const translated = translatedAnnotations.get(video.annotations.indexOf(ann));
 
                         return (
                           <div key={ann.id} className="relative pl-9 group/card">
@@ -1127,7 +1344,7 @@ export default function VideoPage() {
                                   <div className="flex items-center justify-between gap-2 mb-1">
                                     <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                                       <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-px rounded shrink-0 ${colors.badge} ${colors.badgeText}`}>
-                                        {getEmoji(ann.label)} {ann.label}
+                                        {getEmoji(ann.label)} {translated?.label || ann.label}
                                       </span>
                                       <button onClick={e => { e.stopPropagation(); seekTo(ann.timestampStart); }}
                                         className="inline-flex items-center rounded px-1.5 py-px text-[10px] font-mono text-accent/80 hover:text-accent hover:bg-accent/10 active:scale-[0.97] transition-all shrink-0">
@@ -1163,10 +1380,10 @@ export default function VideoPage() {
                                   </div>
 
                                   {/* Note */}
-                                  {ann.note && (
+                                  {(translated?.note || ann.note) && (
                                     <div className="text-xs text-muted/80 leading-relaxed mb-1" onClick={e => e.stopPropagation()}>
-                                      <div className={!isExpanded ? "line-clamp-3" : ""} dangerouslySetInnerHTML={{ __html: renderNote(ann.note) }} />
-                                      {ann.note.length > 120 && (
+                                      <div className={!isExpanded ? "line-clamp-3" : ""} dangerouslySetInnerHTML={{ __html: renderNote(translated?.note || ann.note || "") }} />
+                                      {(translated?.note || ann.note || "").length > 120 && (
                                         <button onClick={() => toggleNoteExpand(ann.id)}
                                           className="text-[10px] text-accent hover:text-accent-hover mt-0.5 font-medium transition-colors">
                                           {isExpanded ? "less" : "more"}

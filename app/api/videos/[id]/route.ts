@@ -37,8 +37,15 @@ export async function GET(
   const videoScenes = await db.select().from(scenes).where(eq(scenes.videoId, videoId));
   const videoKeyMoments = await db.select().from(keyMoments).where(eq(keyMoments.videoId, videoId));
 
+  const folderRow = await db
+    .select({ folderId: folderVideos.folderId })
+    .from(folderVideos)
+    .where(eq(folderVideos.videoId, videoId))
+    .limit(1);
+
   return NextResponse.json({
     ...video,
+    folderId: folderRow[0]?.folderId ?? null,
     transcript: transcript
       ? { ...transcript, segments: JSON.parse(transcript.segments) }
       : null,

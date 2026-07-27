@@ -2,11 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { clipItems, cliplists } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
+import { auth } from "@/auth";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
@@ -14,7 +19,11 @@ export async function POST(
     return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
   }
 
-  const listRows = await db.select().from(cliplists).where(eq(cliplists.id, listId)).limit(1);
+  const listRows = await db
+    .select()
+    .from(cliplists)
+    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
   }
@@ -51,11 +60,24 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const listId = parseInt(id, 10);
   if (isNaN(listId)) {
     return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
+  }
+
+  const listRows = await db
+    .select()
+    .from(cliplists)
+    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .limit(1);
+  if (!listRows[0]) {
+    return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
   }
 
   const body = await request.json();

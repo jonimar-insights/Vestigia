@@ -96,6 +96,13 @@ const freeProviders: ProviderConfig[] = [
     model: "gpt-4o",
     free: true,
   },
+  {
+    name: "xAI",
+    baseUrl: "https://api.x.ai/v1",
+    apiKey: process.env.XAI_API_KEY || "",
+    model: "grok-3-mini",
+    free: false,
+  },
 ];
 
 // Paid / user-configured providers (fallback after free tiers)
@@ -149,6 +156,7 @@ const BASE_COOLDOWN: Record<string, number> = {
   "Gemini": 60_000,       // 1 min base
   "Cerebras": 60_000,     // 1 min base
   "GitHub Models": 60_000, // 1 min base
+  "xAI": 10_000,          // 10s base (paid)
   "Claude": 10_000,       // 10s base (paid, should rarely fail)
   "GPT": 10_000,          // 10s base
 };

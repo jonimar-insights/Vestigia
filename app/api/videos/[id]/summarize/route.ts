@@ -37,7 +37,7 @@ interface TimeChunk {
   lines: string[];
 }
 
-function chunkByTime(segments: TranscriptSegment[], segmentDurationSec = 600): TimeChunk[] {
+function chunkByTime(segments: TranscriptSegment[], segmentDurationSec = 300): TimeChunk[] {
   if (segments.length === 0) return [];
 
   const totalDuration = segments[segments.length - 1].start + (segments[segments.length - 1].duration || 0);
@@ -125,7 +125,7 @@ async function saveMoments(
         endTimestamp: m.endTimestamp,
         title: m.title,
         description: m.summary,
-        source: "ai-summary",
+        source: "ai",
         confidence,
       })
       .returning();
@@ -231,6 +231,10 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
@@ -239,10 +243,19 @@ export async function GET(
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
   }
 
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
+  if (!videoRows[0]) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
+  }
+
   const saved = await db
     .select()
     .from(keyMoments)
-    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai-summary")));
+    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai")));
 
   const moments = saved.map((m) => ({
     id: m.id,
@@ -260,6 +273,10 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
@@ -278,7 +295,11 @@ export async function POST(
     );
   }
 
-  const videoRows = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
   if (!videoRows[0]) {
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
@@ -287,7 +308,7 @@ export async function POST(
   const existing = await db
     .select()
     .from(keyMoments)
-    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai-summary")));
+    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai")));
 
   if (existing.length > 0 && !regenerate) {
     return NextResponse.json({
@@ -305,11 +326,9 @@ export async function POST(
 
   if (regenerate && existing.length > 0) {
     await db.delete(keyMoments)
-      .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai-summary")));
+      .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai")));
   }
 
-  // Get session for OAuth token and user keys
-  const session = await auth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accessToken = (session as any)?.accessToken;
 
@@ -387,14 +406,14 @@ Respond with JSON only:
 }
 
 Rules:
-- Return 3-8 moments, SPREAD EVENLY from ${chunk.startSec} to ${chunk.endSec}
+- Return 5-12 moments, SPREAD EVENLY from ${chunk.startSec} to ${chunk.endSec}
 - timestamp and endTimestamp MUST be between ${chunk.startSec} and ${chunk.endSec}
 - endTimestamp must be greater than timestamp
 - importance: "high", "medium", or "low"`,
             },
           ],
           temperature: 0.3,
-          maxTokens: 4096,
+          maxTokens: 8192,
         }, userKeys, preferred);
 
         console.log(`Chunk ${i + 1}: served by ${result.provider}`);
@@ -495,7 +514,7 @@ ${descPreview}
 
 INSTRUCTIONS:
 1. Analyze the title, channel, category, tags, and description to infer the video's likely structure.
-2. Identify 5-10 key moments that would likely appear in this type of video.
+2. Identify 8-15 key moments that would likely appear in this type of video.
 3. For each moment, provide:
    - timestamp: approximate start time in SECONDS (spread evenly across ${metadata.duration}s)
    - endTimestamp: end time in SECONDS (must be after timestamp)
@@ -518,7 +537,7 @@ Return ONLY a JSON array. No other text. Example:
         { role: "user", content: prompt },
       ],
       temperature: 0.4,
-      maxTokens: 4000,
+      maxTokens: 6000,
     }, userKeys, preferred);
 
     const text = result.text;
@@ -577,6 +596,10 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
@@ -585,8 +608,17 @@ export async function DELETE(
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
   }
 
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
+  if (!videoRows[0]) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
+  }
+
   await db.delete(keyMoments)
-    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai-summary")));
+    .where(and(eq(keyMoments.videoId, videoId), eq(keyMoments.source, "ai")));
 
   return NextResponse.json({ success: true });
 }

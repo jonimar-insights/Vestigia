@@ -26,8 +26,12 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
   callbacks: {
     async jwt({ token, user, account }) {
-      if (user) {
-        token.id = user.id;
+      // Use Google's stable providerAccountId as the user identifier.
+      // token.sub and user.id are NextAuth-internal UUIDs that change between sessions.
+      if (account?.providerAccountId) {
+        token.id = account.providerAccountId;
+      } else if (!token.id) {
+        token.id = token.sub ?? user?.id;
       }
       if (account?.access_token) {
         token.accessToken = account.access_token;

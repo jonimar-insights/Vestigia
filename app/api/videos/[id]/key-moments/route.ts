@@ -11,10 +11,30 @@ import { fetchTranscriptWithFallback } from "@/lib/transcript";
 import { auth } from "@/auth";
 import { getDecryptedSettings } from "@/lib/user-settings";
 
+export const maxDuration = 300;
+
+const TRANSCRIPT_TIMEOUT_MS = 30_000;
+
+function fetchWithTimeout(
+  youtubeId: string,
+  accessToken?: string,
+): Promise<Awaited<ReturnType<typeof fetchTranscriptWithFallback>>> {
+  return Promise.race([
+    fetchTranscriptWithFallback(youtubeId, accessToken),
+    new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), TRANSCRIPT_TIMEOUT_MS),
+    ),
+  ]);
+}
+
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
@@ -23,7 +43,11 @@ export async function POST(
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
   }
 
-  const videoRows = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
   if (!videoRows[0]) {
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
@@ -33,22 +57,40 @@ export async function POST(
     .select()
     .from(keyMoments)
     .where(eq(keyMoments.videoId, videoId));
-  if (existing.length > 0) {
+
+  const url = new URL(request.url);
+  const regenerate = url.searchParams.get("regenerate") === "true";
+  const skipTranscript = url.searchParams.get("skipTranscript") === "true";
+  const depthParam = url.searchParams.get("depth");
+  const effectiveDepth = depthParam === "deep" || depthParam === "shallow" || depthParam === "ultra" ? depthParam : "normal";
+  // When regenerating, default to ultra for maximum extraction
+  const depth = regenerate && !depthParam ? "ultra" : effectiveDepth;
+  const dedupThreshold = regenerate ? 2 : 3;
+
+  if (existing.length > 0 && !regenerate) {
     return NextResponse.json({
       message: "Key moments already extracted",
       moments: existing,
     });
   }
 
+  if (existing.length > 0 && regenerate) {
+    await db.delete(keyMoments).where(eq(keyMoments.videoId, videoId));
+  }
+
+  // Determine actual video duration: DB > transcript last segment > null
+  const actualDuration = video.durationSeconds ?? null;
+
   const allMoments = [];
 
   const chapters = await extractYouTubeChapters(video.youtubeId);
   for (const ch of chapters) {
+    const ts = actualDuration ? Math.min(ch.timestamp, actualDuration) : ch.timestamp;
     const [inserted] = await db
       .insert(keyMoments)
       .values({
         videoId,
-        timestamp: ch.timestamp,
+        timestamp: ts,
         title: ch.title,
         description: ch.description,
         source: "chapter",
@@ -58,46 +100,60 @@ export async function POST(
     allMoments.push(inserted);
   }
 
-  // Get session early for YouTube API access
-  const session = await auth();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const accessToken = (session as any)?.accessToken;
 
-  const existingTranscript = await db
-    .select()
-    .from(transcripts)
-    .where(eq(transcripts.videoId, videoId))
-    .limit(1);
-
   let transcriptSegments: { start: number; duration: number; text: string }[] = [];
 
-  if (existingTranscript[0]) {
-    transcriptSegments = JSON.parse(existingTranscript[0].segments);
-  } else {
-    const fetched = await fetchTranscriptWithFallback(video.youtubeId, accessToken);
-    if (fetched) {
-      await db.insert(transcripts).values({
-        videoId,
-        segments: JSON.stringify(fetched.segments),
-        language: fetched.language,
-        source: fetched.source,
-      });
-      transcriptSegments = fetched.segments;
+  if (!skipTranscript) {
+    const existingTranscript = await db
+      .select()
+      .from(transcripts)
+      .where(eq(transcripts.videoId, videoId))
+      .limit(1);
+
+    if (existingTranscript[0]) {
+      transcriptSegments = JSON.parse(existingTranscript[0].segments);
+    } else {
+      const fetched = await fetchWithTimeout(video.youtubeId, accessToken);
+      if (fetched) {
+        await db.insert(transcripts).values({
+          videoId,
+          segments: JSON.stringify(fetched.segments),
+          language: fetched.language,
+          source: fetched.source,
+        });
+        transcriptSegments = fetched.segments;
+      }
     }
   }
 
   if (transcriptSegments.length > 0) {
+    // Derive actual duration from transcript if DB doesn't have it
+    const lastSeg = transcriptSegments[transcriptSegments.length - 1];
+    const transcriptDuration = lastSeg.start + lastSeg.duration;
+    const effectiveDuration = actualDuration ?? transcriptDuration;
+
+    // Backfill durationSeconds if DB row was missing it
+    if (!video.durationSeconds && transcriptDuration > 0) {
+      await db
+        .update(videos)
+        .set({ durationSeconds: Math.round(transcriptDuration) })
+        .where(eq(videos.id, videoId));
+    }
+
     const transcriptMoments = await extractTranscriptKeyMoments(video.youtubeId, transcriptSegments);
     for (const tm of transcriptMoments) {
       const tooClose = allMoments.some(
-        (m) => Math.abs(m.timestamp - tm.timestamp) < 3,
+        (m) => Math.abs(m.timestamp - tm.timestamp) < dedupThreshold,
       );
       if (!tooClose) {
+        const ts = effectiveDuration ? Math.min(tm.timestamp, effectiveDuration) : tm.timestamp;
         const [inserted] = await db
           .insert(keyMoments)
           .values({
             videoId,
-            timestamp: tm.timestamp,
+            timestamp: ts,
             title: tm.title,
             description: tm.description,
             source: "transcript",
@@ -109,7 +165,6 @@ export async function POST(
     }
   }
 
-  // Always attempt AI extraction to enrich results with AI-identified key moments
   let userKeys: Record<string, string> | undefined;
   let preferred: string | null = null;
   if (session?.user?.id) {
@@ -118,17 +173,18 @@ export async function POST(
     preferred = settings.preferredProvider ?? null;
   }
 
-  const aiMoments = await extractAIKeyMoments(video.youtubeId, transcriptSegments, userKeys, preferred);
+  const aiMoments = await extractAIKeyMoments(video.youtubeId, transcriptSegments, userKeys, preferred, depth, actualDuration);
   for (const am of aiMoments) {
     const tooClose = allMoments.some(
-      (m) => Math.abs(m.timestamp - am.timestamp) < 3,
+      (m) => Math.abs(m.timestamp - am.timestamp) < dedupThreshold,
     );
     if (!tooClose) {
+      const ts = actualDuration ? Math.min(am.timestamp, actualDuration) : am.timestamp;
       const [inserted] = await db
         .insert(keyMoments)
         .values({
           videoId,
-          timestamp: am.timestamp,
+          timestamp: ts,
           title: am.title,
           description: am.description,
           source: "ai",
@@ -142,14 +198,18 @@ export async function POST(
   allMoments.sort((a, b) => a.timestamp - b.timestamp);
 
   return NextResponse.json({
-    message: `Extracted ${allMoments.length} key moments`,
+    message: regenerate
+      ? `Regenerated ${allMoments.length} key moments`
+      : `Extracted ${allMoments.length} key moments`,
     moments: allMoments,
     sources: {
       chapters: chapters.length,
       transcript: allMoments.filter((m) => m.source === "transcript").length,
       ai: allMoments.filter((m) => m.source === "ai").length,
     },
-    transcriptStored: transcriptSegments.length > 0 && existingTranscript.length === 0,
+    depth,
+    regenerate,
+    transcriptStored: transcriptSegments.length > 0 && !skipTranscript,
   });
 }
 
@@ -157,12 +217,25 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
   if (isNaN(videoId)) {
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
+  }
+
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
+  if (!videoRows[0]) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
   const moments = await db
@@ -177,12 +250,25 @@ export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   const db = getDb();
   const { id } = await params;
   const videoId = parseInt(id);
 
   if (isNaN(videoId)) {
     return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
+  }
+
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
+  if (!videoRows[0]) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
   const body = await request.json().catch(() => ({}));

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { folders, folderVideos, videos } from "@/lib/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { folders, folderVideos, videos, annotations, scenes, keyMoments, transcripts } from "@/lib/schema";
+import { eq, count, desc, and } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -32,9 +32,24 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .where(eq(folderVideos.folderId, folderId))
     .orderBy(desc(folderVideos.addedAt));
 
+  const enriched = await Promise.all(
+    items.map(async (i) => {
+      const annotationCount =
+        (await db.select({ value: count() }).from(annotations).where(eq(annotations.videoId, i.video.id)))[0]?.value ?? 0;
+      const sceneCount =
+        (await db.select({ value: count() }).from(scenes).where(eq(scenes.videoId, i.video.id)))[0]?.value ?? 0;
+      const momentCount =
+        (await db.select({ value: count() }).from(keyMoments).where(eq(keyMoments.videoId, i.video.id)))[0]?.value ?? 0;
+      const hasTranscript =
+        (await db.select().from(transcripts).where(eq(transcripts.videoId, i.video.id)).limit(1)).length > 0;
+
+      return { ...i.video, addedAt: i.addedAt, annotationCount, sceneCount, momentCount, hasTranscript };
+    }),
+  );
+
   return NextResponse.json({
     ...folder,
-    videos: items.map((i) => ({ ...i.video, addedAt: i.addedAt })),
+    videos: enriched,
   });
 }
 
