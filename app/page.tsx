@@ -482,6 +482,11 @@ export default function Home() {
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
+  // ── Translation state ──
+  const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
+  const [translating, setTranslating] = useState(false);
+  const [translatedLang, setTranslatedLang] = useState<"pt" | "en" | null>(null);
+
   // "Add to cliplist" dropdown per search result
   const [addToDropdown, setAddToDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
   const addToRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -795,6 +800,37 @@ export default function Home() {
     });
   }
 
+  async function translateTitles() {
+    const target = translatedLang === "pt" ? "English" : "Portuguese";
+    const newLang = translatedLang === "pt" ? "en" : "pt";
+    const list = currentVideoList;
+    const titles = list.map((v) => v.title || "");
+    if (!titles.some(Boolean)) return;
+    setTranslating(true);
+    try {
+      const res = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ texts: titles, targetLanguage: target }),
+      });
+      if (res.ok) {
+        const { translated } = await res.json();
+        const newMap = new Map<number, string>();
+        list.forEach((v, i) => {
+          if (translated[i]) newMap.set(v.id, translated[i]);
+        });
+        setTranslatedTitles(newMap);
+        setTranslatedLang(newLang);
+      }
+    } catch {}
+    setTranslating(false);
+  }
+
+  function clearTitleTranslations() {
+    setTranslatedTitles(new Map());
+    setTranslatedLang(null);
+  }
+
   const currentVideoList = selectedFolderId !== null ? folderVideos : videos;
   const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
@@ -1033,6 +1069,30 @@ export default function Home() {
           </div>
           {session?.user && (
             <div className="flex items-center gap-3">
+              {/* Translate titles button */}
+              {translatedLang ? (
+                <button
+                  onClick={clearTitleTranslations}
+                  className="rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/10 transition-all flex items-center gap-1.5"
+                  title="Clear translation"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                  {translatedLang === "pt" ? "EN" : "PT"}
+                </button>
+              ) : (
+                <button
+                  onClick={translateTitles}
+                  disabled={translating}
+                  className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-foreground hover:border-accent/50 disabled:opacity-50 transition-all flex items-center gap-1.5"
+                >
+                  {translating ? (
+                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
+                  )}
+                  PT
+                </button>
+              )}
               <span className="text-sm text-muted">{session.user.name}</span>
               <button
                 onClick={() => signOut({ callbackUrl: "/signin" })}
@@ -1521,7 +1581,7 @@ export default function Home() {
                       )}
                       <div className="p-3 flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
+                          <h3 className="text-sm font-medium line-clamp-2">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                           <div className="flex items-center gap-2 mt-1">
                             <span className={`shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded flex items-center gap-0.5 ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`} title={`${video.momentCount ?? 0} key moment${(video.momentCount ?? 0) !== 1 ? "s" : ""}`}>
                               <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
@@ -1580,7 +1640,7 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium truncate">{video.title ?? "Untitled"}</h3>
+                        <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
                             <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
@@ -1694,7 +1754,7 @@ export default function Home() {
                     )}
                     <div className="p-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
+                        <h3 className="text-sm font-medium line-clamp-2">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           {(video.momentCount ?? 0) > 0 && (
                             <span className="shrink-0 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`${video.momentCount} key moment${video.momentCount !== 1 ? "s" : ""}`}>
@@ -1771,7 +1831,7 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium truncate">{video.title ?? "Untitled"}</h3>
+                        <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
                             <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
