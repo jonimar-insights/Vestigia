@@ -175,54 +175,21 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
     if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
   }
 
-  // Playback effect - loads/seeks video when currentIdx changes
+  // Playback effect - loads/seeks video when currentIdx changes (skips slides)
   useEffect(() => {
-    if (!playerReady || !playerRef.current || !item) return;
+    if (!playerReady || !playerRef.current || !item || item?.type === "slide") return;
     const ytId = videoIds.get(item.videoId);
     if (!ytId) return;
 
-    // Same video - just seek
-    if (lastVideoIdRef.current === ytId) {
-      try {
-        playerRef.current.seekTo(item.timestamp, true);
-        playerRef.current.playVideo();
-      } catch {}
-      return;
-    }
-
-    // Different video
     advancedRef.current = false;
     clearTimeInterval();
     setCurrentTime(item.timestamp);
-
-    let poll: ReturnType<typeof setInterval> | null = null;
-    const load = () => {
-      if (!playerRef.current) return;
-      lastVideoIdRef.current = ytId;
-      try { playerRef.current.loadVideoById(ytId, item.timestamp); } catch {}
-    };
+    lastVideoIdRef.current = ytId;
 
     try {
-      const state = playerRef.current.getPlayerState();
-      if (state === 3) {
-        poll = setInterval(() => {
-          try {
-            if (!playerRef.current) { if (poll) clearInterval(poll); return; }
-            if (playerRef.current.getPlayerState() !== 3) {
-              if (poll) clearInterval(poll);
-              load();
-            }
-          } catch { if (poll) clearInterval(poll); }
-        }, 100);
-      } else {
-        load();
-      }
-    } catch {
-      load();
-    }
-
-    return () => { if (poll) clearInterval(poll); };
-  }, [currentIdx, playerReady, item?.videoId, item?.timestamp]); // eslint-disable-line
+      playerRef.current.loadVideoById(ytId, item.timestamp);
+    } catch {}
+  }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type]); // eslint-disable-line
 
   // YouTube IFrame setup — find first video item (skip slides which have videoId=0)
   useEffect(() => {
@@ -244,9 +211,6 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
             onReady: () => {
               if (destroyed) return;
               setPlayerReady(true);
-              if (firstVideoItem && playerRef.current) {
-                playerRef.current.seekTo(firstVideoItem.timestamp, true);
-              }
             },
             onStateChange: (e: { data: number }) => {
               if (destroyed) return;
