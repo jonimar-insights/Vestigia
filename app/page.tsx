@@ -1031,7 +1031,7 @@ export default function Home() {
   async function renameCliplist(id: number, newName: string) {
     if (!newName.trim()) return;
     await fetch(`/api/cliplists/${id}`, {
-      method: "PUT",
+      method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: newName.trim() }),
     });
