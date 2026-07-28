@@ -272,6 +272,21 @@ export default function VideoPage() {
     }
   }
 
+  function playSegment(start: number, end: number) {
+    const p = playerRef.current;
+    if (!p) { seekTo(start); return; }
+    p.seekTo(start, true);
+    setCurrentTime(start);
+    p.playVideo();
+    const check = setInterval(() => {
+      const t = p.getCurrentTime();
+      if (t >= end || t < start - 0.5) {
+        p.pauseVideo();
+        clearInterval(check);
+      }
+    }, 200);
+  }
+
   function getScrubberPercent() {
     if (scrubberPos !== null) return scrubberPos;
     if (duration > 0) return (currentTime / duration) * 100;
@@ -1349,7 +1364,7 @@ export default function VideoPage() {
                               className={`rounded-xl border border-border/60 ${colors.border} bg-surface hover:bg-surface-hover/50 hover:border-border transition-all duration-150 overflow-hidden ${
                                 isEditing ? "ring-1 ring-accent/30" : ""
                               } ${selectedIds.has(ann.id) ? "ring-1 ring-accent/40 bg-accent/5" : ""}`}
-                              onClick={() => { if (!isEditing) seekTo(ann.timestampStart); }}>
+                              onClick={() => { if (!isEditing) playSegment(ann.timestampStart, ann.timestampEnd); }}>
 
                               {isEditing ? (
                                 <div className="p-2.5 space-y-2" onClick={e => e.stopPropagation()}>
