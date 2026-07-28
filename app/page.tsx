@@ -568,6 +568,16 @@ export default function Home() {
       const fid = parseInt(folderParam);
       if (!isNaN(fid)) setSelectedFolderId(fid);
     }
+
+    // Auto-select cliplist from URL ?cliplist= param
+    const cliplistParam = params.get("cliplist");
+    if (cliplistParam) {
+      const cid = parseInt(cliplistParam);
+      if (!isNaN(cid)) {
+        setTab("cliplists");
+        fetch(`/api/cliplists/${cid}`).then(r => r.ok ? r.json() : null).then(data => { if (data) setSelectedCliplist(data); }).catch(() => {});
+      }
+    }
   }, [loadVideos, loadFolders]);
 
   useEffect(() => {

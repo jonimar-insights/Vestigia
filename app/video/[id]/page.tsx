@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { formatTimestamp, sanitizeHtml } from "@/lib/youtube";
 
 // YouTube IFrame API types
@@ -138,6 +139,7 @@ export default function VideoPage() {
 
   // Cliplist state
   const [cliplists, setCliplists] = useState<Array<{ id: number; name: string; itemCount: number }>>([]);
+  const [videoCliplistItems, setVideoCliplistItems] = useState<Array<{ cliplistId: number; cliplistName: string; timestamp: number; endTimestamp: number | null; title: string | null }>>([]);
   const [keyMomentDropdown, setKeyMomentDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
   const [annotCliplistDropdown, setAnnotCliplistDropdown] = useState<{ id: number; open: boolean }>({ id: -1, open: false });
   const [showCreateCliplist, setShowCreateCliplist] = useState(false);
@@ -388,6 +390,11 @@ export default function VideoPage() {
       if (controller.signal.aborted) return;
       setVideo(data);
       setLoading(false);
+      // Fetch cliplist items for this video (fire-and-forget)
+      fetch(`/api/videos/${videoId}/cliplists`, { signal: controller.signal })
+        .then((r) => r.ok ? r.json() : [])
+        .then((items) => { if (!controller.signal.aborted) setVideoCliplistItems(items ?? []); })
+        .catch(() => {});
       // Fetch sibling videos for prev/next navigation (fire-and-forget)
       fetch(data.folderId ? `/api/folders/${data.folderId}` : "/api/videos")
         .then((r) => r.ok ? r.json() : null)
@@ -1482,6 +1489,27 @@ export default function VideoPage() {
                                       ))}
                                     </div>
                                   )}
+
+                                  {/* Cliplist links */}
+                                  {(() => {
+                                    const matching = videoCliplistItems.filter(c =>
+                                      Math.abs(c.timestamp - ann.timestampStart) < 1 &&
+                                      (c.endTimestamp == null || Math.abs(c.endTimestamp - ann.timestampEnd) < 1)
+                                    );
+                                    if (matching.length === 0) return null;
+                                    const seen = new Set<number>();
+                                    return (
+                                      <div className="flex flex-wrap gap-0.5" onClick={e => e.stopPropagation()}>
+                                        {matching.filter(c => { if (seen.has(c.cliplistId)) return false; seen.add(c.cliplistId); return true; }).map(c => (
+                                          <Link key={c.cliplistId} href={`/?cliplist=${c.cliplistId}`}
+                                            onClick={e => e.stopPropagation()}
+                                            className="text-[9px] text-accent/60 hover:text-accent transition-colors">
+                                            {c.cliplistName}
+                                          </Link>
+                                        ))}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
                               )}
                             </div>
