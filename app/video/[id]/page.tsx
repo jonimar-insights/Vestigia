@@ -1121,7 +1121,7 @@ export default function VideoPage() {
                         const dur = m.endTimestamp ? m.endTimestamp - m.timestamp : undefined;
                         return (
                           <div key={i} className="px-3 py-2 hover:bg-surface-hover/50 transition-colors border-b border-border/20 last:border-0 group/row">
-                            <button onClick={() => seekTo(m.timestamp)} className="w-full text-left">
+                            <button onClick={() => m.endTimestamp ? playSegment(m.timestamp, m.endTimestamp) : seekTo(m.timestamp)} className="w-full text-left">
                               <div className="flex items-start gap-2">
                                 <div className={`mt-0.5 w-1.5 h-1.5 rounded-full shrink-0 ${
                                   m.importance === "high" ? "bg-emerald-500" :
