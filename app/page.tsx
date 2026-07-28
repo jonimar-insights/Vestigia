@@ -224,12 +224,12 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
     return () => { if (poll) clearInterval(poll); };
   }, [currentIdx, playerReady, item?.videoId, item?.timestamp]); // eslint-disable-line
 
-  // YouTube IFrame setup
+  // YouTube IFrame setup — find first video item (skip slides which have videoId=0)
   useEffect(() => {
     const container = playerContainerRef.current;
     if (!container || playerRef.current) return;
-    const firstItem = items[0];
-    const firstYtId = firstItem ? videoIds.get(firstItem.videoId) : undefined;
+    const firstVideoItem = items.find((i) => i.videoId > 0);
+    const firstYtId = firstVideoItem ? videoIds.get(firstVideoItem.videoId) : undefined;
     if (!firstYtId) return;
     lastVideoIdRef.current = firstYtId;
     let destroyed = false;
@@ -244,8 +244,8 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
             onReady: () => {
               if (destroyed) return;
               setPlayerReady(true);
-              if (firstItem && playerRef.current) {
-                playerRef.current.seekTo(firstItem.timestamp, true);
+              if (firstVideoItem && playerRef.current) {
+                playerRef.current.seekTo(firstVideoItem.timestamp, true);
               }
             },
             onStateChange: (e: { data: number }) => {
