@@ -2144,11 +2144,6 @@ export default function Home() {
               <div className="flex items-center justify-center py-12">
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
               </div>
-            ) : cliplists.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-border py-16 text-center">
-                <p className="text-muted text-sm">No cliplists yet.</p>
-                <p className="text-xs text-muted/60 mt-1">Create one to start saving search results.</p>
-              </div>
             ) : selectedCliplist ? (
               /* ── Single cliplist view ── */
               <div>

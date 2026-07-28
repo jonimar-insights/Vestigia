@@ -467,7 +467,7 @@ export default function VideoPage() {
           for (const c of matchingCliplists) {
             if (seen.has(c.cliplistId)) continue;
             seen.add(c.cliplistId);
-            fetch(`/api/cliplists/${c.cliplistId}/items`, {
+            await fetch(`/api/cliplists/${c.cliplistId}/items`, {
               method: "POST", headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 type: "annotation", videoId: Number(videoId),
@@ -706,7 +706,7 @@ export default function VideoPage() {
 
   async function addAnnotationToCliplist(cliplistId: number, ann: { id: number; label: string; note: string | null; timestampStart: number; timestampEnd: number; tags: string[] }) {
     try {
-      await fetch(`/api/cliplists/${cliplistId}/items`, {
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -719,7 +719,10 @@ export default function VideoPage() {
           tags: ann.tags,
         }),
       });
-      setAnnotCliplistDropdown({ id: -1, open: false });
+      if (res.ok) {
+        setAnnotCliplistDropdown({ id: -1, open: false });
+        await loadVideo();
+      }
     } catch {}
   }
 
