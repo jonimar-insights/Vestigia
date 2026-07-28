@@ -456,7 +456,29 @@ export default function VideoPage() {
           label: "Note", tags: [], note: note.trim() || null,
         }),
       });
-      if (res.ok) { setStartDisplay(""); setEndDisplay(""); setStart(0); setEnd(0); setNote(""); setShowForm(false); await loadVideo(); }
+      if (res.ok) {
+        const created = await res.json();
+        const annId = created?.id;
+        if (annId) {
+          const matchingCliplists = videoCliplistItems.filter(c =>
+            Math.abs(c.timestamp - start) < 1 && (c.endTimestamp == null || Math.abs(c.endTimestamp - end) < 1)
+          );
+          const seen = new Set<number>();
+          for (const c of matchingCliplists) {
+            if (seen.has(c.cliplistId)) continue;
+            seen.add(c.cliplistId);
+            fetch(`/api/cliplists/${c.cliplistId}/items`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                type: "annotation", videoId: Number(videoId),
+                timestamp: start, endTimestamp: end,
+                title: "Note", detail: note.trim() || null, tags: [],
+              }),
+            }).catch(() => {});
+          }
+        }
+        setStartDisplay(""); setEndDisplay(""); setStart(0); setEnd(0); setNote(""); setShowForm(false); await loadVideo();
+      }
     } finally { setSaving(false); }
   }
 
