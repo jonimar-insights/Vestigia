@@ -22,7 +22,7 @@ export async function POST(
   const listRows = await db
     .select()
     .from(cliplists)
-    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .where(eq(cliplists.id, listId))
     .limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
@@ -74,7 +74,7 @@ export async function DELETE(
   const listRows = await db
     .select()
     .from(cliplists)
-    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .where(eq(cliplists.id, listId))
     .limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });

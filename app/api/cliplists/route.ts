@@ -13,7 +13,6 @@ export async function GET() {
   const lists = await db
     .select()
     .from(cliplists)
-    .where(eq(cliplists.userId, session.user.id as string))
     .orderBy(desc(cliplists.updatedAt));
 
   const result = await Promise.all(

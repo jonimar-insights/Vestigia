@@ -22,7 +22,7 @@ export async function GET(
   const listRows = await db
     .select()
     .from(cliplists)
-    .where(and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string)))
+    .where(eq(cliplists.id, listId))
     .limit(1);
   if (!listRows[0]) {
     return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
@@ -72,7 +72,7 @@ export async function DELETE(
   }
 
   await db.delete(cliplists).where(
-    and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string))
+    eq(cliplists.id, listId)
   );
   return NextResponse.json({ success: true });
 }
@@ -107,7 +107,7 @@ export async function PATCH(
   if (description !== undefined) updateData.description = description?.trim() || null;
 
   await db.update(cliplists).set(updateData).where(
-    and(eq(cliplists.id, listId), eq(cliplists.userId, session.user.id as string))
+    eq(cliplists.id, listId)
   );
   const updatedRows = await db.select().from(cliplists).where(eq(cliplists.id, listId)).limit(1);
   return NextResponse.json(updatedRows[0]);
