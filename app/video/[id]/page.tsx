@@ -119,6 +119,8 @@ export default function VideoPage() {
   const [editLabel, setEditLabel] = useState("");
   const [editTags, setEditTags] = useState("");
   const [editNote, setEditNote] = useState("");
+  const [editStart, setEditStart] = useState("");
+  const [editEnd, setEditEnd] = useState("");
 
   // UI state
   const [feedCollapsed, setFeedCollapsed] = useState(false);
@@ -438,13 +440,23 @@ export default function VideoPage() {
 
   function startEdit(ann: Annotation) {
     setEditingId(ann.id); setEditLabel(ann.label); setEditTags(ann.tags.join(", ")); setEditNote(ann.note ?? "");
+    setEditStart(formatTimestamp(ann.timestampStart)); setEditEnd(formatTimestamp(ann.timestampEnd));
   }
 
   async function saveEdit(id: number) {
     if (!editLabel.trim()) return;
+    const ts = parseTimeInput(editStart);
+    const te = parseTimeInput(editEnd);
     await fetch(`/api/videos/${videoId}/annotations`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ annotationId: id, label: editLabel.trim(), tags: editTags.split(",").map(t => t.trim()).filter(Boolean), note: editNote.trim() || null }),
+      body: JSON.stringify({
+        annotationId: id,
+        label: editLabel.trim(),
+        tags: editTags.split(",").map(t => t.trim()).filter(Boolean),
+        note: editNote.trim() || null,
+        ...(ts > 0 && { timestampStart: ts }),
+        ...(te > 0 && { timestampEnd: te }),
+      }),
     });
     setEditingId(null); await loadVideo();
   }
@@ -1341,6 +1353,15 @@ export default function VideoPage() {
 
                               {isEditing ? (
                                 <div className="p-2.5 space-y-2" onClick={e => e.stopPropagation()}>
+                                  <div className="flex items-center gap-1.5">
+                                    <input type="text" value={editStart} onChange={e => setEditStart(e.target.value)}
+                                      placeholder="0:00"
+                                      className="w-14 rounded border border-border bg-background px-1.5 py-1 text-xs font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
+                                    <span className="text-[9px] text-muted/30">&ndash;</span>
+                                    <input type="text" value={editEnd} onChange={e => setEditEnd(e.target.value)}
+                                      placeholder="0:00"
+                                      className="w-14 rounded border border-border bg-background px-1.5 py-1 text-xs font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
+                                  </div>
                                   <input type="text" value={editLabel} onChange={e => setEditLabel(e.target.value)}
                                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all" />
                                   <input type="text" value={editTags} onChange={e => setEditTags(e.target.value)}
