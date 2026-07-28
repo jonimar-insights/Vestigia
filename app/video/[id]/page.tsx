@@ -137,6 +137,7 @@ export default function VideoPage() {
   // Cliplist state
   const [cliplists, setCliplists] = useState<Array<{ id: number; name: string; itemCount: number }>>([]);
   const [keyMomentDropdown, setKeyMomentDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
+  const [annotCliplistDropdown, setAnnotCliplistDropdown] = useState<{ id: number; open: boolean }>({ id: -1, open: false });
   const [showCreateCliplist, setShowCreateCliplist] = useState(false);
   const [newCliplistName, setNewCliplistName] = useState("");
   const [creatingCliplist, setCreatingCliplist] = useState(false);
@@ -404,16 +405,19 @@ export default function VideoPage() {
 
   // Close key moment dropdown on outside click
   useEffect(() => {
-    if (keyMomentDropdown.index < 0) return;
+    if (keyMomentDropdown.index < 0 && annotCliplistDropdown.id < 0) return;
     function handleClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-key-moment-dropdown]")) {
         setKeyMomentDropdown({ index: -1, open: false });
       }
+      if (!target.closest("[data-annot-cliplist-dropdown]")) {
+        setAnnotCliplistDropdown({ id: -1, open: false });
+      }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [keyMomentDropdown.index]);
+  }, [keyMomentDropdown.index, annotCliplistDropdown.id]);
 
   // ── CRUD ──
   async function handleAddAnnotation(e: React.FormEvent) {
@@ -641,6 +645,25 @@ export default function VideoPage() {
         }),
       });
       setKeyMomentDropdown({ index: -1, open: false });
+    } catch {}
+  }
+
+  async function addAnnotationToCliplist(cliplistId: number, ann: { id: number; label: string; note: string | null; timestampStart: number; timestampEnd: number; tags: string[] }) {
+    try {
+      await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "annotation",
+          videoId: Number(videoId),
+          timestamp: ann.timestampStart,
+          endTimestamp: ann.timestampEnd,
+          title: ann.label,
+          detail: ann.note || null,
+          tags: ann.tags,
+        }),
+      });
+      setAnnotCliplistDropdown({ id: -1, open: false });
     } catch {}
   }
 
@@ -1362,6 +1385,32 @@ export default function VideoPage() {
                                         )}
                                       </button>
                                       <div className="flex items-center opacity-0 group-hover/card:opacity-100 transition-opacity">
+                                        <div className="relative" data-annot-cliplist-dropdown>
+                                          <button onClick={e => {
+                                              e.stopPropagation();
+                                              if (cliplists.length === 0) loadCliplists();
+                                              setAnnotCliplistDropdown({ id: ann.id, open: annotCliplistDropdown.id === ann.id ? !annotCliplistDropdown.open : true });
+                                            }}
+                                            className="p-0.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Add to cliplist">
+                                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                                          </button>
+                                          {annotCliplistDropdown.id === ann.id && annotCliplistDropdown.open && (
+                                            <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1" data-annot-cliplist-dropdown>
+                                              <div className="px-2.5 py-1 text-[9px] font-semibold text-muted uppercase tracking-wider">Add to cliplist</div>
+                                              {cliplists.length === 0 ? (
+                                                <div className="px-2.5 py-1 text-[9px] text-muted">No cliplists yet</div>
+                                              ) : (
+                                                cliplists.map(cl => (
+                                                  <button key={cl.id} onClick={e => { e.stopPropagation(); addAnnotationToCliplist(cl.id, ann); }}
+                                                    className="w-full text-left px-2.5 py-1 text-[10px] hover:bg-surface-hover transition-colors flex items-center justify-between">
+                                                    <span className="truncate">{cl.name}</span>
+                                                    <span className="text-[9px] text-muted shrink-0 ml-2">{cl.itemCount}</span>
+                                                  </button>
+                                                ))
+                                              )}
+                                            </div>
+                                          )}
+                                        </div>
                                         <button onClick={e => { e.stopPropagation(); startEdit(ann); }}
                                           className="p-0.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title="Edit">
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
