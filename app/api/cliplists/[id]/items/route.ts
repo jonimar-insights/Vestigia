@@ -31,8 +31,35 @@ export async function POST(
   const body = await request.json();
   const { type, videoId, timestamp, endTimestamp, title, detail, tags } = body;
 
-  if (!type || !videoId || timestamp === undefined || !title) {
-    return NextResponse.json({ error: "Missing required fields: type, videoId, timestamp, title" }, { status: 400 });
+  if (!type || !title) {
+    return NextResponse.json({ error: "Missing required fields: type, title" }, { status: 400 });
+  }
+
+  // Slides don't need videoId/timestamp — they're inter-title cards
+  if (type === "slide") {
+    const [result] = await db
+      .insert(clipItems)
+      .values({
+        cliplistId: listId,
+        type,
+        videoId: 0,
+        timestamp: 0,
+        endTimestamp: null,
+        title,
+        detail: detail || null,
+        tags: tags ? JSON.stringify(tags) : null,
+      })
+      .returning();
+
+    await db.update(cliplists)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(cliplists.id, listId));
+
+    return NextResponse.json(result, { status: 201 });
+  }
+
+  if (videoId === undefined || timestamp === undefined) {
+    return NextResponse.json({ error: "Missing required fields: videoId, timestamp" }, { status: 400 });
   }
 
   const [result] = await db
