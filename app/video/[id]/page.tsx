@@ -1401,12 +1401,29 @@ export default function VideoPage() {
                                 </div>
                               ) : (
                                 <div className="p-2.5">
-                                  {/* Header: Label + Timestamps + Actions */}
+                                  {/* Header: Label + Timestamps + Cliplists + Actions */}
                                   <div className="flex items-center justify-between gap-2 mb-1">
                                     <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                                       <span className={`inline-flex items-center gap-0.5 text-[10px] font-semibold px-1.5 py-px rounded shrink-0 ${colors.badge} ${colors.badgeText}`}>
                                         {getEmoji(ann.label)} {translated?.label || ann.label}
                                       </span>
+                                      {(() => {
+                                        const matching = videoCliplistItems.filter(c =>
+                                          Math.abs(c.timestamp - ann.timestampStart) < 1 &&
+                                          (c.endTimestamp == null || Math.abs(c.endTimestamp - ann.timestampEnd) < 1)
+                                        );
+                                        if (matching.length === 0) return null;
+                                        const seen = new Set<number>();
+                                        return matching.filter(c => { if (seen.has(c.cliplistId)) return false; seen.add(c.cliplistId); return true; }).map(c => (
+                                          <Link key={c.cliplistId} href={`/?cliplist=${c.cliplistId}`}
+                                            onClick={e => e.stopPropagation()}
+                                            className="inline-flex items-center gap-0.5 text-[9px] text-accent/70 hover:text-accent bg-accent/5 hover:bg-accent/10 px-1.5 py-px rounded transition-colors shrink-0"
+                                            title={`View in cliplist: ${c.cliplistName}`}>
+                                            <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                                            {c.cliplistName}
+                                          </Link>
+                                        ));
+                                      })()}
                                       <button onClick={e => { e.stopPropagation(); seekTo(ann.timestampStart); }}
                                         className="inline-flex items-center rounded px-1.5 py-px text-[10px] font-mono text-accent/80 hover:text-accent hover:bg-accent/10 active:scale-[0.97] transition-all shrink-0">
                                         {formatTimestamp(ann.timestampStart)}
@@ -1490,26 +1507,6 @@ export default function VideoPage() {
                                     </div>
                                   )}
 
-                                  {/* Cliplist links */}
-                                  {(() => {
-                                    const matching = videoCliplistItems.filter(c =>
-                                      Math.abs(c.timestamp - ann.timestampStart) < 1 &&
-                                      (c.endTimestamp == null || Math.abs(c.endTimestamp - ann.timestampEnd) < 1)
-                                    );
-                                    if (matching.length === 0) return null;
-                                    const seen = new Set<number>();
-                                    return (
-                                      <div className="flex flex-wrap gap-0.5" onClick={e => e.stopPropagation()}>
-                                        {matching.filter(c => { if (seen.has(c.cliplistId)) return false; seen.add(c.cliplistId); return true; }).map(c => (
-                                          <Link key={c.cliplistId} href={`/?cliplist=${c.cliplistId}`}
-                                            onClick={e => e.stopPropagation()}
-                                            className="text-[9px] text-accent/60 hover:text-accent transition-colors">
-                                            {c.cliplistName}
-                                          </Link>
-                                        ))}
-                                      </div>
-                                    );
-                                  })()}
                                 </div>
                               )}
                             </div>
