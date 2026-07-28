@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { clipItems, cliplists } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(
@@ -30,10 +30,7 @@ export async function GET(
     .from(clipItems)
     .innerJoin(cliplists, eq(clipItems.cliplistId, cliplists.id))
     .where(
-      and(
-        eq(clipItems.videoId, videoId),
-        eq(cliplists.userId, session.user.id as string),
-      ),
+      eq(clipItems.videoId, videoId),
     );
 
   return NextResponse.json(rows);
