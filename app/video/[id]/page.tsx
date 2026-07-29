@@ -147,6 +147,7 @@ export default function VideoPage() {
   const [creatingCliplist, setCreatingCliplist] = useState(false);
   const [pendingMomentIdx, setPendingMomentIdx] = useState<number | null>(null);
   const [momentSort, setMomentSort] = useState<"time" | "importance">("time");
+  const [shareCopiedId, setShareCopiedId] = useState<number | null>(null);
   const [siblingVideos, setSiblingVideos] = useState<Array<{ id: number; title: string | null; thumbnailUrl: string | null }>>([]);
   const [panelRatio, setPanelRatio] = useState(() => {
     if (typeof window !== "undefined") {
@@ -579,7 +580,10 @@ export default function VideoPage() {
     ];
     if (ann.note) lines.push(ann.note);
     lines.push(`${origin}/video/${videoId}#t=${Math.floor(ann.timestampStart)}`);
-    navigator.clipboard.writeText(lines.join("\n"));
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setShareCopiedId(ann.id);
+      setTimeout(() => setShareCopiedId(null), 2000);
+    }).catch(() => {});
   }
 
   // ── AI Summary ──
@@ -1529,8 +1533,13 @@ export default function VideoPage() {
                                           )}
                                         </div>
                                         <button onClick={e => { e.stopPropagation(); shareAnnotation(ann); }}
-                                          className="p-0.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Share">
+                                          className={`p-0.5 rounded transition-colors shrink-0 ${shareCopiedId === ann.id ? "text-accent" : "text-muted hover:text-accent hover:bg-accent/10"}`}
+                                          title={shareCopiedId === ann.id ? "Copied!" : "Share"}>
+                                          {shareCopiedId === ann.id ? (
+                                            <span className="text-[9px] font-medium px-0.5">Copied!</span>
+                                          ) : (
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                                          )}
                                         </button>
                                         <button onClick={e => { e.stopPropagation(); startEdit(ann); }}
                                           className="p-0.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title="Edit">

@@ -464,6 +464,7 @@ export default function Home() {
   const [editSlideTitle, setEditSlideTitle] = useState("");
   const [editSlideDetail, setEditSlideDetail] = useState("");
   const [editSlideDuration, setEditSlideDuration] = useState(5);
+  const [shareCopied, setShareCopied] = useState(false);
 
   // ── Settings state ──
   const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
@@ -2270,12 +2271,19 @@ export default function Home() {
                       <button
                         onClick={() => {
                           const origin = window.location.origin;
-                          navigator.clipboard.writeText(`${origin}/?cliplist=${selectedCliplist.id}`);
+                          navigator.clipboard.writeText(`${origin}/?cliplist=${selectedCliplist.id}`).then(() => {
+                            setShareCopied(true);
+                            setTimeout(() => setShareCopied(false), 2000);
+                          }).catch(() => {});
                         }}
-                        className="text-xs text-muted hover:text-accent transition-colors"
-                        title="Copy cliplist link"
+                        className={`text-xs transition-colors ${shareCopied ? "text-accent" : "text-muted hover:text-accent"}`}
+                        title={shareCopied ? "Copied!" : "Copy cliplist link"}
                       >
+                        {shareCopied ? (
+                          <span className="text-[10px] font-medium">Copied!</span>
+                        ) : (
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                        )}
                       </button>
                       <button
                         onClick={() => deleteCliplist(selectedCliplist.id)}
