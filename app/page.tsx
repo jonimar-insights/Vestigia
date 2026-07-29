@@ -183,13 +183,12 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
 
     advancedRef.current = false;
     clearTimeInterval();
-    setCurrentTime(item.timestamp);
     lastVideoIdRef.current = ytId;
 
     try {
       playerRef.current.loadVideoById(ytId, item.timestamp);
     } catch {}
-  }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type]); // eslint-disable-line
+  }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type, videoIds]); // eslint-disable-line
 
   // YouTube IFrame setup — find first video item (skip slides which have videoId=0)
   useEffect(() => {
@@ -318,9 +317,18 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
           </div>
 
           {/* Video player area — shows slide card for slides, YouTube player for video items */}
-          <div className="aspect-video mx-auto w-full max-w-4xl bg-black">
-            {item?.type === "slide" ? (
-              <div className="flex items-center justify-center h-full px-12">
+          <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
+            <div ref={playerContainerRef} className={`w-full h-full ${item?.type === "slide" ? "hidden" : ""}`} />
+            {(!playerReady || !ytId) && item?.type !== "slide" && (
+              <div className="absolute inset-0 flex items-center justify-center">
+                <div className="flex items-center gap-2 text-white/40">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                  <span className="text-xs">Loading player...</span>
+                </div>
+              </div>
+            )}
+            {item?.type === "slide" && (
+              <div className="absolute inset-0 flex items-center justify-center px-12">
                 <div className="text-center max-w-2xl">
                   <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
                     <svg className="w-8 h-8 text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -337,18 +345,7 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
                   </div>
                 </div>
               </div>
-            ) : (
-            <>
-            <div ref={playerContainerRef} className="w-full h-full" />
-            {(!playerReady || !ytId) && (
-              <div className="flex items-center justify-center h-full">
-                <div className="flex items-center gap-2 text-white/40">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                  <span className="text-xs">Loading player...</span>
-                </div>
-              </div>
             )}
-            </>)}
           </div>
 
           {/* Item info + controls */}
