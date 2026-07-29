@@ -2,32 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
-
-interface SharedItem {
-  id: number;
-  type: string;
-  videoId: number;
-  timestamp: number;
-  endTimestamp: number | null;
-  title: string;
-  detail: string | null;
-  tags: string[];
-  videoTitle: string | null;
-  videoThumbnail: string | null;
-  youtubeId: string | null;
-}
+import VideoPlaylistPlayer, { ClipItem } from "@/components/VideoPlaylistPlayer";
 
 interface SharedCliplist {
   id: number;
   name: string;
   description: string | null;
-  items: SharedItem[];
-}
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
+  items: ClipItem[];
 }
 
 export default function SharedCliplistPage() {
@@ -35,6 +16,7 @@ export default function SharedCliplistPage() {
   const token = params.token as string;
   const [data, setData] = useState<SharedCliplist | null>(null);
   const [error, setError] = useState(false);
+  const [playing, setPlaying] = useState(false);
 
   useEffect(() => {
     fetch(`/api/shared/cliplist/${token}`)
@@ -62,68 +44,30 @@ export default function SharedCliplistPage() {
     );
   }
 
-  return (
-    <div className="max-w-5xl mx-auto px-4 py-12">
-      <header className="mb-10">
-        <p className="text-xs text-muted uppercase tracking-widest mb-2">Shared Cliplist</p>
-        <h1 className="text-3xl font-bold mb-2">{data.name}</h1>
-        {data.description && (
-          <p className="text-muted text-sm">{data.description}</p>
-        )}
-        <p className="text-xs text-muted mt-3">{data.items.length} items</p>
-      </header>
+  if (playing && data.items.length > 0) {
+    return (
+      <VideoPlaylistPlayer items={data.items} onClose={() => setPlaying(false)} />
+    );
+  }
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {data.items.map((item) => (
-          <a
-            key={item.id}
-            href={
-              item.youtubeId
-                ? `https://youtube.com/watch?v=${item.youtubeId}&t=${Math.floor(item.timestamp)}`
-                : undefined
-            }
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block bg-surface border border-border rounded-xl overflow-hidden hover:bg-surface-hover transition-colors group"
-          >
-            <div className="relative aspect-video bg-foreground/5">
-              {item.videoThumbnail ? (
-                <img
-                  src={item.videoThumbnail}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  loading="lazy"
-                />
-              ) : (
-                <div className="flex items-center justify-center h-full text-muted text-sm">
-                  No thumbnail
-                </div>
-              )}
-              <div className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/20 transition-colors">
-                <svg className="w-10 h-10 text-white drop-shadow-lg opacity-80 group-hover:opacity-100 transition-opacity" fill="currentColor" viewBox="0 0 24 24">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </div>
-              <span className="absolute bottom-2 right-2 bg-black/70 text-white text-[11px] px-1.5 py-0.5 rounded font-mono">
-                {formatTime(item.timestamp)}
-              </span>
-            </div>
-            <div className="p-3">
-              <h3 className="font-semibold text-sm leading-snug mb-1 line-clamp-2">
-                {item.title}
-              </h3>
-              {item.detail && (
-                <p className="text-xs text-muted line-clamp-2">{item.detail}</p>
-              )}
-              {item.videoTitle && (
-                <p className="text-[11px] text-muted/60 mt-1.5 truncate">
-                  {item.videoTitle}
-                </p>
-              )}
-            </div>
-          </a>
-        ))}
-      </div>
+  return (
+    <div className="max-w-3xl mx-auto px-4 py-24 text-center">
+      <p className="text-xs text-muted uppercase tracking-widest mb-3">Shared Cliplist</p>
+      <h1 className="text-4xl font-bold mb-3">{data.name}</h1>
+      {data.description && (
+        <p className="text-muted text-sm mb-6">{data.description}</p>
+      )}
+      <p className="text-xs text-muted mb-8">{data.items.length} items</p>
+
+      <button
+        onClick={() => setPlaying(true)}
+        className="inline-flex items-center gap-2 rounded-xl bg-accent px-6 py-3 text-sm font-medium text-white hover:bg-accent-hover active:scale-95 transition-all"
+      >
+        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M8 5v14l11-7z" />
+        </svg>
+        Play Cliplist
+      </button>
     </div>
   );
 }
