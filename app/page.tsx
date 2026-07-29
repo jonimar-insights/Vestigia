@@ -465,6 +465,7 @@ export default function Home() {
   const [editSlideDetail, setEditSlideDetail] = useState("");
   const [editSlideDuration, setEditSlideDuration] = useState(5);
   const [shareCopied, setShareCopied] = useState(false);
+  const [sharing, setSharing] = useState(false);
 
   // ── Settings state ──
   const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
@@ -2269,15 +2270,21 @@ export default function Home() {
                         </button>
                       )}
                       <button
-                        onClick={() => {
-                          const origin = window.location.origin;
-                          navigator.clipboard.writeText(`${origin}/?cliplist=${selectedCliplist.id}`).then(() => {
+                        onClick={async () => {
+                          if (sharing) return;
+                          setSharing(true);
+                          try {
+                            const res = await fetch(`/api/cliplists/${selectedCliplist.id}/share`, { method: "POST" });
+                            if (!res.ok) return;
+                            const { url } = await res.json();
+                            await navigator.clipboard.writeText(url);
                             setShareCopied(true);
                             setTimeout(() => setShareCopied(false), 2000);
-                          }).catch(() => {});
+                          } catch {}
+                          setSharing(false);
                         }}
                         className={`text-xs transition-colors ${shareCopied ? "text-accent" : "text-muted hover:text-accent"}`}
-                        title={shareCopied ? "Copied!" : "Copy cliplist link"}
+                        title={shareCopied ? "Copied!" : "Generate share link"}
                       >
                         {shareCopied ? (
                           <span className="text-[10px] font-medium">Copied!</span>

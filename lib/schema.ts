@@ -77,6 +77,7 @@ export const cliplists = pgTable("cliplists", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
+  shareToken: text("share_token").unique(),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
