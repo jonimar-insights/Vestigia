@@ -460,6 +460,10 @@ export default function Home() {
   const [slideTitle, setSlideTitle] = useState("");
   const [slideDetail, setSlideDetail] = useState("");
   const [slideDuration, setSlideDuration] = useState(5);
+  const [editingSlideId, setEditingSlideId] = useState<number | null>(null);
+  const [editSlideTitle, setEditSlideTitle] = useState("");
+  const [editSlideDetail, setEditSlideDetail] = useState("");
+  const [editSlideDuration, setEditSlideDuration] = useState(5);
 
   // ── Settings state ──
   const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
@@ -1094,6 +1098,28 @@ export default function Home() {
       });
     }
     await loadCliplists();
+  }
+
+  async function updateSlideItem(cliplistId: number, itemId: number) {
+    if (!editSlideTitle.trim()) return;
+    try {
+      await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId,
+          title: editSlideTitle.trim(),
+          detail: editSlideDetail.trim() || null,
+          endTimestamp: editSlideDuration,
+        }),
+      });
+      setEditingSlideId(null);
+      if (selectedCliplist?.id === cliplistId) {
+        const res = await fetch(`/api/cliplists/${cliplistId}`);
+        if (res.ok) setSelectedCliplist(await res.json());
+      }
+      await loadCliplists();
+    } catch {}
   }
 
   const playlistActive = playlistVideos.length > 0 || playlistLoading;
@@ -2218,7 +2244,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => { setShowSlideForm(!showSlideForm); setSlideTitle(""); setSlideDetail(""); }}
+                        onClick={() => { setShowSlideForm(!showSlideForm); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
                         className="text-xs text-muted hover:text-accent transition-colors"
                         title="Add slide between videos"
                       >
@@ -2292,7 +2318,7 @@ export default function Home() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); }}
+                          onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
                           className="text-[10px] text-muted hover:text-foreground transition-colors"
                         >
                           Cancel
@@ -2308,6 +2334,53 @@ export default function Home() {
                       {selectedCliplist.items.map((item) => (
                         <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-hover/50 transition-colors group/item">
                           {item.type === "slide" ? (
+                            editingSlideId === item.id ? (
+                              /* ── Slide edit form ── */
+                              <form
+                                onSubmit={(e) => { e.preventDefault(); updateSlideItem(selectedCliplist.id, item.id); }}
+                                className="flex items-center gap-2 w-full"
+                              >
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={editSlideTitle}
+                                  onChange={(e) => setEditSlideTitle(e.target.value)}
+                                  className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                />
+                                <input
+                                  type="text"
+                                  value={editSlideDetail}
+                                  onChange={(e) => setEditSlideDetail(e.target.value)}
+                                  placeholder="Subtitle"
+                                  className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                />
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    max={120}
+                                    value={editSlideDuration}
+                                    onChange={(e) => setEditSlideDuration(Math.max(1, Number(e.target.value)))}
+                                    className="w-14 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  />
+                                  <span className="text-[10px] text-muted">sec</span>
+                                </div>
+                                <button
+                                  type="submit"
+                                  disabled={!editSlideTitle.trim()}
+                                  className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingSlideId(null)}
+                                  className="text-[10px] text-muted hover:text-foreground transition-colors"
+                                >
+                                  Cancel
+                                </button>
+                              </form>
+                            ) : (
                             /* ── Slide card ── */
                             <div className="flex items-center gap-3 w-full">
                               <div className="w-full flex items-center gap-3 py-1">
@@ -2329,15 +2402,25 @@ export default function Home() {
                                   )}
                                 </div>
                               </div>
-                              <button
-                                onClick={() => removeClipItem(selectedCliplist.id, item.id)}
-                                className="p-1 rounded text-muted/40 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover/item:opacity-100 shrink-0"
-                                title="Remove from cliplist"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                              </button>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  onClick={() => { setEditingSlideId(item.id); setEditSlideTitle(item.title); setEditSlideDetail(item.detail ?? ""); setEditSlideDuration(item.endTimestamp ?? 5); }}
+                                  className="p-1 rounded text-muted/40 hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover/item:opacity-100"
+                                  title="Edit slide"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                                </button>
+                                <button
+                                  onClick={() => removeClipItem(selectedCliplist.id, item.id)}
+                                  className="p-1 rounded text-muted/40 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover/item:opacity-100"
+                                  title="Remove from cliplist"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                              </div>
                             </div>
-                          ) : (
+                          )
+                        ) : (
                           <>
                           {item.videoThumbnail && (
                             <div className="relative shrink-0 w-20 h-12">

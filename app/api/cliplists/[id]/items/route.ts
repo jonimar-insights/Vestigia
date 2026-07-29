@@ -4,6 +4,64 @@ import { clipItems, cliplists } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
 
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const db = getDb();
+  const { id } = await params;
+  const listId = parseInt(id, 10);
+  if (isNaN(listId)) {
+    return NextResponse.json({ error: "Invalid cliplist ID" }, { status: 400 });
+  }
+
+  const listRows = await db
+    .select()
+    .from(cliplists)
+    .where(eq(cliplists.id, listId))
+    .limit(1);
+  if (!listRows[0]) {
+    return NextResponse.json({ error: "Cliplist not found" }, { status: 404 });
+  }
+
+  const body = await request.json();
+  const { itemId, title, detail, endTimestamp } = body;
+
+  if (!itemId) {
+    return NextResponse.json({ error: "itemId is required" }, { status: 400 });
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (title !== undefined) updateData.title = title.trim();
+  if (detail !== undefined) updateData.detail = detail || null;
+  if (endTimestamp !== undefined) updateData.endTimestamp = endTimestamp;
+
+  if (Object.keys(updateData).length === 0) {
+    return NextResponse.json({ error: "No fields to update" }, { status: 400 });
+  }
+
+  await db
+    .update(clipItems)
+    .set(updateData)
+    .where(and(eq(clipItems.id, itemId), eq(clipItems.cliplistId, listId)));
+
+  await db.update(cliplists)
+    .set({ updatedAt: new Date().toISOString() })
+    .where(eq(cliplists.id, listId));
+
+  const [updated] = await db
+    .select()
+    .from(clipItems)
+    .where(and(eq(clipItems.id, itemId), eq(clipItems.cliplistId, listId)))
+    .limit(1);
+
+  return NextResponse.json(updated ?? { success: true });
+}
+
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
