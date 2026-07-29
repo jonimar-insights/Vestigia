@@ -161,13 +161,14 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
     });
   }, [items]);  
 
-  // Auto-advance slides after 5 seconds
+  // Auto-advance slides after duration (endTimestamp in seconds, default 5)
   useEffect(() => {
     if (item?.type === "slide") {
       clearTimeInterval();
+      const ms = (item.endTimestamp ?? 5) * 1000;
       slideTimerRef.current = setTimeout(() => {
         setCurrentIdx((prev) => (prev < items.length - 1 ? prev + 1 : 0));
-      }, 5000);
+      }, ms);
       return () => { if (slideTimerRef.current) clearTimeout(slideTimerRef.current); };
     }
   }, [currentIdx, item?.type]); // eslint-disable-line
@@ -458,6 +459,7 @@ export default function Home() {
   const [showSlideForm, setShowSlideForm] = useState(false);
   const [slideTitle, setSlideTitle] = useState("");
   const [slideDetail, setSlideDetail] = useState("");
+  const [slideDuration, setSlideDuration] = useState(5);
 
   // ── Settings state ──
   const [settings, setSettings] = useState<{ aiKeys: Record<string, string>; preferredProvider: string | null }>({ aiKeys: {}, preferredProvider: null });
@@ -1063,10 +1065,12 @@ export default function Home() {
           type: "slide",
           title: slideTitle.trim(),
           detail: slideDetail.trim() || null,
+          endTimestamp: slideDuration,
         }),
       });
       setSlideTitle("");
       setSlideDetail("");
+      setSlideDuration(5);
       setShowSlideForm(false);
       // Refresh the current cliplist view
       if (selectedCliplist?.id === cliplistId) {
@@ -2266,8 +2270,19 @@ export default function Home() {
                           value={slideDetail}
                           onChange={(e) => setSlideDetail(e.target.value)}
                           placeholder="Subtitle (optional)"
-                          className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                          className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                         />
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="number"
+                            min={1}
+                            max={120}
+                            value={slideDuration}
+                            onChange={(e) => setSlideDuration(Math.max(1, Number(e.target.value)))}
+                            className="w-14 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <span className="text-[10px] text-muted">sec</span>
+                        </div>
                         <button
                           type="submit"
                           disabled={!slideTitle.trim()}
@@ -2277,7 +2292,7 @@ export default function Home() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); }}
+                          onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); }}
                           className="text-[10px] text-muted hover:text-foreground transition-colors"
                         >
                           Cancel
@@ -2302,7 +2317,12 @@ export default function Home() {
                                   </svg>
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                  <span className="text-[9px] uppercase font-medium text-purple-400 bg-purple-500/10 px-1 py-0.5 rounded inline-block mb-0.5">Slide</span>
+                                  <div className="flex items-center gap-1.5 mb-0.5">
+                                    <span className="text-[9px] uppercase font-medium text-purple-400 bg-purple-500/10 px-1 py-0.5 rounded">Slide</span>
+                                    {item.endTimestamp && (
+                                      <span className="text-[9px] font-mono text-muted/50">{item.endTimestamp}s</span>
+                                    )}
+                                  </div>
                                   <p className="text-xs font-medium truncate">{item.title}</p>
                                   {item.detail && (
                                     <p className="text-[10px] text-muted truncate">{item.detail}</p>
