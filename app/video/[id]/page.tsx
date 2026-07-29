@@ -1170,6 +1170,25 @@ export default function VideoPage() {
                                       <span className="text-[9px] font-mono text-muted/40">({Math.round(dur)}s)</span>
                                     )}
                                     <span className="text-[11px] font-medium text-foreground truncate">{translated?.title || m.title}</span>
+                                    {(() => {
+                                      const matching = videoCliplistItems.filter(c =>
+                                        Math.abs(c.timestamp - m.timestamp) < 1 &&
+                                        (m.endTimestamp == null || c.endTimestamp == null || Math.abs(c.endTimestamp - m.endTimestamp) < 1)
+                                      );
+                                      if (matching.length === 0) return null;
+                                      const seen = new Set<number>();
+                                      return matching.filter(c => { if (seen.has(c.cliplistId)) return false; seen.add(c.cliplistId); return true; }).map(c => (
+                                        <Link key={c.cliplistId} href={`/?cliplist=${c.cliplistId}`}
+                                          onClick={e => e.stopPropagation()}
+                                          className="inline-flex items-center gap-0.5 text-[9px] text-accent/70 hover:text-accent bg-accent/5 hover:bg-accent/10 px-1.5 py-px rounded transition-colors shrink-0"
+                                          title={`View in cliplist: ${c.cliplistName}`}>
+                                          <svg className="w-2 h-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                          </svg>
+                                          {c.cliplistName}
+                                        </Link>
+                                      ));
+                                    })()}
                                   </div>
                                   <p className="text-[10px] text-muted/70 leading-relaxed mt-0.5 line-clamp-2">{translated?.summary || m.summary}</p>
                                 </div>
