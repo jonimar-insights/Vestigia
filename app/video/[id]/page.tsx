@@ -569,6 +569,19 @@ export default function VideoPage() {
     URL.revokeObjectURL(url);
   }
 
+  function shareAnnotation(ann: Annotation) {
+    const origin = window.location.origin;
+    const start = formatTimestamp(ann.timestampStart);
+    const end = formatTimestamp(ann.timestampEnd);
+    const lines = [
+      `${ann.label}`,
+      `${start} – ${end}`,
+    ];
+    if (ann.note) lines.push(ann.note);
+    lines.push(`${origin}/video/${videoId}#t=${Math.floor(ann.timestampStart)}`);
+    navigator.clipboard.writeText(lines.join("\n"));
+  }
+
   // ── AI Summary ──
   async function runSummary(regenerate = false) {
     setSummaryLoading(true);
@@ -1515,6 +1528,10 @@ export default function VideoPage() {
                                             </div>
                                           )}
                                         </div>
+                                        <button onClick={e => { e.stopPropagation(); shareAnnotation(ann); }}
+                                          className="p-0.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Share">
+                                          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                                        </button>
                                         <button onClick={e => { e.stopPropagation(); startEdit(ann); }}
                                           className="p-0.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title="Edit">
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
