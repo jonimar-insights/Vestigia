@@ -183,10 +183,12 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
 
     advancedRef.current = false;
     clearTimeInterval();
+    setCurrentTime(item.timestamp);
     lastVideoIdRef.current = ytId;
 
     try {
       playerRef.current.loadVideoById(ytId, item.timestamp);
+      playerRef.current.playVideo();
     } catch {}
   }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type, videoIds]); // eslint-disable-line
 
@@ -267,6 +269,7 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
     try {
       if (playerRef.current.getPlayerState() !== 1) return;
     } catch { return; }
+    if (currentTime < item.timestamp) return;
     const end = item.endTimestamp ?? (item.timestamp + 30);
     if (currentTime >= end) {
       advancedRef.current = true;
@@ -318,9 +321,9 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
 
           {/* Video player area — shows slide card for slides, YouTube player for video items */}
           <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
-            <div ref={playerContainerRef} className={`w-full h-full ${item?.type === "slide" ? "hidden" : ""}`} />
+            <div ref={playerContainerRef} className="w-full h-full" />
             {(!playerReady || !ytId) && item?.type !== "slide" && (
-              <div className="absolute inset-0 flex items-center justify-center">
+              <div className="absolute inset-0 flex items-center justify-center bg-black">
                 <div className="flex items-center gap-2 text-white/40">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
                   <span className="text-xs">Loading player...</span>
@@ -328,7 +331,7 @@ function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: (
               </div>
             )}
             {item?.type === "slide" && (
-              <div className="absolute inset-0 flex items-center justify-center px-12">
+              <div className="absolute inset-0 flex items-center justify-center px-12 bg-black">
                 <div className="text-center max-w-2xl">
                   <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
                     <svg className="w-8 h-8 text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
