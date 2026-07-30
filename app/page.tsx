@@ -149,7 +149,6 @@ export default function Home() {
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [showFolderSharePicker, setShowFolderSharePicker] = useState(false);
 
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
@@ -956,61 +955,17 @@ export default function Home() {
 
               {/* Shared folders */}
               <div className="mt-6 pt-6 border-t border-border/50">
-                <div className="flex items-center justify-between mb-2">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">
-                    {t("share.sharedFolders")}
-                  </h3>
-                  <button
-                    onClick={() => setShowFolderSharePicker(true)}
-                    className="text-muted hover:text-accent transition-colors"
-                    title={t("share.link")}
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                    </svg>
-                  </button>
-                </div>
-
-                {/* Folder share picker */}
-                {showFolderSharePicker && (
-                  <div className="mb-2 rounded-lg border border-border bg-surface p-2 space-y-1">
-                    {(folderList.filter((f) => !f.shareToken).length === 0) ? (
-                      <p className="text-[10px] text-muted/60 px-1">All folders are already shared</p>
-                    ) : (
-                      folderList.filter((f) => !f.shareToken).map((f) => (
-                        <button
-                          key={f.id}
-                          onClick={async () => {
-                            try {
-                              const res = await fetch(`/api/folders/${f.id}/share`, { method: "POST" });
-                              if (res.ok) {
-                                await loadFolders();
-                                setShowFolderSharePicker(false);
-                              }
-                            } catch {}
-                          }}
-                          className="w-full text-left px-2 py-1 rounded text-xs text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-                        >
-                          {f.name}
-                        </button>
-                      ))
-                    )}
-                    <button
-                      onClick={() => setShowFolderSharePicker(false)}
-                      className="w-full text-left px-2 py-1 rounded text-[10px] text-muted/50 hover:text-muted transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
+                <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                  {t("share.sharedFolders")}
+                </h3>
 
                 <div className="space-y-0.5">
                   {(() => {
                     const shared = folderList.filter((f) => f.shareToken);
-                    if (shared.length === 0 && !showFolderSharePicker) {
+                    if (shared.length === 0) {
                       return (
                         <p className="text-[10px] text-muted/60 px-1 py-2">
-                          No shared folders — click the share icon above to share one.
+                          No shared folders.
                         </p>
                       );
                     }
