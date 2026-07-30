@@ -913,10 +913,14 @@ export default function Home() {
                                   setTimeout(() => setFolderShareCopied(null), 2000);
                                 } catch {}
                               }}
-                              className={`cursor-pointer p-0.5 text-accent`}
+                              className={`cursor-pointer p-0.5 transition-colors ${folderShareCopied === folder.id ? "text-accent" : "text-muted hover:text-accent"}`}
                               title={folderShareCopied === folder.id ? t("share.copied") : t("share.link")}
                             >
+                              {folderShareCopied === folder.id ? (
+                                <span className="text-[10px] font-medium">{t("share.copied")}</span>
+                              ) : (
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                              )}
                             </span>
                             <span
                               onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
