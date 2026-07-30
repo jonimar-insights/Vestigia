@@ -1120,7 +1120,7 @@ export default function VideoPage() {
                         {summaryMoments.length > 0 && (
                           <button
                             onClick={() => {
-                              const sizes = [0.85, 1, 1.15, 1.3];
+                              const sizes = [0.85, 1, 1.15, 1.3, 1.5];
                               const i = sizes.indexOf(momentFontSize);
                               const next = sizes[(i + 1) % sizes.length];
                               setMomentFontSize(next);
