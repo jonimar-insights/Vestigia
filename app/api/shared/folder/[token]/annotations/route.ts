@@ -60,7 +60,7 @@ export async function POST(
 ) {
   const { token } = await params;
   const body = await _request.json();
-  const { videoId, name, timestampStart, timestampEnd, note } = body;
+  const { videoId, name, email, timestampStart, timestampEnd, note } = body;
 
   if (!videoId || !name || timestampStart === undefined || timestampEnd === undefined) {
     return NextResponse.json(
@@ -104,6 +104,7 @@ export async function POST(
       tags: JSON.stringify([]),
       note: note || null,
       createdBy: name,
+      email: email || null,
     })
     .returning();
 

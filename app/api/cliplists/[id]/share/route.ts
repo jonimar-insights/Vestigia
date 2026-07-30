@@ -37,7 +37,7 @@ export async function POST(
       .where(eq(cliplists.id, listId));
   }
 
-  const origin = _request.headers.get("origin") ?? "https://vestigia.vercel.app";
+  const origin = _request.headers.get("origin") ?? "https://vestigia-vercel.vercel.app";
   return NextResponse.json({ token, url: `${origin}/shared/cliplist/${token}` });
 }
 

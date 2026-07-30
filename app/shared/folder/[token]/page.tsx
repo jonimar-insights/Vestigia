@@ -29,6 +29,7 @@ interface SharedAnnotation {
   tags: string[];
   note: string | null;
   createdBy: string;
+  email: string | null;
   createdAt: string;
 }
 
@@ -70,8 +71,12 @@ export default function SharedFolderPage({
   const [annotations, setAnnotations] = useState<SharedAnnotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
 
+  // Mode
+  const [mode, setMode] = useState<"view" | "edit">("edit");
+
   // Annotation form
   const [authorName, setAuthorName] = useState("");
+  const [authorEmail, setAuthorEmail] = useState("");
   const [startSec, setStartSec] = useState(0);
   const [endSec, setEndSec] = useState(0);
   const [note, setNote] = useState("");
@@ -226,6 +231,7 @@ export default function SharedFolderPage({
         body: JSON.stringify({
           videoId: selectedVideo.id,
           name: authorName.trim(),
+          email: authorEmail.trim() || null,
           timestampStart: startSec,
           timestampEnd: endSec,
           note: note.trim() || null,
@@ -384,7 +390,21 @@ export default function SharedFolderPage({
             <div className="w-full lg:w-80 shrink-0 flex flex-col gap-4">
               {/* Form */}
               <div className="rounded-xl border border-border bg-surface p-3">
-                <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Add Annotation</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">Add Annotation</h3>
+                  <button
+                    type="button"
+                    onClick={() => setMode(mode === "edit" ? "view" : "edit")}
+                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                      mode === "edit"
+                        ? "bg-accent/10 text-accent border-accent/30"
+                        : "text-muted border-border hover:border-muted"
+                    }`}
+                  >
+                    {mode === "edit" ? "Editing" : "Viewing"}
+                  </button>
+                </div>
+                {mode === "edit" && (
                 <form onSubmit={handleAddAnnotation} className="space-y-2.5">
                   <input
                     type="text"
@@ -392,6 +412,13 @@ export default function SharedFolderPage({
                     onChange={(e) => setAuthorName(e.target.value)}
                     placeholder="Your name"
                     required
+                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                  />
+                  <input
+                    type="email"
+                    value={authorEmail}
+                    onChange={(e) => setAuthorEmail(e.target.value)}
+                    placeholder="Your email (optional)"
                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                   />
                   <div className="flex items-center gap-2">
@@ -442,6 +469,7 @@ export default function SharedFolderPage({
                     {saving ? "Saving..." : "Save Annotation"}
                   </button>
                 </form>
+                )}
               </div>
 
               {/* Annotation feed */}

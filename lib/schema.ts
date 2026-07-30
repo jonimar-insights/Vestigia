@@ -55,6 +55,7 @@ export const annotations = pgTable("annotations", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by").notNull().default("anonymous"),
+  email: text("email"),
   userId: text("user_id"),
 });
 
