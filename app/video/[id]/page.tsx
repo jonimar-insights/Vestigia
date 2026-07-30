@@ -806,7 +806,7 @@ export default function VideoPage() {
       <div className="min-h-screen flex items-center justify-center">
         <div className="flex items-center gap-3 text-muted">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-          <span className="text-sm">Loading video...</span>
+          <span className="text-sm">{t("app.loading")}</span>
         </div>
       </div>
     );
@@ -857,7 +857,7 @@ export default function VideoPage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="hidden md:inline text-[10px] text-muted bg-surface-hover rounded px-1.5 py-0.5 font-mono">
-              <kbd>A</kbd> annotate &middot; <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> seek &middot; <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> prev/next
+              <kbd>A</kbd> {t("player.annotate")} &middot; <kbd>Space</kbd> {t("player.playPauseShort")} &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> {t("player.seek5s")} &middot; <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> {t("player.prevNext")}
             </span>
             <button
               onClick={toggleLanguage}
@@ -877,7 +877,7 @@ export default function VideoPage() {
               }}
               className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover active:scale-[0.97] transition-all flex items-center gap-1.5">
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Annotate
+              {t("player.annotateBtn")}
             </button>
           </div>
         </div>
@@ -896,7 +896,7 @@ export default function VideoPage() {
                 <div className="absolute inset-0 flex items-center justify-center bg-black">
                   <div className="flex items-center gap-3 text-white/60">
                     <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white/80" />
-                    <span className="text-sm">Loading player...</span>
+                    <span className="text-sm">{t("player.loading")}</span>
                   </div>
                 </div>
               )}
@@ -919,7 +919,7 @@ export default function VideoPage() {
                 <div className="flex items-center gap-1">
                   <button onClick={() => seekTo(Math.max(0, currentTime - 10))}
                     className="p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-                    title="Back 10s (Shift+ArrowLeft)">
+                    title={t("player.back10s")}>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.333 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" /></svg>
                   </button>
                   <button onClick={() => {
@@ -929,7 +929,7 @@ export default function VideoPage() {
                     else playerRef.current.playVideo();
                   }}
                     className="p-2 rounded-lg bg-accent text-white hover:bg-accent-hover active:scale-95 transition-all"
-                    title="Play/Pause (Space)">
+                    title={t("player.playPause")}>
                     {isPlaying ? (
                       <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
                     ) : (
@@ -938,7 +938,7 @@ export default function VideoPage() {
                   </button>
                   <button onClick={() => seekTo(Math.min(duration, currentTime + 10))}
                     className="p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-                    title="Forward 10s (Shift+ArrowRight)">
+                    title={t("player.forward10s")}>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.933 12.8a1 1 0 000-1.6L6.6 7.2A1 1 0 005 8v8a1 1 0 001.6.8l5.333-4zM19.933 12.8a1 1 0 000-1.6l-5.333-4A1 1 0 0013 8v8a1 1 0 001.6.8l5.333-4z" /></svg>
                   </button>
                 </div>
@@ -1002,13 +1002,13 @@ export default function VideoPage() {
               {/* Keyboard hints */}
               <div className="flex items-center justify-center gap-4 mt-3 pt-3 border-t border-border/40">
                 <span className="text-[9px] text-muted/40 font-mono flex items-center gap-1">
-                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">Space</kbd> play/pause
+                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">Space</kbd> {t("player.playPauseShort")}
                 </span>
                 <span className="text-[9px] text-muted/40 font-mono flex items-center gap-1">
-                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">&larr;</kbd><kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">&rarr;</kbd> seek 5s
+                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">&larr;</kbd><kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">&rarr;</kbd> {t("player.seek5s")}
                 </span>
                 <span className="text-[9px] text-muted/40 font-mono flex items-center gap-1">
-                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">A</kbd> annotate
+                  <kbd className="bg-surface-hover border border-border/40 rounded px-1 py-0.5 text-[8px]">A</kbd> {t("player.annotate")}
                 </span>
               </div>
             </div>
@@ -1018,7 +1018,7 @@ export default function VideoPage() {
           <div
             onMouseDown={handlePanelDragStart}
             className="hidden lg:flex w-2 shrink-0 cursor-col-resize items-center justify-center group/drag hover:bg-accent/10 transition-colors"
-            title="Drag to resize panels"
+            title={t("player.dragResize")}
           >
             <div className="w-0.5 h-8 rounded-full bg-border group-hover/drag:bg-accent/40 transition-colors" />
           </div>
@@ -1042,7 +1042,7 @@ export default function VideoPage() {
                         placeholder="0:00"
                         className="w-14 rounded border border-border/60 bg-background px-1.5 py-px text-[10px] font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
                       <button type="button" onClick={() => { setStart(currentTime); setStartDisplay(formatTimestamp(currentTime)); }}
-                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title="Set start to now">now</button>
+                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setStartNow")}>{t("annotation.now")}</button>
                       <span className="text-[9px] text-muted/30">&ndash;</span>
                       <input type="text" value={endDisplay} required
                         onChange={e => setEndDisplay(e.target.value)}
@@ -1050,7 +1050,7 @@ export default function VideoPage() {
                         placeholder="0:00"
                         className="w-14 rounded border border-border/60 bg-background px-1.5 py-px text-[10px] font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
                       <button type="button" onClick={() => { setEnd(currentTime); setEndDisplay(formatTimestamp(currentTime)); }}
-                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title="Set end to now">now</button>
+                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setEndNow")}>{t("annotation.now")}</button>
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button type="submit" disabled={saving || !start || !end}
@@ -1105,7 +1105,7 @@ export default function VideoPage() {
                   <button onClick={() => runSummary()} disabled={summaryLoading}
                     className="w-full rounded-xl border border-border/60 bg-surface hover:bg-surface-hover/50 py-2.5 flex items-center justify-center gap-2 transition-all group text-[11px]">
                     <svg className="w-3.5 h-3.5 text-muted group-hover:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                    <span className="text-muted group-hover:text-foreground transition-colors font-medium">AI Summary</span>
+                    <span className="text-muted group-hover:text-foreground transition-colors font-medium">{t("keyMoments.aiSummary")}</span>
                   </button>
                 ) : (
                   <div className="rounded-xl border border-border/60 bg-surface overflow-hidden">
@@ -1162,7 +1162,7 @@ export default function VideoPage() {
                       {summaryError && (
                         <div className="px-3 py-4 text-center">
                           <p className="text-[10px] text-danger">{summaryError}</p>
-                          <button onClick={() => runSummary()} className="text-[10px] text-accent hover:text-accent-hover mt-1 transition-colors">Try again</button>
+                          <button onClick={() => runSummary()} className="text-[10px] text-accent hover:text-accent-hover mt-1 transition-colors">{t("keyMoments.tryAgain")}</button>
                         </div>
                       )}
                       {!summaryLoading && !summaryError && summaryMoments.length === 0 && (
@@ -1255,7 +1255,7 @@ export default function VideoPage() {
                                       {showCreateCliplist ? (
                                         <form onSubmit={handleCreateCliplistAndAdd} className="p-2 space-y-1.5">
                                           <input type="text" value={newCliplistName} onChange={e => setNewCliplistName(e.target.value)}
-                                            placeholder="Cliplist name" autoFocus
+                                            placeholder={t("cliplist.name")} autoFocus
                                             className="w-full rounded border border-border bg-background px-2 py-1 text-[10px] focus:border-accent outline-none" />
                                           <div className="flex items-center gap-1">
                                             <button type="submit" disabled={creatingCliplist || !newCliplistName.trim()}
@@ -1320,7 +1320,7 @@ export default function VideoPage() {
                       ? "bg-accent text-white shadow-sm"
                       : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
                   }`}>
-                  All
+                  {t("feed.all")}
                   <span className="opacity-60">{video.annotations.length}</span>
                 </button>
                 {uniqueLabels.map(l => {
@@ -1346,7 +1346,7 @@ export default function VideoPage() {
               <div className="flex items-center gap-2">
                 <button onClick={() => setFeedCollapsed(!feedCollapsed)}
                   className="p-1 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-                  title={feedCollapsed ? "Expand" : "Collapse"}>
+                  title={feedCollapsed ? t("player.expand") : t("player.collapse")}>
                   <svg className={`w-4 h-4 transition-transform duration-200 ${feedCollapsed ? "-rotate-90" : ""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -1357,19 +1357,19 @@ export default function VideoPage() {
                       selectedIds.size > 0 && selectedIds.size === displayedAnnotations.length
                         ? "bg-accent border-accent text-white"
                         : "border-border hover:border-accent/50"
-                    }`} title="Select all">
+                    }`} title={t("feed.selectAll")}>
                     {selectedIds.size > 0 && selectedIds.size === displayedAnnotations.length && (
                       <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                     )}
                   </button>
                 )}
                 <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">
-                  {filterLabel ? `${filterLabel} (${displayedAnnotations.length})` : `${video.annotations.length} annotations`}
+                  {filterLabel ? `${filterLabel} (${displayedAnnotations.length})` : `${video.annotations.length} ${t("video.annotations")}`}
                 </h2>
               </div>
               <div className="flex items-center gap-1.5">
                 <button onClick={exportSelected}
-                  className="p-1.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title="Export as chapters">
+                  className="p-1.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title={t("annotation.exportChapters")}>
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                 </button>
               </div>
@@ -1378,25 +1378,25 @@ export default function VideoPage() {
             {/* Bulk action bar */}
             {selectedIds.size > 0 && (
               <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-lg bg-accent/5 border border-accent/15 shrink-0">
-                <span className="text-[10px] font-medium text-accent">{selectedIds.size} selected</span>
+                <span className="text-[10px] font-medium text-accent">{selectedIds.size} {t("video.selected")}</span>
                 <div className="flex-1" />
                 <div className="relative">
                   <input type="text" value={bulkLabel} onChange={e => setBulkLabel(e.target.value)}
                     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); bulkRelabel(); } }}
-                    placeholder="Relabel to..."
+                    placeholder={t("annotation.relabelTo")}
                     className="w-32 rounded-md border border-border bg-background px-2 py-1 text-[10px] focus:border-accent outline-none" />
                 </div>
                 <button onClick={bulkRelabel} disabled={!bulkLabel.trim()}
                   className="rounded-md bg-accent/10 px-2 py-1 text-[10px] font-medium text-accent hover:bg-accent/20 disabled:opacity-30 transition-all">
-                  Relabel
+                  {t("annotation.relabel")}
                 </button>
                 <button onClick={bulkDelete}
                   className="rounded-md bg-danger/10 px-2 py-1 text-[10px] font-medium text-danger hover:bg-danger/20 transition-all">
-                  Delete
+                  {t("annotation.delete")}
                 </button>
                 <button onClick={() => setSelectedIds(new Set())}
                   className="rounded-md px-2 py-1 text-[10px] text-muted hover:text-foreground transition-all">
-                  Clear
+                  {t("annotation.clear")}
                 </button>
               </div>
             )}
@@ -1411,15 +1411,15 @@ export default function VideoPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                     </div>
-                    <p className="text-sm font-medium text-muted mb-1">{filterLabel ? "No matching annotations" : "No annotations yet"}</p>
+                    <p className="text-sm font-medium text-muted mb-1">{filterLabel ? t("annotation.noMatching") : t("annotation.noAnnotationsYet")}</p>
                     <p className="text-xs text-muted/60 mb-4">
-                      {filterLabel ? "Try a different filter" : "Press"} {!filterLabel && <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>}
-                      {!filterLabel ? " to create your first annotation" : ""}
+                      {filterLabel ? t("annotation.tryDifferentFilter") : t("annotation.press")} {!filterLabel && <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>}
+                      {!filterLabel ? t("annotation.toCreateFirst") : ""}
                     </p>
                     {!filterLabel && (
                       <button onClick={() => setShowForm(true)}
                         className="text-xs text-accent hover:text-accent-hover font-medium transition-colors">
-                        + Create annotation
+                        {t("annotation.createFirstAction")}
                       </button>
                     )}
                   </div>
@@ -1461,10 +1461,10 @@ export default function VideoPage() {
                                   <input type="text" value={editLabel} onChange={e => setEditLabel(e.target.value)}
                                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all" />
                                   <input type="text" value={editTags} onChange={e => setEditTags(e.target.value)}
-                                    placeholder="Tags (comma separated)"
+                                    placeholder={t("annotation.tagsPlaceholder")}
                                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all" />
                                   <textarea value={editNote} onChange={e => setEditNote(e.target.value)}
-                                    rows={3} placeholder="Write a note..."
+                                    rows={3} placeholder={t("annotation.notePlaceholder")}
                                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-none transition-all" />
                                   <div className="flex items-center gap-2">
                                     <button onClick={() => saveEdit(ann.id)}
@@ -1513,7 +1513,7 @@ export default function VideoPage() {
                                       <button onClick={e => { e.stopPropagation(); toggleSelect(ann.id); }}
                                         className={`w-3.5 h-3.5 rounded border transition-all flex items-center justify-center ${
                                           selectedIds.has(ann.id) ? "bg-accent border-accent text-white" : "border-border hover:border-accent/50"
-                                        }`} title="Select">
+                                        }`} title={t("annotation.select")}>
                                         {selectedIds.has(ann.id) && (
                                           <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>
                                         )}
@@ -1525,12 +1525,12 @@ export default function VideoPage() {
                                               if (cliplists.length === 0) loadCliplists();
                                               setAnnotCliplistDropdown({ id: ann.id, open: annotCliplistDropdown.id === ann.id ? !annotCliplistDropdown.open : true });
                                             }}
-                                            className="p-0.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors" title="Add to cliplist">
+                                            className="p-0.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-colors" title={t("annotation.share")}>
                                             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
                                           </button>
                                           {annotCliplistDropdown.id === ann.id && annotCliplistDropdown.open && (
                                             <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1" data-annot-cliplist-dropdown>
-                                              <div className="px-2.5 py-1 text-[9px] font-semibold text-muted uppercase tracking-wider">Add to cliplist</div>
+                                              <div className="px-2.5 py-1 text-[9px] font-semibold text-muted uppercase tracking-wider">{t("keyMoments.addToCliplist")}</div>
                                               {cliplists.length === 0 ? (
                                             <div className="px-2.5 py-1 text-[9px] text-muted">{t("keyMoments.noCliplists")}</div>
                                               ) : (
@@ -1547,19 +1547,19 @@ export default function VideoPage() {
                                         </div>
                                         <button onClick={e => { e.stopPropagation(); shareAnnotation(ann); }}
                                           className={`p-0.5 rounded transition-colors shrink-0 ${shareCopiedId === ann.id ? "text-accent" : "text-muted hover:text-accent hover:bg-accent/10"}`}
-                                          title={shareCopiedId === ann.id ? "Copied!" : "Share"}>
+                                          title={shareCopiedId === ann.id ? t("annotation.copied") : t("annotation.share")}>
                                           {shareCopiedId === ann.id ? (
-                                            <span className="text-[9px] font-medium px-0.5">Copied!</span>
+                                            <span className="text-[9px] font-medium px-0.5">{t("annotation.copied")}</span>
                                           ) : (
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
                                           )}
                                         </button>
                                         <button onClick={e => { e.stopPropagation(); startEdit(ann); }}
-                                          className="p-0.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title="Edit">
+                                          className="p-0.5 rounded text-muted hover:text-foreground hover:bg-surface-hover transition-colors" title={t("annotation.edit")}>
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                         </button>
                                         <button onClick={e => { e.stopPropagation(); handleDelete(ann.id); }}
-                                          className="p-0.5 rounded text-muted hover:text-danger hover:bg-danger/10 transition-colors" title="Delete">
+                                          className="p-0.5 rounded text-muted hover:text-danger hover:bg-danger/10 transition-colors" title={t("annotation.delete")}>
                                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                                         </button>
                                       </div>
@@ -1573,7 +1573,7 @@ export default function VideoPage() {
                                       {(translated?.note || ann.note || "").length > 120 && (
                                         <button onClick={() => toggleNoteExpand(ann.id)}
                                           className="text-[10px] text-accent hover:text-accent-hover mt-0.5 font-medium transition-colors">
-                                          {isExpanded ? "less" : "more"}
+                                          {isExpanded ? t("annotation.less") : t("annotation.more")}
                                         </button>
                                       )}
                                     </div>

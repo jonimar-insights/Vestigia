@@ -138,6 +138,7 @@ export const folders = pgTable("folders", {
   name: text("name").notNull(),
   description: text("description"),
   color: text("color").default("bg-accent"),
+  shareToken: text("share_token").unique(),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),

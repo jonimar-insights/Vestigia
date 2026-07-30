@@ -148,6 +148,7 @@ export default function Home() {
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [folderShareCopied, setFolderShareCopied] = useState<number | null>(null);
 
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
@@ -901,6 +902,23 @@ export default function Home() {
                           <span className="text-[10px] text-muted/60">{folder.videoCount}</span>
                           <div className="hidden group-hover:flex items-center gap-0.5">
                             <span
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
+                                  if (!res.ok) return;
+                                  const { url } = await res.json();
+                                  await navigator.clipboard.writeText(url);
+                                  setFolderShareCopied(folder.id);
+                                  setTimeout(() => setFolderShareCopied(null), 2000);
+                                } catch {}
+                              }}
+                              className={`cursor-pointer p-0.5 ${folderShareCopied === folder.id ? "text-accent" : "text-muted hover:text-accent"}`}
+                              title={folderShareCopied === folder.id ? t("share.copied") : t("share.link")}
+                            >
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                            </span>
+                            <span
                               onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
                               className="text-muted hover:text-foreground cursor-pointer p-0.5"
                               title={t("sidebar.rename")}
@@ -966,7 +984,7 @@ export default function Home() {
                   type="text"
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
-                  placeholder="Paste a YouTube URL or playlist link..."
+                  placeholder={t("import.urlPlaceholder")}
                   className="flex-1 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   disabled={loading || playlistLoading}
                 />
@@ -975,7 +993,7 @@ export default function Home() {
                   disabled={loading || playlistLoading || !url.trim()}
                   className="rounded-lg bg-accent px-5 py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {loading ? "Adding..." : playlistLoading ? "Loading..." : "Import"}
+                  {loading ? t("import.adding") : playlistLoading ? t("app.loading") : t("video.import")}
                 </button>
               </div>
               <label className="flex items-center gap-2 mt-2 text-xs text-muted cursor-pointer select-none">
@@ -985,7 +1003,7 @@ export default function Home() {
                   onChange={(e) => setExtractKeyMoments(e.target.checked)}
                   className="rounded border-border accent-accent"
                 />
-                Extract key moments on import
+                {t("video.extractKeyMoments")}
               </label>
               {error && <p className="mt-2 text-sm text-danger">{error}</p>}
             </form>
@@ -996,13 +1014,13 @@ export default function Home() {
                 <div className="flex items-center justify-between px-4 py-3 border-b border-border">
                   <h3 className="text-sm font-medium">
                     {playlistLoading
-                      ? "Loading playlist..."
+                      ? t("import.loadingPlaylist")
                       : importedIds.size > 0
                         ? `${playlistVideos.length} videos — ${importedIds.size} already imported, ${playlistVideos.length - importedIds.size} new`
                         : `${playlistVideos.length} videos in playlist`}
                   </h3>
                   <button onClick={cancelPlaylist} className="text-xs text-muted hover:text-foreground transition-colors">
-                    Cancel
+                    {t("import.cancelPlaylist")}
                   </button>
                 </div>
 
@@ -1042,10 +1060,10 @@ export default function Home() {
                           onChange={(e) => setExtractKeyMoments(e.target.checked)}
                           className="rounded border-border accent-accent"
                         />
-                        Key moments
+                        {t("import.keyMoments")}
                       </label>
                       <div className="w-px h-3 bg-border/50" />
-                      <span className="text-[10px] uppercase tracking-wider text-muted/60 shrink-0">Add to</span>
+                      <span className="text-[10px] uppercase tracking-wider text-muted/60 shrink-0">{t("folder.addTo")}</span>
                       <div className="relative" data-folder-dropdown>
                         <button
                           type="button"
@@ -1054,7 +1072,7 @@ export default function Home() {
                         >
                           <svg className="w-3 h-3 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" /></svg>
                           {playlistTargetFolder === null
-                            ? "No folder"
+                            ? t("folder.noFolder")
                             : folderList.find((f) => f.id === playlistTargetFolder)?.name ?? "Select..."}
                           <svg className="w-3 h-3 text-muted/50" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m6 9 6 6 6-6" /></svg>
                         </button>
@@ -1067,7 +1085,7 @@ export default function Home() {
                                 playlistTargetFolder === null ? "text-accent font-medium" : "text-foreground"
                               }`}
                             >
-                              No folder
+                              {t("folder.noFolder")}
                             </button>
                             {folderList.map((f) => (
                               <button
@@ -1114,7 +1132,7 @@ export default function Home() {
                                         setPlaylistNewFolderName("");
                                       }
                                     }}
-                                    placeholder="Folder name..."
+                                    placeholder={t("folder.newFolderName")}
                                     disabled={playlistCreatingFolder}
                                     className="flex-1 rounded border border-border bg-surface px-2 py-1 text-xs text-foreground placeholder:text-muted/40 focus:outline-none focus:border-accent"
                                   />
@@ -1161,7 +1179,7 @@ export default function Home() {
                                 className="w-full text-left px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-surface-hover/50 transition-colors flex items-center gap-1.5"
                               >
                                 <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14" /></svg>
-                                New folder...
+                                {t("sidebar.newFolder")}
                               </button>
                             )}
                           </div>
@@ -1202,7 +1220,7 @@ export default function Home() {
                               <span className="text-xs text-foreground line-clamp-2">{v.title}</span>
                               {alreadyImported && (
                                 <span className="inline-block mt-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-green-500/10 text-green-600 dark:text-green-400 rounded">
-                                  Imported
+                                  {t("video.imported")}
                                 </span>
                               )}
                             </div>
@@ -1216,14 +1234,14 @@ export default function Home() {
             )}
 
             {fetching ? (
-              <p className="text-center text-muted py-12">Loading videos...</p>
+              <p className="text-center text-muted py-12">{t("app.loading")}</p>
             ) : selectedFolderId !== null ? (
               folderVideosLoading ? (
-                <p className="text-center text-muted py-12">Loading folder...</p>
+                <p className="text-center text-muted py-12">{t("app.loading")}</p>
               ) : folderVideos.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border py-16 text-center">
-                  <p className="text-muted">No videos in this folder yet.</p>
-                  <p className="text-xs text-muted/60 mt-1">Click the folder icon on a video card to add it.</p>
+                  <p className="text-muted">{t("video.noFolderVideos")}</p>
+                  <p className="text-xs text-muted/60 mt-1">{t("video.noFolderVideosHint")}</p>
                 </div>
               ) : (
                 <>
@@ -1240,8 +1258,8 @@ export default function Home() {
                         className="rounded border-border accent-accent"
                       />
                       {selectedVideoIds.size > 0
-                        ? `${selectedVideoIds.size} selected`
-                        : `Select all (${currentVideoList.length})`}
+                        ? `${selectedVideoIds.size} ${t("video.selected")}`
+                        : `${t("video.selectAll")} (${currentVideoList.length})`}
                     </label>
                     <div className="flex items-center gap-2">
                       <div className="flex items-center rounded-lg border border-border bg-surface p-0.5">
@@ -1255,7 +1273,7 @@ export default function Home() {
                       <button
                         onClick={() => setViewMode("grid")}
                         className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
-                        title="Thumbnail view"
+                        title={t("video.thumbnailView")}
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
@@ -1264,7 +1282,7 @@ export default function Home() {
                       <button
                         onClick={() => setViewMode("list")}
                         className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
-                        title="Detail list view"
+                        title={t("video.detailListView")}
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                           <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -1312,7 +1330,7 @@ export default function Home() {
                             <button
                               onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
                               className="text-muted hover:text-accent transition-colors p-1 rounded"
-                              title="Remove from folder"
+                              title={t("sidebar.removeFromFolder")}
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
@@ -1322,7 +1340,7 @@ export default function Home() {
                           <button
                             onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
                             className="text-muted hover:text-danger transition-colors p-1 rounded"
-                            title="Delete"
+                            title={t("video.bulkDelete")}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1360,14 +1378,14 @@ export default function Home() {
                         <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
-                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
+                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} {t("video.annotations")}</span>
                           )}
                           {(video.sceneCount ?? 0) > 0 && (
-                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} scenes</span>
+                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} {t("video.scenes")}</span>
                           )}
-                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} moments</span>
+                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} {t("video.moments")}</span>
                           {video.hasTranscript && (
-                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">transcript</span>
+                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">{t("video.transcript")}</span>
                           )}
                         </div>
                       </div>
@@ -1376,7 +1394,7 @@ export default function Home() {
                           <button
                             onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
                             className="text-muted hover:text-accent transition-colors p-1.5 rounded"
-                            title="Remove from folder"
+                            title={t("sidebar.removeFromFolder")}
                           >
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
@@ -1386,7 +1404,7 @@ export default function Home() {
                         <button
                           onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
                           className="text-muted hover:text-danger transition-colors p-1.5 rounded"
-                          title="Delete"
+                          title={t("video.bulkDelete")}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1401,7 +1419,7 @@ export default function Home() {
               )
             ) : videos.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border py-16 text-center">
-                <p className="text-muted">No videos yet. Paste a YouTube URL above to get started.</p>
+                <p className="text-muted">{t("video.noVideos")}</p>
               </div>
             ) : (
               <>
@@ -1417,8 +1435,8 @@ export default function Home() {
                       className="rounded border-border accent-accent"
                     />
                     {selectedVideoIds.size > 0
-                      ? `${selectedVideoIds.size} selected`
-                      : `Select all (${currentVideoList.length})`}
+                      ? `${selectedVideoIds.size} ${t("video.selected")}`
+                      : `${t("video.selectAll")} (${currentVideoList.length})`}
                   </label>
                   <div className="flex items-center gap-2">
                     <div className="flex items-center rounded-lg border border-border bg-surface p-0.5">
@@ -1432,7 +1450,7 @@ export default function Home() {
                     <button
                       onClick={() => setViewMode("grid")}
                       className={`p-1.5 rounded transition-colors ${viewMode === "grid" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
-                      title="Thumbnail view"
+                      title={t("video.thumbnailView")}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
@@ -1441,7 +1459,7 @@ export default function Home() {
                     <button
                       onClick={() => setViewMode("list")}
                       className={`p-1.5 rounded transition-colors ${viewMode === "list" ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
-                      title="Detail list view"
+                      title={t("video.detailListView")}
                     >
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
@@ -1497,7 +1515,7 @@ export default function Home() {
                             <button
                               onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
                               className="text-muted hover:text-accent transition-colors p-1 rounded"
-                              title="Add to folder"
+                              title={t("folder.addTo")}
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -1505,7 +1523,7 @@ export default function Home() {
                             </button>
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Add to folder</div>
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
                                 {folderList.map((folder) => (
                                   <button
                                     key={folder.id}
@@ -1522,7 +1540,7 @@ export default function Home() {
                         <button
                           onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
                           className="text-muted hover:text-danger transition-colors p-1 rounded"
-                          title="Delete"
+                          title={t("video.bulkDelete")}
                         >
                           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -1560,14 +1578,14 @@ export default function Home() {
                         <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
-                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} annotations</span>
+                            <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} {t("video.annotations")}</span>
                           )}
                           {(video.sceneCount ?? 0) > 0 && (
-                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} scenes</span>
+                            <span className="text-[9px] font-medium text-purple-500 bg-purple-500/10 px-1.5 py-0.5 rounded">{video.sceneCount} {t("video.scenes")}</span>
                           )}
-                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} moments</span>
+                          <span className={`text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`}>{video.momentCount ?? 0} {t("video.moments")}</span>
                           {video.hasTranscript && (
-                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">transcript</span>
+                            <span className="text-[9px] font-medium text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded">{t("video.transcript")}</span>
                           )}
                         </div>
                       </div>
@@ -1577,7 +1595,7 @@ export default function Home() {
                             <button
                               onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
                               className="text-muted hover:text-accent transition-colors p-1.5 rounded"
-                              title="Add to folder"
+                              title={t("folder.addTo")}
                             >
                               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
@@ -1585,7 +1603,7 @@ export default function Home() {
                             </button>
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Add to folder</div>
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
                                 {folderList.map((folder) => (
                                   <button
                                     key={folder.id}
@@ -1599,21 +1617,21 @@ export default function Home() {
                             )}
                           </div>
                         )}
-                        <button
-                          onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
-                          className="text-muted hover:text-danger transition-colors p-1.5 rounded"
-                          title="Delete"
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    </Link>
-                  ))}
-                </div>
-                )}
-              </>
+                          <button
+                            onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
+                            className="text-muted hover:text-danger transition-colors p-1.5 rounded"
+                            title={t("video.bulkDelete")}
+                          >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                          </button>
+                        </div>
+                      </Link>
+                    ))}
+                  </div>
+                  )}
+                </>
             )}
           </div>
         )}
@@ -1629,7 +1647,7 @@ export default function Home() {
                     style={{ width: `${(bulkDeleteProgress.done / bulkDeleteProgress.total) * 100}%` }}
                   />
                 </div>
-                <span className="text-sm text-muted whitespace-nowrap">Deleting {bulkDeleteProgress.done}/{bulkDeleteProgress.total}</span>
+                <span className="text-sm text-muted whitespace-nowrap">{t("video.bulkDeleting")} {bulkDeleteProgress.done}/{bulkDeleteProgress.total}</span>
               </div>
             ) : (
               <>
@@ -1639,11 +1657,11 @@ export default function Home() {
                     onClick={() => setBulkFolderDropdown(!bulkFolderDropdown)}
                     className="text-sm px-3 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/80 transition-colors"
                   >
-                    Add to folder
+                    {t("video.bulkAddToFolder")}
                   </button>
                   {bulkFolderDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                      <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">Select folder</div>
+                      <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.select")}</div>
                       {folderList.map((folder) => (
                         <button
                           key={folder.id}
@@ -1654,7 +1672,7 @@ export default function Home() {
                         </button>
                       ))}
                       {folderList.length === 0 && (
-                        <div className="px-3 py-2 text-sm text-muted">No folders yet</div>
+                        <div className="px-3 py-2 text-sm text-muted">{t("folder.noFolders")}</div>
                       )}
                     </div>
                   )}
@@ -1663,7 +1681,7 @@ export default function Home() {
                   onClick={bulkDeleteSelected}
                   className="text-sm px-3 py-1.5 rounded-lg bg-danger/10 text-danger hover:bg-danger/20 transition-colors"
                 >
-                  Delete
+                  {t("video.bulkDelete")}
                 </button>
                 <button
                   onClick={() => setSelectedVideoIds(new Set())}
@@ -1684,7 +1702,7 @@ export default function Home() {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search annotations, scenes, key moments..."
+                placeholder={t("search.placeholder")}
                 autoFocus
                 className="w-full rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
               />
@@ -1696,7 +1714,7 @@ export default function Home() {
             </div>
 
             {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
-              <p className="text-sm text-muted text-center py-8">No results found</p>
+              <p className="text-sm text-muted text-center py-8">{t("search.noResults")}</p>
             )}
 
             {searchResults.length > 0 && (
@@ -1763,10 +1781,10 @@ export default function Home() {
                       {addToDropdown.open && addToDropdown.index === i && (
                         <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface shadow-xl z-50 py-1 max-h-60 overflow-y-auto">
                           <div className="px-3 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wider">
-                            Add to cliplist
+                            {t("search.addToCliplist")}
                           </div>
                           {cliplists.length === 0 ? (
-                            <div className="px-3 py-2 text-[10px] text-muted">No cliplists yet</div>
+                            <div className="px-3 py-2 text-[10px] text-muted">{t("search.noCliplists")}</div>
                           ) : (
                             cliplists.map((cl) => (
                               <button
@@ -1793,7 +1811,7 @@ export default function Home() {
                               }}
                               className="w-full text-left px-3 py-1.5 text-xs text-accent hover:bg-accent/10 transition-colors"
                             >
-                              + New cliplist
+                              {t("search.newCliplist")}
                             </button>
                           </div>
                         </div>
@@ -1812,14 +1830,14 @@ export default function Home() {
             {/* Header + Create button */}
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">
-                {cliplistsLoading ? "Loading..." : `${cliplists.length} cliplist${cliplists.length !== 1 ? "s" : ""}`}
+                {cliplistsLoading ? t("app.loading") : `${cliplists.length} ${t("cliplist.name")}${cliplists.length !== 1 ? "s" : ""}`}
               </h2>
               <button
                 onClick={() => setShowCreateCliplist(true)}
                 className="rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover transition-all flex items-center gap-1.5"
               >
                 <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                New Cliplist
+                {t("cliplist.newCliplist")}
               </button>
             </div>
 
@@ -1831,7 +1849,7 @@ export default function Home() {
                     type="text"
                     value={newCliplistName}
                     onChange={(e) => setNewCliplistName(e.target.value)}
-                    placeholder="Cliplist name"
+                    placeholder={t("cliplist.name")}
                     autoFocus
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none mb-2"
                   />
@@ -1839,7 +1857,7 @@ export default function Home() {
                     type="text"
                     value={newCliplistDesc}
                     onChange={(e) => setNewCliplistDesc(e.target.value)}
-                    placeholder="Description (optional)"
+                    placeholder={t("cliplist.description")}
                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none mb-3"
                   />
                   <div className="flex items-center gap-2">
@@ -1848,14 +1866,14 @@ export default function Home() {
                       disabled={creatingCliplist || !newCliplistName.trim()}
                       className="rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
                     >
-                      {creatingCliplist ? "Creating..." : "Create"}
+                      {creatingCliplist ? t("cliplist.creating") : t("cliplist.create")}
                     </button>
                     <button
                       type="button"
                       onClick={() => { setShowCreateCliplist(false); setNewCliplistName(""); setNewCliplistDesc(""); }}
                       className="rounded-lg border border-border px-4 py-1.5 text-xs text-muted hover:text-foreground transition-colors"
                     >
-                      Cancel
+                      {t("cliplist.cancelCreate")}
                     </button>
                   </div>
                 </form>
@@ -1874,7 +1892,7 @@ export default function Home() {
                   className="flex items-center gap-1 text-xs text-muted hover:text-foreground transition-colors mb-4"
                 >
                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-                  Back to all cliplists
+                  {t("cliplist.back")}
                 </button>
 
                 <div className="rounded-xl border border-border bg-surface overflow-hidden">
@@ -1892,11 +1910,11 @@ export default function Home() {
                           />
                           <button type="submit" disabled={!editingCliplistName.trim()}
                             className="rounded bg-accent px-2 py-1 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all">
-                            Save
+                            {t("cliplist.saveRename")}
                           </button>
                           <button type="button" onClick={() => setEditingCliplistId(null)}
                             className="rounded px-2 py-1 text-[10px] text-muted hover:text-foreground transition-colors">
-                            Cancel
+                            {t("cliplist.cancelRename")}
                           </button>
                         </form>
                       ) : (
@@ -1913,16 +1931,16 @@ export default function Home() {
                       <button
                         onClick={() => { setShowSlideForm(!showSlideForm); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
                         className="text-xs text-muted hover:text-accent transition-colors"
-                        title="Add slide between videos"
+                        title={t("cliplist.addSlideBetween")}
                       >
-                        + Slide
+                        + {t("cliplist.new")}
                       </button>
                       {editingCliplistId !== selectedCliplist.id && (
                         <button
                           onClick={() => { setEditingCliplistId(selectedCliplist.id); setEditingCliplistName(selectedCliplist.name); }}
                           className="text-xs text-muted hover:text-accent transition-colors"
                         >
-                          Rename
+                          {t("sidebar.rename")}
                         </button>
                       )}
                       {selectedCliplist.items.length > 0 && (
@@ -1931,7 +1949,7 @@ export default function Home() {
                           className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover active:scale-95 transition-all flex items-center gap-1.5"
                         >
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                          Play
+                          {t("cliplist.play")}
                         </button>
                       )}
                       <button
@@ -1949,10 +1967,10 @@ export default function Home() {
                           setSharing(false);
                         }}
                         className={`text-xs transition-colors ${shareCopied ? "text-accent" : "text-muted hover:text-accent"}`}
-                        title={shareCopied ? "Copied!" : "Generate share link"}
+                        title={shareCopied ? t("cliplist.copied") : t("cliplist.share")}
                       >
                         {shareCopied ? (
-                          <span className="text-[10px] font-medium">Copied!</span>
+                          <span className="text-[10px] font-medium">{t("cliplist.copied")}</span>
                         ) : (
                         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
                         )}
@@ -1961,7 +1979,7 @@ export default function Home() {
                         onClick={() => deleteCliplist(selectedCliplist.id)}
                         className="text-xs text-danger/60 hover:text-danger transition-colors"
                       >
-                        Delete
+                        {t("cliplist.delete")}
                       </button>
                     </div>
                   </div>
@@ -1978,14 +1996,14 @@ export default function Home() {
                           type="text"
                           value={slideTitle}
                           onChange={(e) => setSlideTitle(e.target.value)}
-                          placeholder="Slide title"
+                          placeholder={t("cliplist.slideTitle")}
                           className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                         />
                         <input
                           type="text"
                           value={slideDetail}
                           onChange={(e) => setSlideDetail(e.target.value)}
-                          placeholder="Subtitle (optional)"
+                          placeholder={t("cliplist.slideSubtitle")}
                           className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                         />
                         <div className="flex items-center gap-1 shrink-0">
@@ -2004,21 +2022,21 @@ export default function Home() {
                           disabled={!slideTitle.trim()}
                           className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
                         >
-                          Add
+                          {t("cliplist.addSlide")}
                         </button>
                         <button
                           type="button"
                           onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
                           className="text-[10px] text-muted hover:text-foreground transition-colors"
                         >
-                          Cancel
+                          {t("cliplist.cancelSlide")}
                         </button>
                       </form>
                     </div>
                   )}
 
                   {selectedCliplist.items.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-xs text-muted">No items in this cliplist</div>
+                    <div className="px-4 py-8 text-center text-xs text-muted">{t("cliplist.noItems")}</div>
                   ) : (
                     <div className="divide-y divide-border/50 max-h-[60vh] overflow-y-auto">
                       {selectedCliplist.items.map((item) => (
@@ -2041,7 +2059,7 @@ export default function Home() {
                                   type="text"
                                   value={editSlideDetail}
                                   onChange={(e) => setEditSlideDetail(e.target.value)}
-                                  placeholder="Subtitle"
+                                  placeholder={t("cliplist.editSubtitle")}
                                   className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                                 />
                                 <div className="flex items-center gap-1 shrink-0">
@@ -2060,14 +2078,14 @@ export default function Home() {
                                   disabled={!editSlideTitle.trim()}
                                   className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
                                 >
-                                  Save
+                                  {t("cliplist.saveSlide")}
                                 </button>
                                 <button
                                   type="button"
                                   onClick={() => setEditingSlideId(null)}
                                   className="text-[10px] text-muted hover:text-foreground transition-colors"
                                 >
-                                  Cancel
+                                  {t("cliplist.cancelEdit")}
                                 </button>
                               </form>
                             ) : (
@@ -2081,7 +2099,7 @@ export default function Home() {
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 mb-0.5">
-                                    <span className="text-[9px] uppercase font-medium text-purple-400 bg-purple-500/10 px-1 py-0.5 rounded">Slide</span>
+                                    <span className="text-[9px] uppercase font-medium text-purple-400 bg-purple-500/10 px-1 py-0.5 rounded">{t("cliplist.slideBadge")}</span>
                                     {item.endTimestamp && (
                                       <span className="text-[9px] font-mono text-muted/50">{item.endTimestamp}s</span>
                                     )}
@@ -2096,14 +2114,14 @@ export default function Home() {
                                 <button
                                   onClick={() => { setEditingSlideId(item.id); setEditSlideTitle(item.title); setEditSlideDetail(item.detail ?? ""); setEditSlideDuration(item.endTimestamp ?? 5); }}
                                   className="p-1 rounded text-muted/40 hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover/item:opacity-100"
-                                  title="Edit slide"
+                                  title={t("cliplist.editSlide")}
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                                 </button>
                                 <button
                                   onClick={() => removeClipItem(selectedCliplist.id, item.id)}
                                   className="p-1 rounded text-muted/40 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover/item:opacity-100"
-                                  title="Remove from cliplist"
+                                  title={t("cliplist.removeItem")}
                                 >
                                   <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                                 </button>
@@ -2140,7 +2158,7 @@ export default function Home() {
                           <button
                             onClick={() => removeClipItem(selectedCliplist.id, item.id)}
                             className="p-1 rounded text-muted/40 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover/item:opacity-100"
-                            title="Remove from cliplist"
+                            title={t("cliplist.removeItem")}
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                           </button>
@@ -2172,11 +2190,11 @@ export default function Home() {
                         <div className="flex items-center gap-2">
                           <button type="submit" disabled={!editingCliplistName.trim()}
                             className="rounded-md bg-accent px-3 py-1 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all">
-                            Save
+                            {t("cliplist.saveRename")}
                           </button>
                           <button type="button" onClick={() => setEditingCliplistId(null)}
                             className="rounded-md px-3 py-1 text-[10px] text-muted hover:text-foreground transition-colors">
-                            Cancel
+                            {t("cliplist.cancelRename")}
                           </button>
                         </div>
                       </form>
@@ -2199,7 +2217,7 @@ export default function Home() {
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); setEditingCliplistId(cl.id); setEditingCliplistName(cl.name); }}
                           className="opacity-0 group-hover:opacity-100 text-muted hover:text-accent transition-all p-0.5 rounded"
-                          title="Rename"
+                          title={t("sidebar.rename")}
                         >
                           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                         </button>
@@ -2221,9 +2239,9 @@ export default function Home() {
           <div>
             {!session ? (
               <div className="rounded-lg border border-dashed border-border py-16 text-center">
-                <p className="text-muted text-sm">Sign in to manage your API keys.</p>
+                <p className="text-muted text-sm">{t("settings.notSignedIn")}</p>
                 <a href="/signin" className="text-xs text-accent hover:text-accent-hover mt-2 inline-block transition-colors">
-                  Sign in with Google
+                  {t("settings.signIn")}
                 </a>
               </div>
             ) : settingsLoading ? (
@@ -2234,9 +2252,9 @@ export default function Home() {
               <div className="space-y-6">
                 {/* Header */}
                 <div>
-                  <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">AI Providers</h2>
+                  <h2 className="text-sm font-semibold text-muted uppercase tracking-wider">{t("settings.aiProviders")}</h2>
                   <p className="text-xs text-muted/60 mt-1">
-                    Add your own API keys to use your own quota. Keys are stored encrypted and never shared.
+                    {t("settings.description")}
                   </p>
                 </div>
 
@@ -2271,7 +2289,7 @@ export default function Home() {
                               <div className="flex items-center gap-1.5">
                                 <h3 className="text-sm font-semibold">{p.name}</h3>
                                 {p.free && (
-                                  <span className="text-[9px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">Free</span>
+                                  <span className="text-[9px] font-medium text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">{t("settings.free")}</span>
                                 )}
                               </div>
                               <p className="text-[10px] text-muted/60">{p.model}</p>
@@ -2289,7 +2307,7 @@ export default function Home() {
                                   saveSettings(newSettings);
                                 }}
                                 className="text-[10px] text-danger/60 hover:text-danger transition-colors"
-                                title="Remove key"
+                                title={t("settings.removeKey")}
                               >
                                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -2308,7 +2326,7 @@ export default function Home() {
                                   ? "text-accent bg-accent/10"
                                   : "text-muted/40 hover:text-accent hover:bg-accent/5"
                               }`}
-                              title={isPreferred ? "Preferred (click to unset)" : "Set as preferred"}
+                              title={isPreferred ? t("settings.unsetPreferred") : t("settings.preferred")}
                             >
                               <svg className="w-3.5 h-3.5" fill={isPreferred ? "currentColor" : "none"} viewBox="0 0 24 24" stroke="currentColor">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
@@ -2343,7 +2361,7 @@ export default function Home() {
                                   }
                                 }, 800);
                               }}
-                              placeholder={isConfigured ? "Key saved — enter new key to replace" : `Enter ${p.name} API key (${p.keyPrefix}...)`}
+                              placeholder={isConfigured ? t("settings.keySaved") : t("settings.enterKey").replace("{provider}", p.name).replace("{prefix}", p.keyPrefix)}
                               className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all"
                             />
                           </div>
@@ -2355,15 +2373,15 @@ export default function Home() {
                               disabled={!isConfigured || test?.testing}
                               className="rounded-lg border border-border px-2.5 py-1 text-[10px] font-medium text-muted hover:text-foreground hover:border-accent/30 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                             >
-                              {test?.testing ? "Testing..." : "Test"}
+                              {test?.testing ? t("settings.testing") : t("settings.test")}
                             </button>
                             {test && !test.testing && (
                               <span className={`text-[10px] font-medium ${test.success ? "text-emerald-500" : "text-danger"}`}>
-                                {test.success ? "Connected" : "Failed"}
+                                {test.success ? t("settings.connected") : t("settings.failed")}
                               </span>
                             )}
                             {isConfigured && !test && (
-                              <span className="text-[10px] text-emerald-500/60 font-medium">Configured</span>
+                              <span className="text-[10px] text-emerald-500/60 font-medium">{t("settings.configured")}</span>
                             )}
                           </div>
                           {/* Warning banner when test fails */}
@@ -2371,7 +2389,7 @@ export default function Home() {
                             <div className="mt-2 rounded-lg border border-danger/20 bg-danger/5 px-3 py-2">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="text-[10px] text-danger/80 leading-relaxed">
-                                  {test.error?.slice(0, 80) ?? "Connection failed"} &mdash; this key won&#39;t be used for AI calls.
+                                  {test.error?.slice(0, 80) ?? t("settings.connectionFailed")} &mdash; {t("settings.keyNotUsed")}
                                 </p>
                                 <button
                                   onClick={() => {
@@ -2385,7 +2403,7 @@ export default function Home() {
                                   }}
                                   className="shrink-0 text-[10px] text-danger/60 hover:text-danger font-medium transition-colors"
                                 >
-                                  Remove
+                                  {t("settings.removeKey")}
                                 </button>
                               </div>
                             </div>
@@ -2400,11 +2418,11 @@ export default function Home() {
                 <div className="flex items-center justify-between rounded-lg border border-border bg-surface px-4 py-3">
                   <div className="flex items-center gap-3">
                     <span className="text-[10px] text-muted">
-                      {configuredProviders.size} provider{configuredProviders.size !== 1 ? "s" : ""} configured
+                      {t("settings.providersConfigured").replace("{count}", String(configuredProviders.size))}
                     </span>
                     {settings.preferredProvider && (
                       <span className="text-[10px] text-accent font-medium">
-                        Preferred: {settings.preferredProvider}
+                        {t("settings.preferredLabel").replace("{provider}", settings.preferredProvider)}
                       </span>
                     )}
                     {settingsSaving && (
@@ -2421,7 +2439,7 @@ export default function Home() {
                       }}
                       className="text-[10px] text-danger/60 hover:text-danger transition-colors"
                     >
-                      Clear all
+                      {t("settings.clearAll")}
                     </button>
                   )}
                 </div>
