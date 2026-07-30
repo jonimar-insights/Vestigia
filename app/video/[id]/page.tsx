@@ -1399,7 +1399,7 @@ export default function VideoPage() {
 
             {/* Feed list */}
             {!feedCollapsed && (
-              <div className="flex-1 min-h-0 overflow-y-auto max-h-[calc(100vh-16rem)] pr-1 space-y-2 scrollbar-thin">
+              <div className="flex-1 min-h-0 overflow-y-auto max-h-[calc(100vh-16rem)] pr-1 space-y-2 scrollbar-thin" style={{ zoom: 1.5 }}>
                 {displayedAnnotations.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-20 text-center">
                     <div className="w-20 h-20 rounded-2xl bg-surface-hover border border-border flex items-center justify-center mb-5 shadow-inner">
