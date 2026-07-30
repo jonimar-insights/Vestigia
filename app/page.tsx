@@ -150,6 +150,16 @@ export default function Home() {
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
+  // ── Share dialog state ──
+  const [shareDialogFolderId, setShareDialogFolderId] = useState<number | null>(null);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareLink, setShareLink] = useState("");
+  const [shareList, setShareList] = useState<Array<{ id: number; email: string; permission: string }>>([]);
+  const [shareListLoading, setShareListLoading] = useState(false);
+  const [newShareEmail, setNewShareEmail] = useState("");
+  const [newSharePermission, setNewSharePermission] = useState<"view" | "edit">("view");
+  const [addingShare, setAddingShare] = useState(false);
+
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
   const [translating, setTranslating] = useState(false);
@@ -412,6 +422,73 @@ export default function Home() {
     await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
     if (selectedFolderId === folderId) setSelectedFolderId(null);
     await loadFolders();
+  }
+
+  // ── Share dialog ──
+  async function openShareDialog(folderId: number) {
+    setShareDialogFolderId(folderId);
+    setShareDialogOpen(true);
+    setShareLink("");
+    setShareList([]);
+    setNewShareEmail("");
+    setNewSharePermission("view");
+    // Generate share link
+    try {
+      const res = await fetch(`/api/folders/${folderId}/share`, { method: "POST" });
+      if (res.ok) {
+        const { url } = await res.json();
+        setShareLink(url);
+      }
+    } catch {}
+    // Load existing shares
+    await loadShareList(folderId);
+  }
+
+  async function loadShareList(folderId: number) {
+    setShareListLoading(true);
+    try {
+      const res = await fetch(`/api/folders/${folderId}/shares`);
+      if (res.ok) setShareList(await res.json());
+    } catch {}
+    setShareListLoading(false);
+  }
+
+  async function handleAddShare(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newShareEmail.trim() || !shareDialogFolderId) return;
+    setAddingShare(true);
+    try {
+      const res = await fetch(`/api/folders/${shareDialogFolderId}/shares`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: newShareEmail.trim(), permission: newSharePermission }),
+      });
+      if (res.ok) {
+        setNewShareEmail("");
+        await loadShareList(shareDialogFolderId);
+      } else {
+        const data = await res.json();
+        console.error("Failed to add share:", data.error);
+      }
+    } catch {}
+    setAddingShare(false);
+  }
+
+  async function handleRemoveShare(email: string) {
+    if (!shareDialogFolderId) return;
+    try {
+      await fetch(`/api/folders/${shareDialogFolderId}/shares?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+      await loadShareList(shareDialogFolderId);
+      await loadFolders();
+    } catch {}
+  }
+
+  async function handleCopyShareLink() {
+    if (shareLink) {
+      await navigator.clipboard.writeText(shareLink);
+      setSharedFolderCopied(shareDialogFolderId);
+      setTimeout(() => setSharedFolderCopied(null), 2000);
+    }
   }
 
   async function addVideoToFolder(folderId: number, videoId: number) {
@@ -904,15 +981,7 @@ export default function Home() {
                             <span
                               onClick={async (e) => {
                                 e.stopPropagation();
-                                try {
-                                  const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
-                                  if (!res.ok) return;
-                                  const { url } = await res.json();
-                                  await navigator.clipboard.writeText(url);
-                                  setSharedFolderCopied(folder.id);
-                                  setTimeout(() => setSharedFolderCopied(null), 2000);
-                                  await loadFolders();
-                                } catch {}
+                                openShareDialog(folder.id);
                               }}
                               className={`p-0.5 rounded cursor-pointer transition-colors ${
                                 sharedFolderCopied === folder.id
@@ -2532,6 +2601,104 @@ export default function Home() {
         )}
       </main>
       </div>
+
+      {/* ── Share Folder Dialog ── */}
+      {shareDialogOpen && shareDialogFolderId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShareDialogOpen(false)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-surface shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold">Share Folder</h3>
+              <button onClick={() => setShareDialogOpen(false)} className="text-muted hover:text-foreground transition-colors p-1 rounded">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Share link */}
+            <div className="mb-4">
+              <label className="text-[10px] font-medium text-muted uppercase tracking-wider mb-1 block">Share Link</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={shareLink}
+                  readOnly
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono text-muted truncate"
+                />
+                <button
+                  onClick={handleCopyShareLink}
+                  className={`shrink-0 rounded-lg px-3 py-2 text-xs font-medium transition-all ${
+                    sharedFolderCopied === shareDialogFolderId
+                      ? "bg-accent text-white"
+                      : "bg-accent/10 text-accent hover:bg-accent/20"
+                  }`}
+                >
+                  {sharedFolderCopied === shareDialogFolderId ? "Copied!" : "Copy"}
+                </button>
+              </div>
+            </div>
+
+            {/* Shared users list */}
+            <div className="mb-4">
+              <label className="text-[10px] font-medium text-muted uppercase tracking-wider mb-1 block">
+                People with access ({shareList.length})
+              </label>
+              <div className="max-h-40 overflow-y-auto space-y-1">
+                {shareListLoading ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+                  </div>
+                ) : shareList.length === 0 ? (
+                  <p className="text-xs text-muted/60 text-center py-3">No one has been invited yet</p>
+                ) : (
+                  shareList.map((s) => (
+                    <div key={s.id} className="flex items-center justify-between rounded-lg bg-background px-3 py-2 border border-border/50">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs truncate">{s.email}</p>
+                        <span className={`text-[9px] font-medium ${s.permission === "edit" ? "text-accent" : "text-muted/60"}`}>
+                          {s.permission === "edit" ? "Can edit" : "Can view"}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveShare(s.email)}
+                        className="shrink-0 p-1 rounded text-muted/40 hover:text-danger transition-colors"
+                        title="Remove"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Add user form */}
+            <form onSubmit={handleAddShare} className="flex items-center gap-2">
+              <input
+                type="email"
+                value={newShareEmail}
+                onChange={(e) => setNewShareEmail(e.target.value)}
+                placeholder="email@example.com"
+                required
+                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+              />
+              <select
+                value={newSharePermission}
+                onChange={(e) => setNewSharePermission(e.target.value as "view" | "edit")}
+                className="rounded-lg border border-border bg-background px-2 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+              >
+                <option value="view">View</option>
+                <option value="edit">Edit</option>
+              </select>
+              <button
+                type="submit"
+                disabled={addingShare || !newShareEmail.trim()}
+                className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+              >
+                {addingShare ? "Adding..." : "Invite"}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ── Video Playlist overlay ── */}
       {slideshowItems && (

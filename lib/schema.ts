@@ -149,6 +149,18 @@ export const folders = pgTable("folders", {
   userId: text("user_id"),
 });
 
+export const folderShares = pgTable("folder_shares", {
+  id: serial("id").primaryKey(),
+  folderId: integer("folder_id")
+    .notNull()
+    .references(() => folders.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  permission: text("permission").notNull().default("view"),
+  createdAt: text("created_at")
+    .notNull()
+    .$defaultFn(() => new Date().toISOString()),
+});
+
 export const folderVideos = pgTable("folder_videos", {
   id: serial("id").primaryKey(),
   folderId: integer("folder_id")

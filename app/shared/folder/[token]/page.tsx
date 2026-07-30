@@ -67,16 +67,19 @@ export default function SharedFolderPage({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Email verification
+  const [verifiedEmail, setVerifiedEmail] = useState<string | null>(null);
+  const [permission, setPermission] = useState<"view" | "edit" | null>(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [verifiedName, setVerifiedName] = useState("");
+
   const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
   const [annotations, setAnnotations] = useState<SharedAnnotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
 
-  // Mode
-  const [mode, setMode] = useState<"view" | "edit">("edit");
-
   // Annotation form
-  const [authorName, setAuthorName] = useState("");
-  const [authorEmail, setAuthorEmail] = useState("");
   const [startSec, setStartSec] = useState(-1);
   const [endSec, setEndSec] = useState(-1);
   const [note, setNote] = useState("");
@@ -95,12 +98,22 @@ export default function SharedFolderPage({
     async function init() {
       const p = await params;
       setToken(p.token);
+      // Restore verified email from localStorage
+      const stored = localStorage.getItem(`shared_folder_email_${p.token}`);
+      if (stored) {
+        try {
+          const { email, permission: perm, name } = JSON.parse(stored);
+          setVerifiedEmail(email);
+          setPermission(perm);
+          setVerifiedName(name || "");
+        } catch {}
+      }
     }
     init();
   }, [params]);
 
   useEffect(() => {
-    if (!token) return;
+    if (!token || verifiedEmail) return;
     (async () => {
       try {
         const res = await fetch(`/api/shared/folder/${token}`);
@@ -116,7 +129,51 @@ export default function SharedFolderPage({
         setLoading(false);
       }
     })();
-  }, [token]);
+  }, [token, verifiedEmail]);
+
+  async function handleVerify(e: React.FormEvent) {
+    e.preventDefault();
+    if (!emailInput.trim() || !token) return;
+    setVerifying(true);
+    setVerifyError(null);
+    try {
+      const res = await fetch(`/api/shared/folder/${token}/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: emailInput.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.authorized) {
+        setVerifiedEmail(data.email);
+        setPermission(data.permission);
+        setVerifiedName(emailInput.trim().split("@")[0]);
+        // Store in localStorage
+        localStorage.setItem(
+          `shared_folder_email_${token}`,
+          JSON.stringify({ email: data.email, permission: data.permission, name: emailInput.trim().split("@")[0] })
+        );
+      } else {
+        setVerifyError(data.error || "You don't have access to this folder");
+      }
+    } catch {
+      setVerifyError("Failed to verify email");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
+  function handleSignOut() {
+    if (token) {
+      localStorage.removeItem(`shared_folder_email_${token}`);
+    }
+    setVerifiedEmail(null);
+    setPermission(null);
+    setVerifiedName("");
+    setEmailInput("");
+    setFolder(null);
+    setLoading(true);
+    setSelectedVideo(null);
+  }
 
   const loadAnnotations = useCallback(async (videoId: number) => {
     if (!token) return;
@@ -222,7 +279,7 @@ export default function SharedFolderPage({
 
   async function handleAddAnnotation(e: React.FormEvent) {
     e.preventDefault();
-    if (!authorName.trim() || startSec < 0 || endSec < 0 || !token || !selectedVideo) return;
+    if (!authorName.trim() || startSec < 0 || endSec < 0 || !token || !selectedVideo || !verifiedEmail) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/shared/folder/${token}/annotations`, {
@@ -231,7 +288,7 @@ export default function SharedFolderPage({
         body: JSON.stringify({
           videoId: selectedVideo.id,
           name: authorName.trim(),
-          email: authorEmail.trim() || null,
+          email: verifiedEmail,
           timestampStart: startSec,
           timestampEnd: endSec,
           note: note.trim() || null,
@@ -242,12 +299,73 @@ export default function SharedFolderPage({
         setEndSec(-1);
         setNote("");
         await loadAnnotations(selectedVideo.id);
+      } else {
+        const data = await res.json();
+        console.error("Failed to save annotation:", data.error);
       }
     } finally {
       setSaving(false);
     }
   }
 
+  async function handleDeleteAnnotation(annotationId: number) {
+    if (!token || !verifiedEmail) return;
+    try {
+      const res = await fetch(`/api/shared/folder/${token}/annotations`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ annotationId, email: verifiedEmail }),
+      });
+      if (res.ok && selectedVideo) {
+        await loadAnnotations(selectedVideo.id);
+      }
+    } catch {}
+  }
+
+  const authorName = verifiedName;
+
+  // ── Email verification screen ──
+  if (!verifiedEmail) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
+              <svg className="w-7 h-7 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h1 className="text-lg font-semibold">Shared Folder</h1>
+            <p className="text-sm text-muted mt-1">Enter your email to access this folder</p>
+          </div>
+
+          <form onSubmit={handleVerify} className="space-y-3">
+            <input
+              type="email"
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              placeholder="your@email.com"
+              required
+              autoFocus
+              className="w-full rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            {verifyError && (
+              <p className="text-xs text-danger text-center">{verifyError}</p>
+            )}
+            <button
+              type="submit"
+              disabled={verifying || !emailInput.trim()}
+              className="w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+            >
+              {verifying ? "Verifying..." : "Access Folder"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Loading state ──
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -259,6 +377,7 @@ export default function SharedFolderPage({
     );
   }
 
+  // ── Error state ──
   if (error || !folder) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-background gap-4">
@@ -273,37 +392,57 @@ export default function SharedFolderPage({
     );
   }
 
+  const canEdit = permission === "edit";
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
       <header className="border-b border-border px-6 py-4 shrink-0">
         <div className="mx-auto w-full max-w-6xl">
-          {selectedVideo ? (
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => { setSelectedVideo(null); setPlayerReady(false); playerRef.current = null; }}
-                className="shrink-0 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-              </button>
-              <div className="min-w-0">
-                <h1 className="text-sm font-semibold truncate">{selectedVideo.title ?? "Untitled"}</h1>
-                <p className="text-[10px] text-muted">{folder.name}</p>
-              </div>
-            </div>
-          ) : (
-            <div>
-              <h1 className="text-xl font-semibold">{folder.name}</h1>
-              {folder.description && (
-                <p className="text-sm text-muted mt-0.5">{folder.description}</p>
+          <div className="flex items-center justify-between">
+            <div className="min-w-0">
+              {selectedVideo ? (
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => { setSelectedVideo(null); setPlayerReady(false); playerRef.current = null; }}
+                    className="shrink-0 p-1.5 rounded-lg text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <div className="min-w-0">
+                    <h1 className="text-sm font-semibold truncate">{selectedVideo.title ?? "Untitled"}</h1>
+                    <p className="text-[10px] text-muted">{folder.name}</p>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <h1 className="text-xl font-semibold">{folder.name}</h1>
+                  {folder.description && (
+                    <p className="text-sm text-muted mt-0.5">{folder.description}</p>
+                  )}
+                  <p className="text-[10px] text-muted/60 mt-1">
+                    {folder.videos.length} video{folder.videos.length !== 1 ? "s" : ""}
+                  </p>
+                </div>
               )}
-              <p className="text-[10px] text-muted/60 mt-1">
-                {folder.videos.length} video{folder.videos.length !== 1 ? "s" : ""}
-              </p>
             </div>
-          )}
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="text-right">
+                <p className="text-xs text-muted">{verifiedEmail}</p>
+                <p className="text-[10px] text-muted/60">
+                  {canEdit ? "Edit access" : "View only"}
+                </p>
+              </div>
+              <button
+                onClick={handleSignOut}
+                className="text-[10px] text-muted hover:text-foreground px-2 py-1 rounded border border-border hover:bg-surface-hover transition-colors"
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -388,89 +527,77 @@ export default function SharedFolderPage({
 
             {/* Annotation panel */}
             <div className="w-full lg:w-80 shrink-0 flex flex-col gap-4">
-              {/* Form */}
-              <div className="rounded-xl border border-border bg-surface p-3">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">Add Annotation</h3>
-                  <button
-                    type="button"
-                    onClick={() => setMode(mode === "edit" ? "view" : "edit")}
-                    className={`text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
-                      mode === "edit"
-                        ? "bg-accent/10 text-accent border-accent/30"
-                        : "text-muted border-border hover:border-muted"
-                    }`}
-                  >
-                    {mode === "edit" ? "Editing" : "Viewing"}
-                  </button>
-                </div>
-                {mode === "edit" && (
-                <form onSubmit={handleAddAnnotation} className="space-y-2.5">
-                  <input
-                    type="text"
-                    value={authorName}
-                    onChange={(e) => setAuthorName(e.target.value)}
-                    placeholder="Your name"
-                    required
-                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                  />
-                  <input
-                    type="email"
-                    value={authorEmail}
-                    onChange={(e) => setAuthorEmail(e.target.value)}
-                    placeholder="Your email (optional)"
-                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                  />
-                  <div className="flex items-center gap-2">
-                    <div className="flex-1">
-                      <div className="text-[9px] text-muted/60 mb-0.5">Start</div>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={startSec < 0 ? "—" : formatTs(startSec)}
-                          readOnly
-                          className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
-                        />
-                        <button type="button" onClick={markStart}
-                          className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
-                          now
-                        </button>
-                      </div>
-                    </div>
-                    <span className="text-muted/30 mt-4">–</span>
-                    <div className="flex-1">
-                      <div className="text-[9px] text-muted/60 mb-0.5">End</div>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="text"
-                          value={endSec < 0 ? "—" : formatTs(endSec)}
-                          readOnly
-                          className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
-                        />
-                        <button type="button" onClick={markEnd}
-                          className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
-                          now
-                        </button>
-                      </div>
-                    </div>
+              {/* Annotation form (only for edit permission) */}
+              {canEdit && (
+                <div className="rounded-xl border border-border bg-surface p-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">Add Annotation</h3>
+                    <span className="text-[10px] text-accent/80 bg-accent/5 px-2 py-0.5 rounded-full">Editing</span>
                   </div>
-                  <textarea
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Add a note..."
-                    rows={2}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-none"
-                  />
-                  <button
-                    type="submit"
-                    disabled={saving || !authorName.trim() || startSec < 0 || endSec < 0}
-                    className="w-full rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                  >
-                    {saving ? "Saving..." : "Save Annotation"}
-                  </button>
-                </form>
-                )}
-              </div>
+                  <form onSubmit={handleAddAnnotation} className="space-y-2.5">
+                    <div className="flex items-center gap-2 text-xs text-muted/80 bg-background rounded-lg px-3 py-1.5 border border-border/50">
+                      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      <span className="truncate">{verifiedEmail}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1">
+                        <div className="text-[9px] text-muted/60 mb-0.5">Start</div>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={startSec < 0 ? "—" : formatTs(startSec)}
+                            readOnly
+                            className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                          />
+                          <button type="button" onClick={markStart}
+                            className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
+                            now
+                          </button>
+                        </div>
+                      </div>
+                      <span className="text-muted/30 mt-4">–</span>
+                      <div className="flex-1">
+                        <div className="text-[9px] text-muted/60 mb-0.5">End</div>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            value={endSec < 0 ? "—" : formatTs(endSec)}
+                            readOnly
+                            className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                          />
+                          <button type="button" onClick={markEnd}
+                            className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
+                            now
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                    <textarea
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Add a note..."
+                      rows={2}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-none"
+                    />
+                    <button
+                      type="submit"
+                      disabled={saving || startSec < 0 || endSec < 0}
+                      className="w-full rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                    >
+                      {saving ? "Saving..." : "Save Annotation"}
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Permission badge for view-only */}
+              {!canEdit && (
+                <div className="rounded-xl border border-border bg-surface p-3 text-center">
+                  <p className="text-xs text-muted/60">You have view-only access</p>
+                </div>
+              )}
 
               {/* Annotation feed */}
               <div className="flex-1 min-h-0">
@@ -485,21 +612,42 @@ export default function SharedFolderPage({
                     </div>
                   )}
                   {!annotationsLoading && annotations.length === 0 && (
-                    <p className="text-xs text-muted/60 text-center py-6">No annotations yet. Play the video and add one!</p>
+                    <p className="text-xs text-muted/60 text-center py-6">
+                      {canEdit
+                        ? "No annotations yet. Play the video and add one!"
+                        : "No annotations yet."}
+                    </p>
                   )}
                   {annotations.map((a) => (
                     <div key={a.id}
-                      className="rounded-lg border border-border/60 bg-surface p-2.5 hover:bg-surface-hover/50 transition-colors cursor-pointer"
+                      className="rounded-lg border border-border/60 bg-surface p-2.5 hover:bg-surface-hover/50 transition-colors cursor-pointer group"
                       onClick={() => playSegment(a.timestampStart, a.timestampEnd)}
                     >
                       <div className="flex items-center justify-between gap-2 mb-0.5">
-                        <span className="text-[10px] font-semibold text-accent/80 truncate">{a.createdBy}</span>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-[10px] font-semibold text-accent/80 truncate">{a.createdBy}</span>
+                          {a.email && (
+                            <span className="text-[8px] text-muted/40 truncate">{a.email}</span>
+                          )}
+                        </div>
                         <span className="text-[9px] font-mono text-muted/50 tabular-nums shrink-0">
                           {formatTs(a.timestampStart)} – {formatTs(a.timestampEnd)}
                         </span>
                       </div>
                       {a.note && (
                         <p className="text-[10px] text-muted/80 line-clamp-2">{a.note}</p>
+                      )}
+                      {/* Delete button for own annotations */}
+                      {canEdit && a.email === verifiedEmail && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteAnnotation(a.id);
+                          }}
+                          className="mt-1.5 text-[9px] text-danger/60 hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
+                        >
+                          Delete
+                        </button>
                       )}
                     </div>
                   ))}
