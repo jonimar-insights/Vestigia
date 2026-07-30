@@ -152,7 +152,7 @@ export default function VideoPage() {
       const saved = localStorage.getItem("momentFontSize");
       if (saved) return parseFloat(saved);
     }
-    return 1;
+    return 1.5;
   });
   const [shareCopiedId, setShareCopiedId] = useState<number | null>(null);
   const [siblingVideos, setSiblingVideos] = useState<Array<{ id: number; title: string | null; thumbnailUrl: string | null }>>([]);
