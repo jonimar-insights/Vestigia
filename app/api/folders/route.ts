@@ -49,6 +49,7 @@ export async function POST(request: NextRequest) {
       name: name.trim(),
       description: description?.trim() || null,
       color: color || "bg-accent",
+      shareToken: crypto.randomUUID(),
       createdAt: now,
       updatedAt: now,
       userId: session.user.id as string,
