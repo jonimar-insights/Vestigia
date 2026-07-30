@@ -14,6 +14,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `GET /api/shared/folder/[token]` + `GET|POST /api/shared/folder/[token]/annotations` — public endpoints
 - `app/shared/folder/[token]/page.tsx` — public shared folder dashboard
 - Share button (share icon + clipboard copy + "Copied!") added to folder sidebar in `app/page.tsx`
+- Auto-generated `shareToken` on folder creation in `app/api/folders/route.ts`
 - EN/PT translation keys `share.*` and `shared.*` added to `lib/translations.ts`
 
 ### Active
