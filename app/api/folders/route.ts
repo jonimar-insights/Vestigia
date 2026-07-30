@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos } from "@/lib/schema";
-import { eq, desc, count } from "drizzle-orm";
+import { eq, asc, count } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET() {
@@ -14,7 +14,7 @@ export async function GET() {
     .select()
     .from(folders)
     .where(eq(folders.userId, session.user.id as string))
-    .orderBy(desc(folders.updatedAt));
+    .orderBy(asc(folders.name));
 
   const result = await Promise.all(
     allFolders.map(async (f) => {
