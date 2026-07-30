@@ -134,7 +134,8 @@ export default function Home() {
   const settingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Folder state ──
-  const [folderList, setFolderList] = useState<Array<{ id: number; name: string; videoCount: number; color?: string | null }>>([]);
+  const [folderList, setFolderList] = useState<Array<{ id: number; name: string; videoCount: number; shareToken: string | null; color?: string | null }>>([]);
+  const [sharedFolderCopied, setSharedFolderCopied] = useState<number | null>(null);
   const [selectedFolderId, setSelectedFolderId] = useState<number | null>(null);
   const [folderVideos, setFolderVideos] = useState<Video[]>([]);
   const [folderVideosLoading, setFolderVideosLoading] = useState(false);
@@ -148,7 +149,6 @@ export default function Home() {
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [folderShareCopied, setFolderShareCopied] = useState<number | null>(null);
 
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
@@ -902,27 +902,6 @@ export default function Home() {
                           <span className="text-[10px] text-muted/60">{folder.videoCount}</span>
                           <div className="flex items-center gap-0.5">
                             <span
-                              onClick={async (e) => {
-                                e.stopPropagation();
-                                try {
-                                  const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
-                                  if (!res.ok) return;
-                                  const { url } = await res.json();
-                                  await navigator.clipboard.writeText(url);
-                                  setFolderShareCopied(folder.id);
-                                  setTimeout(() => setFolderShareCopied(null), 2000);
-                                } catch {}
-                              }}
-                              className={`cursor-pointer p-0.5 transition-colors ${folderShareCopied === folder.id ? "text-accent" : "text-muted hover:text-accent"}`}
-                              title={folderShareCopied === folder.id ? t("share.copied") : t("share.link")}
-                            >
-                              {folderShareCopied === folder.id ? (
-                                <span className="text-[10px] font-medium">{t("share.copied")}</span>
-                              ) : (
-                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-                              )}
-                            </span>
-                            <span
                               onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
                               className="text-muted hover:text-foreground cursor-pointer p-0.5"
                               title={t("sidebar.rename")}
@@ -972,6 +951,41 @@ export default function Home() {
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </form>
+              )}
+
+              {/* Shared folders */}
+              {folderList.filter((f) => f.shareToken).length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+                    {t("share.sharedFolders")}
+                  </h3>
+                  <div className="space-y-0.5">
+                    {folderList.filter((f) => f.shareToken).map((folder) => (
+                      <div key={folder.id} className="flex items-center justify-between px-3 py-1.5 rounded-lg text-sm text-muted">
+                        <span className="truncate text-xs">{folder.name}</span>
+                        <button
+                          onClick={async () => {
+                            try {
+                              const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
+                              if (!res.ok) return;
+                              const { url } = await res.json();
+                              await navigator.clipboard.writeText(url);
+                              setSharedFolderCopied(folder.id);
+                              setTimeout(() => setSharedFolderCopied(null), 2000);
+                            } catch {}
+                          }}
+                          className={`shrink-0 ml-2 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
+                            sharedFolderCopied === folder.id
+                              ? "bg-accent/10 text-accent border-accent/30"
+                              : "border-border text-muted hover:border-accent/30 hover:text-accent"
+                          }`}
+                        >
+                          {sharedFolderCopied === folder.id ? t("share.copied") : t("share.link")}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
