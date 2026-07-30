@@ -1,23 +1,23 @@
-import { NextRequest } from "next/server";
+import { auth } from "@/auth";
+import { NextResponse } from "next/server";
 
-const PUBLIC_FILE = /\.[\w]+$/;
+const handler = auth((req) => {
+  const { nextUrl } = req;
+  const isLoggedIn = !!req.auth;
 
-export function proxy(request: NextRequest) {
-  if (PUBLIC_FILE.test(request.nextUrl.pathname)) return;
+  const isPublic =
+    nextUrl.pathname.startsWith("/shared/") ||
+    nextUrl.pathname.startsWith("/api/shared/") ||
+    nextUrl.pathname === "/signin" ||
+    nextUrl.pathname.startsWith("/api/auth/");
 
-  const session = request.cookies.get("authjs.session-token")
-    ?? request.cookies.get("__Secure-authjs.session-token");
+  if (isPublic) return NextResponse.next();
+  if (!isLoggedIn) return NextResponse.redirect(new URL("/signin", nextUrl));
+  return NextResponse.next();
+});
 
-  if (!session && request.nextUrl.pathname !== "/signin") {
-    const signInUrl = new URL("/signin", request.nextUrl.origin);
-    return Response.redirect(signInUrl);
-  }
-
-  if (session && request.nextUrl.pathname === "/signin") {
-    return Response.redirect(new URL("/", request.nextUrl.origin));
-  }
-}
+export default handler;
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };
