@@ -16,6 +16,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Share button (share icon + clipboard copy + "Copied!") added to folder sidebar in `app/page.tsx`
 - Auto-generated `shareToken` on folder creation in `app/api/folders/route.ts`
 - EN/PT translation keys `share.*` and `shared.*` added to `lib/translations.ts`
+- `proxy.ts` — exempts `/shared/*`, `/api/shared/*`, `/signin`, `/api/auth/*` from auth redirect
 
 ### Active
 - (none)
