@@ -77,8 +77,8 @@ export default function SharedFolderPage({
   // Annotation form
   const [authorName, setAuthorName] = useState("");
   const [authorEmail, setAuthorEmail] = useState("");
-  const [startSec, setStartSec] = useState(0);
-  const [endSec, setEndSec] = useState(0);
+  const [startSec, setStartSec] = useState(-1);
+  const [endSec, setEndSec] = useState(-1);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -135,8 +135,8 @@ export default function SharedFolderPage({
     playerRef.current = null;
     setAnnotations([]);
     loadAnnotations(video.id);
-    setStartSec(0);
-    setEndSec(0);
+    setStartSec(-1);
+    setEndSec(-1);
     setNote("");
   }
 
@@ -222,7 +222,7 @@ export default function SharedFolderPage({
 
   async function handleAddAnnotation(e: React.FormEvent) {
     e.preventDefault();
-    if (!authorName.trim() || !startSec || !endSec || !token || !selectedVideo) return;
+    if (!authorName.trim() || startSec < 0 || endSec < 0 || !token || !selectedVideo) return;
     setSaving(true);
     try {
       const res = await fetch(`/api/shared/folder/${token}/annotations`, {
@@ -238,8 +238,8 @@ export default function SharedFolderPage({
         }),
       });
       if (res.ok) {
-        setStartSec(0);
-        setEndSec(0);
+        setStartSec(-1);
+        setEndSec(-1);
         setNote("");
         await loadAnnotations(selectedVideo.id);
       }
@@ -427,7 +427,7 @@ export default function SharedFolderPage({
                       <div className="flex items-center gap-1">
                         <input
                           type="text"
-                          value={formatTs(startSec)}
+                          value={startSec < 0 ? "—" : formatTs(startSec)}
                           readOnly
                           className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
                         />
@@ -443,7 +443,7 @@ export default function SharedFolderPage({
                       <div className="flex items-center gap-1">
                         <input
                           type="text"
-                          value={formatTs(endSec)}
+                          value={endSec < 0 ? "—" : formatTs(endSec)}
                           readOnly
                           className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
                         />
@@ -463,7 +463,7 @@ export default function SharedFolderPage({
                   />
                   <button
                     type="submit"
-                    disabled={saving || !authorName.trim() || !startSec || !endSec}
+                    disabled={saving || !authorName.trim() || startSec < 0 || endSec < 0}
                     className="w-full rounded-lg bg-accent px-4 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                   >
                     {saving ? "Saving..." : "Save Annotation"}
