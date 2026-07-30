@@ -149,6 +149,7 @@ export default function Home() {
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [showFolderSharePicker, setShowFolderSharePicker] = useState(false);
 
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
@@ -954,39 +955,122 @@ export default function Home() {
               )}
 
               {/* Shared folders */}
-              {folderList.filter((f) => f.shareToken).length > 0 && (
-                <div className="mt-6">
-                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2">
+              <div className="mt-6 pt-6 border-t border-border/50">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-semibold text-muted uppercase tracking-wider">
                     {t("share.sharedFolders")}
                   </h3>
-                  <div className="space-y-0.5">
-                    {folderList.filter((f) => f.shareToken).map((folder) => (
-                      <div key={folder.id} className="flex items-center justify-between px-3 py-1.5 rounded-lg text-sm text-muted">
-                        <span className="truncate text-xs">{folder.name}</span>
+                  <button
+                    onClick={() => setShowFolderSharePicker(true)}
+                    className="text-muted hover:text-accent transition-colors"
+                    title={t("share.link")}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Folder share picker */}
+                {showFolderSharePicker && (
+                  <div className="mb-2 rounded-lg border border-border bg-surface p-2 space-y-1">
+                    {(folderList.filter((f) => !f.shareToken).length === 0) ? (
+                      <p className="text-[10px] text-muted/60 px-1">All folders are already shared</p>
+                    ) : (
+                      folderList.filter((f) => !f.shareToken).map((f) => (
                         <button
+                          key={f.id}
                           onClick={async () => {
                             try {
-                              const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
-                              if (!res.ok) return;
-                              const { url } = await res.json();
-                              await navigator.clipboard.writeText(url);
-                              setSharedFolderCopied(folder.id);
-                              setTimeout(() => setSharedFolderCopied(null), 2000);
+                              const res = await fetch(`/api/folders/${f.id}/share`, { method: "POST" });
+                              if (res.ok) {
+                                await loadFolders();
+                                setShowFolderSharePicker(false);
+                              }
                             } catch {}
                           }}
-                          className={`shrink-0 ml-2 text-[10px] px-2 py-0.5 rounded-full border transition-colors ${
-                            sharedFolderCopied === folder.id
-                              ? "bg-accent/10 text-accent border-accent/30"
-                              : "border-border text-muted hover:border-accent/30 hover:text-accent"
-                          }`}
+                          className="w-full text-left px-2 py-1 rounded text-xs text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
                         >
-                          {sharedFolderCopied === folder.id ? t("share.copied") : t("share.link")}
+                          {f.name}
                         </button>
-                      </div>
-                    ))}
+                      ))
+                    )}
+                    <button
+                      onClick={() => setShowFolderSharePicker(false)}
+                      className="w-full text-left px-2 py-1 rounded text-[10px] text-muted/50 hover:text-muted transition-colors"
+                    >
+                      Cancel
+                    </button>
                   </div>
+                )}
+
+                <div className="space-y-0.5">
+                  {(() => {
+                    const shared = folderList.filter((f) => f.shareToken);
+                    if (shared.length === 0 && !showFolderSharePicker) {
+                      return (
+                        <p className="text-[10px] text-muted/60 px-1 py-2">
+                          No shared folders — click the share icon above to share one.
+                        </p>
+                      );
+                    }
+                    return shared.map((folder) => (
+                      <div key={folder.id} className="group flex items-center justify-between px-3 py-1.5 rounded-lg text-sm text-muted hover:bg-surface-hover transition-colors">
+                        <span
+                          onClick={() => setSelectedFolderId(folder.id)}
+                          className="truncate text-xs cursor-pointer"
+                        >
+                          {folder.name}
+                        </span>
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={async () => {
+                              try {
+                                const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
+                                if (!res.ok) return;
+                                const { url } = await res.json();
+                                await navigator.clipboard.writeText(url);
+                                setSharedFolderCopied(folder.id);
+                                setTimeout(() => setSharedFolderCopied(null), 2000);
+                              } catch {}
+                            }}
+                            className={`p-0.5 rounded transition-colors ${
+                              sharedFolderCopied === folder.id
+                                ? "text-accent"
+                                : "text-muted hover:text-accent"
+                            }`}
+                            title={sharedFolderCopied === folder.id ? t("share.copied") : t("share.link")}
+                          >
+                            {sharedFolderCopied === folder.id ? (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                              </svg>
+                            )}
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await fetch(`/api/folders/${folder.id}/share`, { method: "DELETE" });
+                                await loadFolders();
+                              } catch {}
+                            }}
+                            className="p-0.5 rounded text-muted hover:text-danger transition-colors"
+                            title="Unshare"
+                          >
+                            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      </div>
+                    ));
+                  })()}
                 </div>
-              )}
+              </div>
             </div>
           </div>
         </aside>
