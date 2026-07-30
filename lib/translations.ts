@@ -193,7 +193,6 @@ export const dict = {
 
     "share.copied": "Copied!",
     "share.link": "Share",
-    "share.folderLink": "Copy folder share link",
     "share.sharedFolders": "Shared folders",
 
     "shared.addAnnotation": "Add Annotation",
@@ -409,7 +408,6 @@ export const dict = {
 
     "share.copied": "Copiado!",
     "share.link": "Partilhar",
-    "share.folderLink": "Copiar link de partilha da pasta",
     "share.sharedFolders": "Pastas partilhadas",
 
     "shared.addAnnotation": "Adicionar Anotação",
