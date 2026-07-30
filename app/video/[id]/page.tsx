@@ -147,13 +147,6 @@ export default function VideoPage() {
   const [creatingCliplist, setCreatingCliplist] = useState(false);
   const [pendingMomentIdx, setPendingMomentIdx] = useState<number | null>(null);
   const [momentSort, setMomentSort] = useState<"time" | "importance">("time");
-  const [momentFontSize, setMomentFontSize] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("momentFontSize");
-      if (saved) return parseFloat(saved);
-    }
-    return 1.5;
-  });
   const [shareCopiedId, setShareCopiedId] = useState<number | null>(null);
   const [siblingVideos, setSiblingVideos] = useState<Array<{ id: number; title: string | null; thumbnailUrl: string | null }>>([]);
   const [panelRatio, setPanelRatio] = useState(() => {
@@ -1118,22 +1111,6 @@ export default function VideoPage() {
                           </button>
                         )}
                         {summaryMoments.length > 0 && (
-                          <button
-                            onClick={() => {
-                              const sizes = [0.85, 1, 1.15, 1.3, 1.5];
-                              const i = sizes.indexOf(momentFontSize);
-                              const next = sizes[(i + 1) % sizes.length];
-                              setMomentFontSize(next);
-                              localStorage.setItem("momentFontSize", String(next));
-                            }}
-                            className="text-muted/60 hover:text-accent transition-colors px-1 py-0.5 rounded hover:bg-surface-hover/50"
-                            title={`Font size: ${Math.round(momentFontSize * 100)}%`}
-                            style={{ fontSize: `${Math.max(8, Math.round(momentFontSize * 11))}px`, fontWeight: 600 }}
-                          >
-                            A
-                          </button>
-                        )}
-                        {summaryMoments.length > 0 && (
                           <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">saved</span>
                         )}
                       </div>
@@ -1162,7 +1139,7 @@ export default function VideoPage() {
                       </div>
                     </div>
 
-                    <div className="max-h-52 overflow-y-auto scrollbar-thin" style={{ zoom: momentFontSize }}>
+                    <div className="max-h-52 overflow-y-auto scrollbar-thin" style={{ zoom: 1.5 }}>
                       {summaryLoading && (
                         <div className="flex items-center justify-center gap-2 py-6 text-muted">
                           <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
