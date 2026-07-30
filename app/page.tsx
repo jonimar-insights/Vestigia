@@ -5,6 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
+import { useLanguage } from "@/components/LanguageProvider";
 
 interface Video {
   id: number;
@@ -76,6 +77,7 @@ function highlight(text: string, query: string) {
 
 export default function Home() {
   const { data: session } = useSession();
+  const { t, language, toggleLanguage } = useLanguage();
   const [tab, setTab] = useState<Tab>("import");
 
   const [url, setUrl] = useState("");
@@ -787,17 +789,24 @@ export default function Home() {
       <header className="border-b border-border px-6 py-4 shrink-0">
         <div className="mx-auto w-full flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold">MARGINALIA: Vestigia</h1>
-            <p className="text-sm text-muted">Import, annotate, and search video content</p>
+            <h1 className="text-xl font-semibold">{t("app.title")}</h1>
+            <p className="text-sm text-muted">{t("app.subtitle")}</p>
           </div>
           {session?.user && (
             <div className="flex items-center gap-3">
               <span className="text-sm text-muted">{session.user.name}</span>
               <button
+                onClick={toggleLanguage}
+                className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-surface-hover"
+                title={language === "en" ? "Mudar para Português" : "Switch to English"}
+              >
+                {language === "en" ? "PT" : "EN"}
+              </button>
+              <button
                 onClick={() => signOut({ callbackUrl: "/signin" })}
                 className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium hover:bg-surface-hover"
               >
-                Sign out
+                {t("app.signOut")}
               </button>
             </div>
           )}
@@ -807,10 +816,10 @@ export default function Home() {
       <div className="mx-auto w-full px-6 pt-6">
         <nav className="flex gap-1 border-b border-border">
           {([
-            { key: "import", label: "Import", icon: "+" },
-            { key: "search", label: "Search", icon: "\u2315" },
-            { key: "cliplists", label: "Cliplists", icon: "\ud83d\udccb" },
-            { key: "settings", label: "Settings", icon: "\u2699\ufe0f" },
+            { key: "import", label: t("tab.import"), icon: "+" },
+            { key: "search", label: t("tab.search"), icon: "\u2315" },
+            { key: "cliplists", label: t("tab.cliplists"), icon: "\ud83d\udccb" },
+            { key: "settings", label: t("tab.settings"), icon: "\u2699\ufe0f" },
           ] as const).map((t) => (
             <button
               key={t.key}
@@ -833,11 +842,11 @@ export default function Home() {
         <aside className="w-52 shrink-0">
           <div className="sticky top-6">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">Folders</h2>
+              <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">{t("sidebar.folders")}</h2>
               <button
                 onClick={() => setShowCreateFolder(true)}
                 className="text-muted hover:text-accent transition-colors"
-                title="New folder"
+                title={t("sidebar.newFolder")}
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -856,7 +865,7 @@ export default function Home() {
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span>All Videos</span>
+                  <span>{t("sidebar.allVideos")}</span>
                   <span className="text-[10px] text-muted/60">{videos.length}</span>
                 </div>
               </button>
@@ -894,7 +903,7 @@ export default function Home() {
                             <span
                               onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
                               className="text-muted hover:text-foreground cursor-pointer p-0.5"
-                              title="Rename"
+                              title={t("sidebar.rename")}
                             >
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                             </span>

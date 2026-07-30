@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { useLanguage } from "@/components/LanguageProvider";
 import { formatTimestamp, sanitizeHtml } from "@/lib/youtube";
 
 // YouTube IFrame API types
@@ -92,6 +93,7 @@ function parseTimeInput(value: string): number {
 }
 
 export default function VideoPage() {
+  const { t, language, toggleLanguage } = useLanguage();
   const params = useParams();
   const router = useRouter();
   const videoId = params.id as string;
@@ -853,6 +855,13 @@ export default function VideoPage() {
             <span className="hidden md:inline text-[10px] text-muted bg-surface-hover rounded px-1.5 py-0.5 font-mono">
               <kbd>A</kbd> annotate &middot; <kbd>Space</kbd> play/pause &middot; <kbd>&larr;</kbd><kbd>&rarr;</kbd> seek &middot; <kbd>Shift</kbd>+<kbd>&larr;</kbd><kbd>&rarr;</kbd> prev/next
             </span>
+            <button
+              onClick={toggleLanguage}
+              className="rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium hover:bg-surface-hover"
+              title={language === "en" ? "Mudar para Português" : "Switch to English"}
+            >
+              {language === "en" ? "PT" : "EN"}
+            </button>
             <button onClick={() => {
                 const t = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
                 const dur = duration || 3600;
@@ -1042,18 +1051,18 @@ export default function VideoPage() {
                     <div className="flex items-center gap-1 shrink-0">
                       <button type="submit" disabled={saving || !start || !end}
                         className="rounded bg-accent px-2.5 py-0.5 text-[10px] font-semibold text-white hover:bg-accent-hover active:scale-[0.97] disabled:opacity-30 disabled:cursor-not-allowed transition-all">
-                        {saving ? "..." : "Add"}
+                        {saving ? t("annotation.saving") : t("annotation.save")}
                       </button>
                       <button type="button" onClick={() => setShowForm(false)}
                         className="rounded px-2 py-0.5 text-[10px] text-muted hover:text-foreground transition-colors">
-                        Cancel
+                        {t("annotation.cancel")}
                       </button>
                     </div>
                   </div>
 
                   {/* Note */}
                   <input type="text" value={note} onChange={e => setNote(e.target.value)}
-                    placeholder="Note"
+                    placeholder={t("annotation.addNote")}
                     className="w-full rounded border border-border/60 bg-background px-1.5 py-px text-[10px] focus:border-accent outline-none transition-all mt-0.5" />
                 </form>
               </div>
@@ -1061,7 +1070,7 @@ export default function VideoPage() {
               <button onClick={() => setShowForm(true)}
                 className="w-full rounded-xl border border-dashed border-border hover:border-accent/40 bg-surface hover:bg-accent/5 py-3 mb-4 flex items-center justify-center gap-2 transition-all group">
                 <svg className="w-4 h-4 text-muted group-hover:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                <span className="text-xs font-medium text-muted group-hover:text-foreground transition-colors">New Annotation</span>
+                <span className="text-xs font-medium text-muted group-hover:text-foreground transition-colors">{t("annotation.new")}</span>
                 <kbd className="bg-surface-hover border border-border/60 rounded px-1.5 py-0.5 text-[9px] text-muted font-mono">A</kbd>
               </button>
             )}
@@ -1069,7 +1078,7 @@ export default function VideoPage() {
             {/* ── Translation toolbar ── */}
             <div className="flex items-center gap-2 mb-3 px-2 py-1.5 rounded-lg border border-border/60 bg-surface">
               <svg className="w-3.5 h-3.5 text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
-              <span className="text-[10px] text-muted font-medium">Translate</span>
+              <span className="text-[10px] text-muted font-medium">{t("translate")}</span>
               <div className="flex items-center ml-auto rounded-md border border-border/60 overflow-hidden">
                 <button onClick={() => { if (translatedLang) clearTranslations(); }}
                   disabled={!translatedLang}
@@ -1099,7 +1108,7 @@ export default function VideoPage() {
                     <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
                       <div className="flex items-center gap-2">
                         <svg className="w-3.5 h-3.5 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                        <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">Key Moments</span>
+                        <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">{t("keyMoments.title")}</span>
                         {summaryMoments.length > 0 && <span className="text-[10px] text-muted/50">{summaryMoments.length}</span>}
                         {summaryMoments.length > 0 && (
                           <button
@@ -1111,23 +1120,23 @@ export default function VideoPage() {
                           </button>
                         )}
                         {summaryMoments.length > 0 && (
-                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">saved</span>
+                          <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">{t("keyMoments.saved")}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1">
                         {!summaryLoading && summaryMoments.length === 0 && !summaryError && (
-                          <button onClick={() => runSummary()} className="text-[10px] text-accent hover:text-accent-hover transition-colors">Retry</button>
+                          <button onClick={() => runSummary()} className="text-[10px] text-accent hover:text-accent-hover transition-colors">{t("keyMoments.retry")}</button>
                         )}
                         {!summaryLoading && summaryMoments.length > 0 && (
                           <>
                             <button onClick={importAllKeyMoments} disabled={saving}
-                              className="text-[10px] text-muted hover:text-accent transition-colors disabled:opacity-50" title="Import all as annotations">
+                              className="text-[10px] text-muted hover:text-accent transition-colors disabled:opacity-50" title={t("keyMoments.importAll")}>
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
                             </button>
-                            <button onClick={() => runSummary(true)} className="text-[10px] text-muted hover:text-accent transition-colors" title="Regenerate (find more moments)">
+                            <button onClick={() => runSummary(true)} className="text-[10px] text-muted hover:text-accent transition-colors" title={t("keyMoments.regenerate")}>
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                             </button>
-                            <button onClick={deleteSummary} className="text-[10px] text-danger/60 hover:text-danger transition-colors" title="Delete saved summary">
+                            <button onClick={deleteSummary} className="text-[10px] text-danger/60 hover:text-danger transition-colors" title={t("keyMoments.delete")}>
                               <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                             </button>
                           </>
@@ -1143,7 +1152,7 @@ export default function VideoPage() {
                       {summaryLoading && (
                         <div className="flex items-center justify-center gap-2 py-6 text-muted">
                           <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
-                          <span className="text-[10px]">Analyzing full transcript...</span>
+                          <span className="text-[10px]">{t("keyMoments.loading")}</span>
                         </div>
                       )}
                       {summaryError && (
@@ -1154,7 +1163,7 @@ export default function VideoPage() {
                       )}
                       {!summaryLoading && !summaryError && summaryMoments.length === 0 && (
                         <div className="px-3 py-4 text-center">
-                          <p className="text-[10px] text-muted">No key moments found</p>
+                          <p className="text-[10px] text-muted">{t("keyMoments.noResults")}</p>
                         </div>
                       )}
                       {summaryMoments.slice().sort((a, b) => {
@@ -1224,7 +1233,7 @@ export default function VideoPage() {
                                   }}
                                   className="text-[9px] text-muted/40 hover:text-accent transition-colors"
                                 >
-                                  + add as annotation
+                                  {t("keyMoments.addAsAnnotation")}
                                 </button>
                                 <span className="text-[9px] text-muted/20">|</span>
                                 <div className="relative" data-key-moment-dropdown>
@@ -1235,7 +1244,7 @@ export default function VideoPage() {
                                     }}
                                     className="text-[9px] text-muted/40 hover:text-accent transition-colors"
                                   >
-                                    + add to cliplist
+                                    {t("keyMoments.addToCliplist")}
                                   </button>
                                   {keyMomentDropdown.open && keyMomentDropdown.index === i && (
                                     <div className="absolute left-0 top-full mt-1 w-52 rounded-lg border border-border bg-surface shadow-xl z-50 py-1" data-key-moment-dropdown>
@@ -1247,18 +1256,18 @@ export default function VideoPage() {
                                           <div className="flex items-center gap-1">
                                             <button type="submit" disabled={creatingCliplist || !newCliplistName.trim()}
                                               className="rounded bg-accent px-2 py-0.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all">
-                                              {creatingCliplist ? "..." : "Create"}
+                                              {creatingCliplist ? "..." : t("keyMoments.create")}
                                             </button>
                                             <button type="button" onClick={() => { setShowCreateCliplist(false); setNewCliplistName(""); setPendingMomentIdx(null); }}
                                               className="rounded px-2 py-0.5 text-[10px] text-muted hover:text-foreground transition-colors">
-                                              Cancel
+                                              {t("annotation.cancel")}
                                             </button>
                                           </div>
                                         </form>
                                       ) : (
                                         <>
                                           <div className="px-2.5 py-1 text-[9px] font-semibold text-muted uppercase tracking-wider">
-                                            Add to cliplist
+                                            {t("keyMoments.addToCliplist")}
                                           </div>
                                           {cliplists.length === 0 ? (
                                             <div className="px-2.5 py-1 text-[9px] text-muted">No cliplists yet</div>
@@ -1279,7 +1288,7 @@ export default function VideoPage() {
                                               onClick={() => { setPendingMomentIdx(i); setShowCreateCliplist(true); }}
                                               className="w-full text-left px-2.5 py-1 text-[10px] text-accent hover:bg-accent/10 transition-colors"
                                             >
-                                              + New cliplist
+                                              {t("keyMoments.newCliplist")}
                                             </button>
                                           </div>
                                         </>
@@ -1455,9 +1464,9 @@ export default function VideoPage() {
                                     className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-none transition-all" />
                                   <div className="flex items-center gap-2">
                                     <button onClick={() => saveEdit(ann.id)}
-                                      className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover active:scale-[0.97] transition-all">Save</button>
+                                      className="rounded-lg bg-accent px-3 py-1 text-xs font-medium text-white hover:bg-accent-hover active:scale-[0.97] transition-all">{t("annotation.save")}</button>
                                     <button onClick={() => setEditingId(null)}
-                                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-surface-hover transition-all">Cancel</button>
+                                      className="rounded-lg border border-border px-3 py-1 text-xs text-muted hover:text-foreground hover:bg-surface-hover transition-all">{t("annotation.cancel")}</button>
                                   </div>
                                 </div>
                               ) : (
@@ -1519,7 +1528,7 @@ export default function VideoPage() {
                                             <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1" data-annot-cliplist-dropdown>
                                               <div className="px-2.5 py-1 text-[9px] font-semibold text-muted uppercase tracking-wider">Add to cliplist</div>
                                               {cliplists.length === 0 ? (
-                                                <div className="px-2.5 py-1 text-[9px] text-muted">No cliplists yet</div>
+                                            <div className="px-2.5 py-1 text-[9px] text-muted">{t("keyMoments.noCliplists")}</div>
                                               ) : (
                                                 cliplists.map(cl => (
                                                   <button key={cl.id} onClick={e => { e.stopPropagation(); addAnnotationToCliplist(cl.id, ann); }}
