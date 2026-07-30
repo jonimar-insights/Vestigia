@@ -560,16 +560,20 @@ export default function VideoPage() {
     const toExport = selectedIds.size > 0
       ? (video?.annotations.filter(a => selectedIds.has(a.id)) ?? [])
       : displayedAnnotations;
-    const chapters = toExport.map(a => {
+    const ytId = video?.youtubeId;
+    const url = ytId ? `https://youtube.com/watch?v=${ytId}` : "";
+    const header = `${video?.title ?? "Untitled"}${url ? "\n" + url : ""}\n`;
+    const chapters = header + toExport.map(a => {
       const start = formatTimestamp(a.timestampStart);
+      const end = formatTimestamp(a.timestampEnd);
       const label = a.label;
-      return `${start} ${label}${a.note ? " - " + a.note : ""}`;
+      return `${start} – ${end}  ${label}${a.note ? " — " + a.note : ""}`;
     }).join("\n");
     const blob = new Blob([chapters], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
+    const blobUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = url; link.download = "chapters.txt"; link.click();
-    URL.revokeObjectURL(url);
+    link.href = blobUrl; link.download = "chapters.txt"; link.click();
+    URL.revokeObjectURL(blobUrl);
   }
 
   function shareAnnotation(ann: Annotation) {

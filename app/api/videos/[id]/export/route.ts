@@ -40,29 +40,34 @@ export async function GET(
   const format = request.nextUrl.searchParams.get("format") ?? "chapters";
 
   let output: string;
+  const videoUrl = video.youtubeUrl || (video.youtubeId ? `https://youtube.com/watch?v=${video.youtubeId}` : "");
+  const header = `${video.title ?? "Untitled"}\n${videoUrl}\n\n`;
   switch (format) {
     case "json":
       output = JSON.stringify(
         videoAnnotations.map((a) => ({
           timestamp: formatTimestamp(a.timestampStart),
           timestampStart: a.timestampStart,
+          timestampEnd: a.timestampEnd,
           label: a.label,
           tags: a.tags,
           note: a.note,
+          videoTitle: video.title,
+          videoUrl,
         })),
         null,
         2,
       );
       break;
     case "timestamps":
-      output = videoAnnotations
-        .map((a) => `${formatTimestamp(a.timestampStart)} - ${a.label}`)
+      output = header + videoAnnotations
+        .map((a) => `${formatTimestamp(a.timestampStart)} – ${formatTimestamp(a.timestampEnd)}  ${a.label}${a.note ? " — " + a.note : ""}`)
         .join("\n");
       break;
     case "chapters":
     default:
-      output = videoAnnotations
-        .map((a) => `${formatTimestamp(a.timestampStart)} ${a.label}`)
+      output = header + videoAnnotations
+        .map((a) => `${formatTimestamp(a.timestampStart)} – ${formatTimestamp(a.timestampEnd)}  ${a.label}${a.note ? " — " + a.note : ""}`)
         .join("\n");
       break;
   }
@@ -70,6 +75,7 @@ export async function GET(
   return NextResponse.json({
     videoId: video.youtubeId,
     title: video.title,
+    videoUrl,
     output,
     annotationCount: videoAnnotations.length,
   });
