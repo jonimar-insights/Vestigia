@@ -902,6 +902,32 @@ export default function Home() {
                           <span className="text-[10px] text-muted/60">{folder.videoCount}</span>
                           <div className="flex items-center gap-0.5">
                             <span
+                              onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                  const res = await fetch(`/api/folders/${folder.id}/share`, { method: "POST" });
+                                  if (!res.ok) return;
+                                  const { url } = await res.json();
+                                  await navigator.clipboard.writeText(url);
+                                  setSharedFolderCopied(folder.id);
+                                  setTimeout(() => setSharedFolderCopied(null), 2000);
+                                  await loadFolders();
+                                } catch {}
+                              }}
+                              className={`p-0.5 rounded cursor-pointer transition-colors ${
+                                sharedFolderCopied === folder.id
+                                  ? "text-accent"
+                                  : "text-muted hover:text-accent"
+                              }`}
+                              title={sharedFolderCopied === folder.id ? t("share.copied") : t("share.link")}
+                            >
+                              {sharedFolderCopied === folder.id ? (
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                              ) : (
+                              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                              )}
+                            </span>
+                            <span
                               onClick={(e) => { e.stopPropagation(); setEditingFolderId(folder.id); setEditingFolderName(folder.name); }}
                               className="text-muted hover:text-foreground cursor-pointer p-0.5"
                               title={t("sidebar.rename")}
