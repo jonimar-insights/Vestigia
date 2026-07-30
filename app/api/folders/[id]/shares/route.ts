@@ -3,6 +3,7 @@ import { getDb } from "@/lib/db";
 import { folders, folderShares } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
+import { sendShareInviteEmail } from "@/lib/email";
 
 export async function GET(
   _request: NextRequest,
@@ -94,6 +95,24 @@ export async function POST(
       permission,
     })
     .returning();
+
+  // Send email invitation
+  const origin = request.headers.get("origin") ?? "https://vestigia-vercel.vercel.app";
+  const shareLink = `${origin}/shared/folder/${rows[0].shareToken}`;
+  const sharedBy = (session.user as { name?: string }).name || session.user.email || "Someone";
+
+  // Fire and forget — don't block the response
+  sendShareInviteEmail({
+    to: email.trim().toLowerCase(),
+    folderName: rows[0].name,
+    shareLink,
+    permission,
+    sharedBy,
+  }).then((emailResult) => {
+    if (!emailResult.success) {
+      console.warn(`[share] Email invite to ${email} failed:`, emailResult.error);
+    }
+  });
 
   return NextResponse.json(result, { status: 201 });
 }
