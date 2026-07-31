@@ -18,6 +18,7 @@ interface FolderData {
   name: string;
   description: string | null;
   videos: VideoData[];
+  shares?: Array<{ email: string; permission: string }>;
 }
 
 interface SharedAnnotation {
@@ -425,6 +426,26 @@ export default function SharedFolderPage({
                   <p className="text-[10px] text-muted/60 mt-1">
                     {folder.videos.length} video{folder.videos.length !== 1 ? "s" : ""}
                   </p>
+                  {folder.shares && folder.shares.length > 0 && (
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                      {folder.shares.map((s, i) => (
+                        <span
+                          key={i}
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-medium ${
+                            s.permission === "edit"
+                              ? "bg-accent/10 text-accent"
+                              : "bg-surface-hover text-muted"
+                          }`}
+                        >
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                          </svg>
+                          {s.email}
+                          <span className="ml-0.5">{s.permission === "edit" ? "✏️" : "👁️"}</span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { folders, folderVideos, videos, annotations } from "@/lib/schema";
+import { folders, folderVideos, videos, annotations, folderShares } from "@/lib/schema";
 import { eq, inArray } from "drizzle-orm";
 
 export async function GET(
@@ -27,7 +27,15 @@ export async function GET(
     .where(eq(folderVideos.folderId, folder.id));
 
   if (fv.length === 0) {
-    return NextResponse.json({ ...folder, videos: [] });
+    // Fetch the list of authorized users
+    const emptyShares = await db
+      .select({
+        email: folderShares.email,
+        permission: folderShares.permission,
+      })
+      .from(folderShares)
+      .where(eq(folderShares.folderId, folder.id));
+    return NextResponse.json({ ...folder, videos: [], shares: emptyShares });
   }
 
   const videoIds = fv.map((v) => v.videoId);
@@ -62,8 +70,18 @@ export async function GET(
     annotationCount: countMap.get(v.id) ?? 0,
   }));
 
+  // Fetch the list of authorized users
+  const shares = await db
+    .select({
+      email: folderShares.email,
+      permission: folderShares.permission,
+    })
+    .from(folderShares)
+    .where(eq(folderShares.folderId, folder.id));
+
   return NextResponse.json({
     ...folder,
     videos: videosWithCounts,
+    shares,
   });
 }
