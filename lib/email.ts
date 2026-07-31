@@ -13,8 +13,6 @@ export async function sendShareInviteEmail(params: {
     return { success: false, error: "Email service not configured" };
   }
 
-  const permissionLabel = params.permission === "edit" ? "can edit" : "can view";
-
   const html = `
 <!DOCTYPE html>
 <html>
