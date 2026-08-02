@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { folders, folderShares } from "@/lib/schema";
+import { folders, folderShares, users } from "@/lib/schema";
 import { eq, and } from "drizzle-orm";
 import { auth } from "@/auth";
-import { sendShareInviteEmail } from "@/lib/email";
+import { sendShareInviteEmail, type GmailOAuth } from "@/lib/email";
 
 export async function GET(
   _request: NextRequest,
@@ -96,19 +96,40 @@ export async function POST(
     })
     .returning();
 
-  // Send email invitation
+  // Send email invitation from the signed-in user's own Gmail when available.
   const origin = request.headers.get("origin") ?? "https://vestigia-vercel.vercel.app";
   const shareLink = `${origin}/shared/folder/${rows[0].shareToken}`;
   const sharedBy = (session.user as { name?: string }).name || session.user.email || "Someone";
 
+  let gmail: GmailOAuth | undefined;
+  if (session.user.email) {
+    const sender = await db
+      .select()
+      .from(users)
+      .where(eq(users.username, session.user.email))
+      .limit(1);
+    if (sender[0] && (sender[0].gmailRefreshToken || sender[0].gmailAccessToken)) {
+      gmail = {
+        user: session.user.email,
+        accessToken: sender[0].gmailAccessToken,
+        refreshToken: sender[0].gmailRefreshToken,
+        expiresAt: sender[0].gmailTokenExpiresAt,
+      };
+    }
+  }
+
   // Fire and forget — don't block the response
-  sendShareInviteEmail({
-    to: email.trim().toLowerCase(),
-    folderName: rows[0].name,
-    shareLink,
-    permission,
-    sharedBy,
-  }).then((emailResult) => {
+  sendShareInviteEmail(
+    {
+      to: email.trim().toLowerCase(),
+      folderName: rows[0].name,
+      shareLink,
+      permission,
+      sharedBy,
+    },
+    undefined,
+    gmail
+  ).then((emailResult) => {
     if (!emailResult.success) {
       console.warn(`[share] Email invite to ${email} failed:`, emailResult.error);
     }

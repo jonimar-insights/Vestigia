@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
 import { useLanguage } from "@/components/LanguageProvider";
+import HelpSection from "@/components/HelpSection";
 
 interface Video {
   id: number;
@@ -52,7 +53,7 @@ interface CliplistWithItems extends Cliplist {
   items: ClipItem[];
 }
 
-type Tab = "import" | "search" | "cliplists" | "settings";
+type Tab = "import" | "search" | "cliplists" | "settings" | "help";
 
 function isPlaylistUrl(u: string) {
   return /[?&]list=/.test(u);
@@ -159,6 +160,10 @@ export default function Home() {
   const [newShareEmail, setNewShareEmail] = useState("");
   const [newSharePermission, setNewSharePermission] = useState<"view" | "edit">("view");
   const [addingShare, setAddingShare] = useState(false);
+  const [appUsers, setAppUsers] = useState<Array<{ email: string; name: string | null }>>([]);
+  const [appUsersLoading, setAppUsersLoading] = useState(false);
+  const [savedEmails, setSavedEmails] = useState<string[]>([]);
+  const [saveEmailForFuture, setSaveEmailForFuture] = useState(true);
 
   // ── Translation state ──
   const [translatedTitles, setTranslatedTitles] = useState<Map<number, string>>(new Map());
@@ -442,6 +447,18 @@ export default function Home() {
     } catch {}
     // Load existing shares
     await loadShareList(folderId);
+    // Load Google-authenticated users for suggestions
+    setAppUsersLoading(true);
+    try {
+      const res = await fetch("/api/users");
+      if (res.ok) setAppUsers(await res.json());
+    } catch {}
+    setAppUsersLoading(false);
+    // Load saved emails for future shares
+    try {
+      const res = await fetch("/api/users/saved-emails");
+      if (res.ok) setSavedEmails(await res.json());
+    } catch {}
   }
 
   async function loadShareList(folderId: number) {
@@ -458,12 +475,23 @@ export default function Home() {
     if (!newShareEmail.trim() || !shareDialogFolderId) return;
     setAddingShare(true);
     try {
+      const email = newShareEmail.trim().toLowerCase();
       const res = await fetch(`/api/folders/${shareDialogFolderId}/shares`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: newShareEmail.trim(), permission: newSharePermission }),
+        body: JSON.stringify({ email, permission: newSharePermission }),
       });
       if (res.ok) {
+        if (saveEmailForFuture) {
+          try {
+            await fetch("/api/users/saved-emails", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email }),
+            });
+            setSavedEmails((prev) => (prev.includes(email) ? prev : [...prev, email]));
+          } catch {}
+        }
         setNewShareEmail("");
         await loadShareList(shareDialogFolderId);
       } else {
@@ -472,6 +500,13 @@ export default function Home() {
       }
     } catch {}
     setAddingShare(false);
+  }
+
+  async function handleRemoveSavedEmail(email: string) {
+    try {
+      await fetch(`/api/users/saved-emails?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+      setSavedEmails((prev) => prev.filter((e) => e !== email));
+    } catch {}
   }
 
   async function handleRemoveShare(email: string) {
@@ -665,28 +700,26 @@ export default function Home() {
       for (let i = 0; i < toImport.length; i++) {
         const v = toImport[i];
         try {
-          const res = await fetch("/api/videos", {
+          const payload = {
+            url: `https://www.youtube.com/watch?v=${v.id}`,
+            title: v.title,
+            thumbnailUrl: v.thumbnail,
+            extractKeyMoments,
+          };
+          // Use the atomic endpoint when importing into a folder so the video
+          // is created and linked in one request (no orphan videos on failure).
+          const endpoint = targetFolderId
+            ? `/api/folders/${targetFolderId}/videos`
+            : "/api/videos";
+          const res = await fetch(endpoint, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              url: `https://www.youtube.com/watch?v=${v.id}`,
-              title: v.title,
-              thumbnailUrl: v.thumbnail,
-              extractKeyMoments,
-            }),
+            body: JSON.stringify(payload),
           });
           if (res.ok) {
-            const video = await res.json();
             newImported.add(v.id);
-            if (targetFolderId && video.id) {
-              await fetch(`/api/folders/${targetFolderId}/videos`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ videoId: video.id }),
-              });
-            }
           } else {
-            console.error(`[import] POST /api/videos failed for ${v.id}: ${res.status}`, await res.text().catch(() => ""));
+            console.error(`[import] POST ${endpoint} failed for ${v.id}: ${res.status}`, await res.text().catch(() => ""));
           }
         } catch (e) {
           console.error(`[import] error for ${v.id}:`, e);
@@ -898,6 +931,7 @@ export default function Home() {
             { key: "search", label: t("tab.search"), icon: "\u2315" },
             { key: "cliplists", label: t("tab.cliplists"), icon: "\ud83d\udccb" },
             { key: "settings", label: t("tab.settings"), icon: "\u2699\ufe0f" },
+            { key: "help", label: t("tab.help"), icon: "?" },
           ] as const).map((t) => (
             <button
               key={t.key}
@@ -2599,6 +2633,10 @@ export default function Home() {
             )}
           </div>
         )}
+        {/* ── HELP TAB ── */}
+        {tab === "help" && (
+          <HelpSection />
+        )}
       </main>
       </div>
 
@@ -2671,30 +2709,73 @@ export default function Home() {
             </div>
 
             {/* Add user form */}
-            <form onSubmit={handleAddShare} className="flex items-center gap-2">
-              <input
-                type="email"
-                value={newShareEmail}
-                onChange={(e) => setNewShareEmail(e.target.value)}
-                placeholder="email@example.com"
-                required
-                className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-              />
-              <select
-                value={newSharePermission}
-                onChange={(e) => setNewSharePermission(e.target.value as "view" | "edit")}
-                className="rounded-lg border border-border bg-background px-2 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-              >
-                <option value="view">View</option>
-                <option value="edit">Edit</option>
-              </select>
-              <button
-                type="submit"
-                disabled={addingShare || !newShareEmail.trim()}
-                className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
-              >
-                {addingShare ? "Adding..." : "Invite"}
-              </button>
+            <form onSubmit={handleAddShare} className="mt-4">
+              <div className="flex items-center gap-2">
+                <input
+                  type="email"
+                  value={newShareEmail}
+                  onChange={(e) => setNewShareEmail(e.target.value)}
+                  placeholder="email@example.com"
+                  required
+                  className="flex-1 rounded-lg border border-border bg-background px-3 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                />
+                <select
+                  value={newSharePermission}
+                  onChange={(e) => setNewSharePermission(e.target.value as "view" | "edit")}
+                  className="rounded-lg border border-border bg-background px-2 py-2 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                >
+                  <option value="view">View</option>
+                  <option value="edit">Edit</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={addingShare || !newShareEmail.trim()}
+                  className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+                >
+                  {addingShare ? "Adding..." : "Invite"}
+                </button>
+              </div>
+              <label className="mt-2 flex items-center gap-1.5 text-[10px] text-muted cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={saveEmailForFuture}
+                  onChange={(e) => setSaveEmailForFuture(e.target.checked)}
+                  className="h-3 w-3 accent-accent"
+                />
+                Save this email for future shares
+              </label>
+              {savedEmails.length > 0 && (
+                <div className="mt-3">
+                  <label className="text-[10px] font-medium text-muted uppercase tracking-wider mb-1 block">
+                    Saved emails
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {savedEmails.map((email) => (
+                      <span
+                        key={email}
+                        className="inline-flex items-center gap-1 rounded-full bg-background border border-border/60 px-2 py-1 text-[10px] text-muted"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => setNewShareEmail(email)}
+                          className="hover:text-foreground transition-colors"
+                          title="Use this email"
+                        >
+                          {email}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSavedEmail(email)}
+                          className="text-muted/40 hover:text-danger transition-colors"
+                          title="Remove saved email"
+                        >
+                          <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </form>
           </div>
         </div>

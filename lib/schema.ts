@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -9,6 +9,9 @@ export const users = pgTable("users", {
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
+  gmailAccessToken: text("gmail_access_token"),
+  gmailRefreshToken: text("gmail_refresh_token"),
+  gmailTokenExpiresAt: text("gmail_token_expires_at"), // unix seconds
 });
 
 export const videos = pgTable("videos", {
@@ -173,3 +176,16 @@ export const folderVideos = pgTable("folder_videos", {
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
 });
+
+export const savedShareEmails = pgTable(
+  "saved_share_emails",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    email: text("email").notNull(),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [uniqueIndex("saved_share_emails_user_email_unique").on(t.userId, t.email)]
+);

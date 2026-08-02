@@ -1,19 +1,23 @@
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const FROM_EMAIL = process.env.EMAIL_FROM || "Vestigia <noreply@vestigia.app>";
+import nodemailer, { type Transporter } from "nodemailer";
 
-export async function sendShareInviteEmail(params: {
-  to: string;
+const GMAIL_SMTP_USER = process.env.GMAIL_SMTP_USER || process.env.GMAIL_USER;
+const GMAIL_SMTP_PASS =
+  process.env.GMAIL_SMTP_APP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
+const GOOGLE_CLIENT_ID = process.env.AUTH_GOOGLE_ID;
+const GOOGLE_CLIENT_SECRET = process.env.AUTH_GOOGLE_SECRET;
+const GMAIL_API_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
+const GMAIL_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const FROM_EMAIL =
+  process.env.EMAIL_FROM ||
+  (GMAIL_SMTP_USER ? `Vestigia <${GMAIL_SMTP_USER}>` : "");
+
+function buildInviteHtml(params: {
+  sharedBy: string;
   folderName: string;
   shareLink: string;
   permission: string;
-  sharedBy: string;
-}): Promise<{ success: boolean; error?: string }> {
-  if (!RESEND_API_KEY) {
-    console.warn("[email] RESEND_API_KEY not set — skipping email send");
-    return { success: false, error: "Email service not configured" };
-  }
-
-  const html = `
+}) {
+  return `
 <!DOCTYPE html>
 <html>
 <head>
@@ -51,28 +55,143 @@ export async function sendShareInviteEmail(params: {
   </div>
 </body>
 </html>`;
+}
 
-  try {
-    const res = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${RESEND_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        from: FROM_EMAIL,
+export interface GmailOAuth {
+  user: string; // sender's Gmail address (the signed-in Google user)
+  accessToken?: string | null;
+  refreshToken?: string | null;
+  expiresAt?: string | number | null; // unix seconds (Google account.expires_at)
+}
+
+function rfc2047(text: string): string {
+  return /[^\x20-\x7E]/.test(text)
+    ? `=?UTF-8?B?${Buffer.from(text, "utf8").toString("base64")}?=`
+    : text;
+}
+
+function buildRawMessage(params: {
+  from: string;
+  to: string;
+  subject: string;
+  html: string;
+}): string {
+  return [
+    `From: ${params.from}`,
+    `To: ${params.to}`,
+    `Subject: ${rfc2047(params.subject)}`,
+    "MIME-Version: 1.0",
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    Buffer.from(params.html, "utf8").toString("base64"),
+  ].join("\r\n");
+}
+
+async function refreshAccessToken(gmail: GmailOAuth): Promise<string> {
+  const params = new URLSearchParams({
+    client_id: GOOGLE_CLIENT_ID!,
+    client_secret: GOOGLE_CLIENT_SECRET!,
+    refresh_token: gmail.refreshToken!,
+    grant_type: "refresh_token",
+  });
+  const res = await fetch(GMAIL_TOKEN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: params.toString(),
+  });
+  if (!res.ok) {
+    throw new Error(`Token refresh failed: ${res.status}`);
+  }
+  const json = (await res.json()) as { access_token?: string };
+  if (!json.access_token) {
+    throw new Error("Token refresh returned no access token");
+  }
+  return json.access_token;
+}
+
+async function sendViaGmailApi(gmail: GmailOAuth, raw: string): Promise<void> {
+  // Always refresh so the access token is guaranteed fresh (valid ~1h).
+  const accessToken = await refreshAccessToken(gmail);
+  const res = await fetch(GMAIL_API_SEND, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      raw: Buffer.from(raw, "utf8").toString("base64url"),
+    }),
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new Error(`Gmail API send failed (${res.status}): ${detail.slice(0, 200)}`);
+  }
+}
+
+export async function sendShareInviteEmail(
+  params: {
+    to: string;
+    folderName: string;
+    shareLink: string;
+    permission: string;
+    sharedBy: string;
+  },
+  transport?: Transporter,
+  gmail?: GmailOAuth
+): Promise<{ success: boolean; error?: string }> {
+  const html = buildInviteHtml({
+    sharedBy: params.sharedBy,
+    folderName: params.folderName,
+    shareLink: params.shareLink,
+    permission: params.permission,
+  });
+
+  // Prefer the signed-in user's own Gmail via the Gmail API (gmail.send scope).
+  const viaOAuth =
+    !!gmail?.user &&
+    !!gmail?.refreshToken &&
+    !!GOOGLE_CLIENT_ID &&
+    !!GOOGLE_CLIENT_SECRET;
+  if (viaOAuth) {
+    try {
+      const from = `${rfc2047(params.sharedBy)} <${gmail.user}>`;
+      const raw = buildRawMessage({
+        from,
         to: params.to,
         subject: `${params.sharedBy} shared "${params.folderName}" with you on Vestigia`,
         html,
-      }),
+      });
+      await sendViaGmailApi(gmail, raw);
+      return { success: true };
+    } catch (err) {
+      console.error("[email] Failed to send via Gmail API:", err);
+      return { success: false, error: "Failed to send email" };
+    }
+  }
+
+  // Fallback: app-level SMTP account.
+  if (!GMAIL_SMTP_USER || !GMAIL_SMTP_PASS) {
+    console.warn("[email] No email transport configured (Gmail OAuth or SMTP) — skipping email send");
+    return { success: false, error: "Email service not configured" };
+  }
+
+  const transporter =
+    transport ??
+    nodemailer.createTransport({
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      auth: { user: GMAIL_SMTP_USER, pass: GMAIL_SMTP_PASS },
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      console.error("[email] Resend API error:", err);
-      return { success: false, error: `Failed to send email: ${err}` };
-    }
-
+  try {
+    await transporter.sendMail({
+      from: FROM_EMAIL,
+      to: params.to,
+      subject: `${params.sharedBy} shared "${params.folderName}" with you on Vestigia`,
+      html,
+    });
     return { success: true };
   } catch (err) {
     console.error("[email] Failed to send email:", err);

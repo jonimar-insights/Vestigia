@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos, videos, annotations, folderShares } from "@/lib/schema";
 import { eq, inArray } from "drizzle-orm";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const limited = rateLimit(_request, { max: 60, windowMs: 60_000 });
+  if (limited) return limited;
+
   const db = getDb();
   const { token } = await params;
 

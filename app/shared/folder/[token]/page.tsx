@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
+import { useSession } from "next-auth/react";
 
 interface VideoData {
   id: number;
@@ -32,6 +33,7 @@ interface SharedAnnotation {
   createdBy: string;
   email: string | null;
   createdAt: string;
+  updatedAt: string | null;
 }
 
 function formatTs(seconds: number): string {
@@ -63,6 +65,7 @@ export default function SharedFolderPage({
 }: {
   params: Promise<{ token: string }>;
 }) {
+  const { data: session } = useSession();
   const [token, setToken] = useState<string | null>(null);
   const [folder, setFolder] = useState<FolderData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -80,11 +83,28 @@ export default function SharedFolderPage({
   const [annotations, setAnnotations] = useState<SharedAnnotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
 
+  // Add video (edit collaborators)
+  const [newVideoUrl, setNewVideoUrl] = useState("");
+  const [addingVideo, setAddingVideo] = useState(false);
+  const [addVideoError, setAddVideoError] = useState<string | null>(null);
+
   // Annotation form
   const [startSec, setStartSec] = useState(-1);
   const [endSec, setEndSec] = useState(-1);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Annotation editing
+  const [editingAnnotation, setEditingAnnotation] = useState<{
+    id: number;
+    timestampStart: number;
+    timestampEnd: number;
+    note: string;
+  } | null>(null);
+  const [editStart, setEditStart] = useState(0);
+  const [editEnd, setEditEnd] = useState(0);
+  const [editNote, setEditNote] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // YT Player
   const playerRef = useRef<YTPlayer | null>(null);
@@ -113,6 +133,14 @@ export default function SharedFolderPage({
     init();
   }, [params]);
 
+  const refreshFolder = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch(`/api/shared/folder/${token}`);
+      if (res.ok) setFolder(await res.json());
+    } catch {}
+  }, [token]);
+
   useEffect(() => {
     if (!token || verifiedEmail) return;
     (async () => {
@@ -131,6 +159,35 @@ export default function SharedFolderPage({
       }
     })();
   }, [token, verifiedEmail]);
+
+  // Auto-verify with Google session email if signed in
+  useEffect(() => {
+    const sessionEmail = session?.user?.email;
+    const sessionName = session?.user?.name;
+    if (!token || verifiedEmail || !sessionEmail) return;
+    (async () => {
+      setVerifying(true);
+      try {
+        const res = await fetch(`/api/shared/folder/${token}/verify`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: sessionEmail }),
+        });
+        const data = await res.json();
+        if (res.ok && data.authorized) {
+          setVerifiedEmail(data.email);
+          setPermission(data.permission);
+          const name = sessionName || sessionEmail.split("@")[0];
+          setVerifiedName(name);
+          localStorage.setItem(
+            `shared_folder_email_${token}`,
+            JSON.stringify({ email: data.email, permission: data.permission, name })
+          );
+        }
+      } catch {}
+      setVerifying(false);
+    })();
+  }, [token, verifiedEmail, session?.user?.email, session?.user?.name]);
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault();
@@ -176,6 +233,54 @@ export default function SharedFolderPage({
     setSelectedVideo(null);
   }
 
+  async function handleAddVideo(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newVideoUrl.trim() || !token || !verifiedEmail) return;
+    setAddingVideo(true);
+    setAddVideoError(null);
+    try {
+      const res = await fetch(`/api/shared/folder/${token}/videos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: verifiedEmail,
+          name: verifiedName,
+          url: newVideoUrl.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setNewVideoUrl("");
+        await refreshFolder();
+      } else {
+        setAddVideoError(data.error || "Failed to add video");
+      }
+    } catch {
+      setAddVideoError("Failed to add video");
+    } finally {
+      setAddingVideo(false);
+    }
+  }
+
+  async function handleExport(format: "csv" | "json") {
+    if (!token || !verifiedEmail || !folder) return;
+    try {
+      const res = await fetch(
+        `/api/shared/folder/${token}/export?email=${encodeURIComponent(verifiedEmail)}&format=${format}`
+      );
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `annotations-${folder.name || "folder"}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch {}
+  }
+
   const loadAnnotations = useCallback(async (videoId: number) => {
     if (!token) return;
     setAnnotationsLoading(true);
@@ -187,6 +292,26 @@ export default function SharedFolderPage({
     }
   }, [token]);
 
+  // Live annotation updates: silently refresh every 5s while a video is open
+  useEffect(() => {
+    if (!selectedVideo || !token) return;
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/shared/folder/${token}/annotations?videoId=${selectedVideo.id}`);
+        if (res.ok) {
+          const data = await res.json();
+          setAnnotations((prev) => {
+            if (prev.length === data.length && prev.every((a, i) => a.id === data[i].id && a.updatedAt === data[i].updatedAt)) {
+              return prev;
+            }
+            return data;
+          });
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(poll);
+  }, [selectedVideo, token]);
+
   function selectVideo(video: VideoData) {
     setSelectedVideo(video);
     setPlayerReady(false);
@@ -196,6 +321,7 @@ export default function SharedFolderPage({
     setStartSec(-1);
     setEndSec(-1);
     setNote("");
+    setEditingAnnotation(null);
   }
 
   // YT IFrame API init
@@ -244,6 +370,11 @@ export default function SharedFolderPage({
       return () => { destroyed = true; if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
     }
 
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const s = document.createElement("script");
+      s.src = "https://www.youtube.com/iframe_api";
+      document.head.appendChild(s);
+    }
     const poll = setInterval(() => {
       if (!destroyed && window.YT && window.YT.Player) { clearInterval(poll); createPlayer(); }
     }, 100);
@@ -323,6 +454,45 @@ export default function SharedFolderPage({
     } catch {}
   }
 
+  function startEditAnnotation(a: SharedAnnotation) {
+    setEditingAnnotation({ id: a.id, timestampStart: a.timestampStart, timestampEnd: a.timestampEnd, note: a.note ?? "" });
+    setEditStart(a.timestampStart);
+    setEditEnd(a.timestampEnd);
+    setEditNote(a.note ?? "");
+  }
+
+  function cancelEditAnnotation() {
+    setEditingAnnotation(null);
+  }
+
+  async function saveEditAnnotation(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingAnnotation || !token || !verifiedEmail) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/shared/folder/${token}/annotations`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          annotationId: editingAnnotation.id,
+          email: verifiedEmail,
+          timestampStart: editStart,
+          timestampEnd: editEnd,
+          note: editNote.trim() || null,
+        }),
+      });
+      if (res.ok && selectedVideo) {
+        setEditingAnnotation(null);
+        await loadAnnotations(selectedVideo.id);
+      } else {
+        const data = await res.json();
+        console.error("Failed to edit annotation:", data.error);
+      }
+    } catch {} finally {
+      setSavingEdit(false);
+    }
+  }
+
   const authorName = verifiedName;
 
   // ── Email verification screen ──
@@ -337,7 +507,11 @@ export default function SharedFolderPage({
               </svg>
             </div>
             <h1 className="text-lg font-semibold">Shared Folder</h1>
-            <p className="text-sm text-muted mt-1">Enter your email to access this folder</p>
+            <p className="text-sm text-muted mt-1">
+              {session?.user?.email
+                ? `Checking access for ${session?.user?.email}...`
+                : "Enter your email to access this folder"}
+            </p>
           </div>
 
           <form onSubmit={handleVerify} className="space-y-3">
@@ -562,15 +736,15 @@ export default function SharedFolderPage({
                       </svg>
                       <span className="truncate">{verifiedEmail}</span>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <div className="flex-1">
+                    <div className="flex items-center gap-2 w-full min-w-0">
+                      <div className="flex-1 min-w-0">
                         <div className="text-[9px] text-muted/60 mb-0.5">Start</div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
                           <input
                             type="text"
                             value={startSec < 0 ? "—" : formatTs(startSec)}
                             readOnly
-                            className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                            className="flex-1 min-w-0 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
                           />
                           <button type="button" onClick={markStart}
                             className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
@@ -579,14 +753,14 @@ export default function SharedFolderPage({
                         </div>
                       </div>
                       <span className="text-muted/30 mt-4">–</span>
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <div className="text-[9px] text-muted/60 mb-0.5">End</div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1 min-w-0">
                           <input
                             type="text"
                             value={endSec < 0 ? "—" : formatTs(endSec)}
                             readOnly
-                            className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                            className="flex-1 min-w-0 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
                           />
                           <button type="button" onClick={markEnd}
                             className="text-[9px] text-accent hover:text-accent-hover shrink-0 px-1.5 py-1 rounded hover:bg-accent/5 transition-colors">
@@ -639,11 +813,69 @@ export default function SharedFolderPage({
                         : "No annotations yet."}
                     </p>
                   )}
-                  {annotations.map((a) => (
+                  {annotations.map((a) => {
+                    const isEditing = editingAnnotation?.id === a.id;
+                    return (
                     <div key={a.id}
-                      className="rounded-lg border border-border/60 bg-surface p-2.5 hover:bg-surface-hover/50 transition-colors cursor-pointer group"
-                      onClick={() => playSegment(a.timestampStart, a.timestampEnd)}
+                      className={`rounded-lg border border-border/60 bg-surface p-2.5 transition-colors group ${isEditing ? "" : "hover:bg-surface-hover/50 cursor-pointer"}`}
+                      onClick={isEditing ? undefined : () => playSegment(a.timestampStart, a.timestampEnd)}
                     >
+                      {isEditing ? (
+                        <form onSubmit={saveEditAnnotation} onClick={(e) => e.stopPropagation()} className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold text-accent/80 truncate">{a.createdBy}</span>
+                            <span className="text-[9px] text-muted/40">Editing</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="min-w-0">
+                              <div className="text-[9px] text-muted/60 mb-0.5">Start (s)</div>
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={editStart}
+                                onChange={(e) => setEditStart(parseFloat(e.target.value) || 0)}
+                                className="w-full min-w-0 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                              />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[9px] text-muted/60 mb-0.5">End (s)</div>
+                              <input
+                                type="number"
+                                min={0}
+                                step="any"
+                                value={editEnd}
+                                onChange={(e) => setEditEnd(parseFloat(e.target.value) || 0)}
+                                className="w-full min-w-0 rounded-lg border border-border bg-background px-2 py-1.5 text-xs font-mono text-accent tabular-nums"
+                              />
+                            </div>
+                          </div>
+                          <textarea
+                            value={editNote}
+                            onChange={(e) => setEditNote(e.target.value)}
+                            rows={2}
+                            placeholder="Add a note..."
+                            className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-none"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="submit"
+                              disabled={savingEdit || editEnd < editStart}
+                              className="flex-1 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+                            >
+                              {savingEdit ? "Saving..." : "Save"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditAnnotation}
+                              className="rounded-lg border border-border px-3 py-1.5 text-xs text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <>
                       <div className="flex items-center justify-between gap-2 mb-0.5">
                         <div className="flex items-center gap-1.5 min-w-0">
                           <span className="text-[10px] font-semibold text-accent/80 truncate">{a.createdBy}</span>
@@ -658,65 +890,162 @@ export default function SharedFolderPage({
                       {a.note && (
                         <p className="text-[10px] text-muted/80 line-clamp-2">{a.note}</p>
                       )}
-                      {/* Delete button for own annotations */}
+                      {/* Edit + Delete buttons for own annotations */}
                       {canEdit && a.email === verifiedEmail && (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteAnnotation(a.id);
-                          }}
-                          className="mt-1.5 text-[9px] text-danger/60 hover:text-danger transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          Delete
-                        </button>
+                        <div className="mt-1.5 flex items-center gap-3 opacity-0 group-hover:opacity-100">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEditAnnotation(a);
+                            }}
+                            className="text-[9px] text-accent/60 hover:text-accent transition-colors"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteAnnotation(a.id);
+                            }}
+                            className="text-[9px] text-danger/60 hover:text-danger transition-colors"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                        </>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
           </div>
         ) : folder.videos.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-border py-20 text-center">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-surface-hover border border-border flex items-center justify-center mb-4">
-              <svg className="w-8 h-8 text-muted/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-              </svg>
+          <>
+            <div className="flex flex-col sm:flex-row gap-3 mb-5 items-stretch sm:items-center justify-between">
+              {canEdit ? (
+                <form onSubmit={handleAddVideo} className="flex flex-1 min-w-0 gap-2">
+                  <input
+                    type="text"
+                    value={newVideoUrl}
+                    onChange={(e) => setNewVideoUrl(e.target.value)}
+                    placeholder="Paste a YouTube URL to add a video..."
+                    className="flex-1 min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-xs placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingVideo || !newVideoUrl.trim()}
+                    className="shrink-0 rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {addingVideo ? "Adding..." : "Add video"}
+                  </button>
+                </form>
+              ) : (
+                <div />
+              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] text-muted/60">Export</span>
+                <button
+                  onClick={() => handleExport("csv")}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                >
+                  CSV
+                </button>
+                <button
+                  onClick={() => handleExport("json")}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                >
+                  JSON
+                </button>
+              </div>
             </div>
-            <p className="text-sm text-muted">This folder is empty.</p>
-          </div>
+            {addVideoError && <p className="text-xs text-danger mb-3">{addVideoError}</p>}
+            <div className="rounded-lg border border-dashed border-border py-20 text-center">
+              <div className="w-16 h-16 mx-auto rounded-2xl bg-surface-hover border border-border flex items-center justify-center mb-4">
+                <svg className="w-8 h-8 text-muted/40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                </svg>
+              </div>
+              <p className="text-sm text-muted">This folder is empty.</p>
+              {canEdit && (
+                <p className="text-xs text-muted/60 mt-1">Add a YouTube video above to get started.</p>
+              )}
+            </div>
+          </>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {folder.videos.map((v) => (
-              <button
-                key={v.id}
-                onClick={() => selectVideo(v)}
-                className="group rounded-xl border border-border bg-surface hover:border-accent/50 hover:bg-surface-hover/30 transition-all overflow-hidden text-left"
-              >
-                <div className="aspect-video w-full overflow-hidden bg-muted relative">
-                  {v.thumbnailUrl ? (
-                    <Image src={v.thumbnailUrl} alt={v.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <svg className="w-10 h-10 text-muted/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                  )}
-                </div>
-                <div className="p-3">
-                  <h3 className="text-sm font-medium line-clamp-2">{v.title ?? "Untitled"}</h3>
-                  <div className="flex items-center gap-2 mt-1.5">
-                    {v.annotationCount > 0 && (
-                      <span className="text-[10px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">
-                        {v.annotationCount} annotation{v.annotationCount !== 1 ? "s" : ""}
-                      </span>
+          <>
+            <div className="flex flex-col sm:flex-row gap-3 mb-5 items-stretch sm:items-center justify-between">
+              {canEdit ? (
+                <form onSubmit={handleAddVideo} className="flex flex-1 min-w-0 gap-2">
+                  <input
+                    type="text"
+                    value={newVideoUrl}
+                    onChange={(e) => setNewVideoUrl(e.target.value)}
+                    placeholder="Paste a YouTube URL to add a video..."
+                    className="flex-1 min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-xs placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <button
+                    type="submit"
+                    disabled={addingVideo || !newVideoUrl.trim()}
+                    className="shrink-0 rounded-lg bg-accent px-4 py-2 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  >
+                    {addingVideo ? "Adding..." : "Add video"}
+                  </button>
+                </form>
+              ) : (
+                <div />
+              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] text-muted/60">Export</span>
+                <button
+                  onClick={() => handleExport("csv")}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                >
+                  CSV
+                </button>
+                <button
+                  onClick={() => handleExport("json")}
+                  className="rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted hover:text-foreground hover:bg-surface-hover transition-colors"
+                >
+                  JSON
+                </button>
+              </div>
+            </div>
+            {addVideoError && <p className="text-xs text-danger mb-3">{addVideoError}</p>}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {folder.videos.map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => selectVideo(v)}
+                  className="group rounded-xl border border-border bg-surface hover:border-accent/50 hover:bg-surface-hover/30 transition-all overflow-hidden text-left"
+                >
+                  <div className="aspect-video w-full overflow-hidden bg-muted relative">
+                    {v.thumbnailUrl ? (
+                      <Image src={v.thumbnailUrl} alt={v.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg className="w-10 h-10 text-muted/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      </div>
                     )}
                   </div>
-                </div>
-              </button>
-            ))}
-          </div>
+                  <div className="p-3">
+                    <h3 className="text-sm font-medium line-clamp-2">{v.title ?? "Untitled"}</h3>
+                    <div className="flex items-center gap-2 mt-1.5">
+                      {v.annotationCount > 0 && (
+                        <span className="text-[10px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">
+                          {v.annotationCount} annotation{v.annotationCount !== 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </>
         )}
       </main>
 

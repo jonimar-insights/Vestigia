@@ -2,16 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderShares } from "@/lib/schema";
 import { eq } from "drizzle-orm";
+import { auth } from "@/auth";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
+  const limited = rateLimit(request, { max: 30, windowMs: 60_000 });
+  if (limited) return limited;
+
   const { token } = await params;
   const body = await request.json();
   const { email } = body as { email: string };
 
-  if (!email?.trim()) {
+  // If the user is signed in with Google, use their session email
+  const session = await auth();
+  const sessionEmail = session?.user?.email?.toLowerCase();
+
+  const effectiveEmail = sessionEmail || email?.trim()?.toLowerCase();
+
+  if (!effectiveEmail) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
   }
 
@@ -35,7 +46,7 @@ export async function POST(
     .where(eq(folderShares.folderId, folder.id));
 
   const share = shareRows.find(
-    (s) => s.email.toLowerCase() === email.trim().toLowerCase()
+    (s) => s.email.toLowerCase() === effectiveEmail
   );
 
   if (!share) {
@@ -48,6 +59,6 @@ export async function POST(
   return NextResponse.json({
     authorized: true,
     permission: share.permission,
-    email: email.trim().toLowerCase(),
+    email: effectiveEmail,
   });
 }
