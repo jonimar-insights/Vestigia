@@ -7,6 +7,7 @@ import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
 import { useLanguage } from "@/components/LanguageProvider";
 import HelpSection from "@/components/HelpSection";
+import LandingBackground from "@/components/LandingBackground";
 
 interface Video {
   id: number;
@@ -896,7 +897,9 @@ export default function Home() {
   const playlistActive = playlistVideos.length > 0 || playlistLoading;
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col relative">
+      <LandingBackground />
+      <div className="relative z-10 flex flex-col min-h-screen">
       <header className="border-b border-border px-6 py-4 shrink-0">
         <div className="mx-auto w-full flex items-center justify-between">
           <div>
@@ -2785,6 +2788,7 @@ export default function Home() {
       {slideshowItems && (
         <VideoPlaylistPlayer items={slideshowItems} onClose={() => setSlideshowItems(null)} />
       )}
+      </div>
     </div>
   );
 }
