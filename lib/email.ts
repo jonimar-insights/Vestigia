@@ -3,6 +3,7 @@ import nodemailer, { type Transporter } from "nodemailer";
 const GMAIL_SMTP_USER = process.env.GMAIL_SMTP_USER || process.env.GMAIL_USER;
 const GMAIL_SMTP_PASS =
   process.env.GMAIL_SMTP_APP_PASSWORD || process.env.GMAIL_APP_PASSWORD;
+const GMAIL_SEND_VIA_USER = process.env.GMAIL_SEND_VIA_USER === "true";
 const GOOGLE_CLIENT_ID = process.env.AUTH_GOOGLE_ID;
 const GOOGLE_CLIENT_SECRET = process.env.AUTH_GOOGLE_SECRET;
 const GMAIL_API_SEND = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send";
@@ -148,7 +149,10 @@ export async function sendShareInviteEmail(
   });
 
   // Prefer the signed-in user's own Gmail via the Gmail API (gmail.send scope).
+  // Only used when GMAIL_SEND_VIA_USER=true — the scope is sensitive and
+  // triggers Google's unverified-app warning when not requested.
   const viaOAuth =
+    GMAIL_SEND_VIA_USER &&
     !!gmail?.user &&
     !!gmail?.refreshToken &&
     !!GOOGLE_CLIENT_ID &&

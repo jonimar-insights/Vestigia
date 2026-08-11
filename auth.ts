@@ -4,6 +4,12 @@ import { getDb } from "@/lib/db";
 import { users } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 
+const GMAIL_SEND_VIA_USER = process.env.GMAIL_SEND_VIA_USER === "true";
+const GOOGLE_SCOPES = ["openid", "email", "profile"];
+if (GMAIL_SEND_VIA_USER) {
+  GOOGLE_SCOPES.push("https://www.googleapis.com/auth/gmail.send");
+}
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   secret: process.env.AUTH_SECRET,
@@ -13,8 +19,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       clientSecret: process.env.AUTH_GOOGLE_SECRET,
       authorization: {
         params: {
-          scope:
-            "openid email profile https://www.googleapis.com/auth/youtube https://www.googleapis.com/auth/gmail.send",
+          scope: GOOGLE_SCOPES.join(" "),
           access_type: "offline",
           prompt: "consent",
         },
@@ -33,7 +38,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, user, account }) {
       // Store Google-authenticated users in the users table (upsert), so
-      // gmail.send tokens persist server-side for the OAuth invite emails.
+      // gmail.send tokens persist server-side for the OAuth invite emails
+      // (only when the gmail.send scope is requested via GMAIL_SEND_VIA_USER).
       if (user?.email && account?.provider === "google") {
         try {
           const db = getDb();
@@ -49,20 +55,29 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               passwordHash: "google-auth",
               name: user.name || user.email.split("@")[0],
               role: "member",
-              gmailAccessToken: account.access_token ?? null,
-              gmailRefreshToken: account.refresh_token ?? null,
-              gmailTokenExpiresAt: account.expires_at ? String(account.expires_at) : null,
+              gmailAccessToken: GMAIL_SEND_VIA_USER ? (account.access_token ?? null) : null,
+              gmailRefreshToken: GMAIL_SEND_VIA_USER ? (account.refresh_token ?? null) : null,
+              gmailTokenExpiresAt:
+                GMAIL_SEND_VIA_USER && account.expires_at
+                  ? String(account.expires_at)
+                  : null,
             })
             .onConflictDoUpdate({
               target: users.username,
               set: {
                 name: user.name ?? existing[0]?.name,
                 role: existing[0]?.role ?? "member",
-                gmailAccessToken: account.access_token ?? existing[0]?.gmailAccessToken,
-                gmailRefreshToken: account.refresh_token ?? existing[0]?.gmailRefreshToken,
-                gmailTokenExpiresAt: account.expires_at
-                  ? String(account.expires_at)
-                  : existing[0]?.gmailTokenExpiresAt,
+                gmailAccessToken: GMAIL_SEND_VIA_USER
+                  ? (account.access_token ?? existing[0]?.gmailAccessToken)
+                  : null,
+                gmailRefreshToken: GMAIL_SEND_VIA_USER
+                  ? (account.refresh_token ?? existing[0]?.gmailRefreshToken)
+                  : null,
+                gmailTokenExpiresAt: GMAIL_SEND_VIA_USER
+                  ? account.expires_at
+                    ? String(account.expires_at)
+                    : existing[0]?.gmailTokenExpiresAt
+                  : null,
               },
             });
         } catch (err) {
