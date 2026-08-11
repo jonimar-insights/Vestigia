@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
-import { useSession } from "next-auth/react";
+import { useSession, signIn } from "next-auth/react";
 
 interface VideoData {
   id: number;
@@ -167,6 +167,7 @@ export default function SharedFolderPage({
     if (!token || verifiedEmail || !sessionEmail) return;
     (async () => {
       setVerifying(true);
+      setVerifyError(null);
       try {
         const res = await fetch(`/api/shared/folder/${token}/verify`, {
           method: "POST",
@@ -183,8 +184,14 @@ export default function SharedFolderPage({
             `shared_folder_email_${token}`,
             JSON.stringify({ email: data.email, permission: data.permission, name })
           );
+        } else if (res.status !== 403 || data?.error !== "Email not authorized") {
+          // Only surface real errors (network / server) — a 403 for an
+          // unauthorized email is expected and just means "try another email".
+          setVerifyError(data?.error || "Failed to verify access");
         }
-      } catch {}
+      } catch {
+        setVerifyError("Failed to check access. Please try again.");
+      }
       setVerifying(false);
     })();
   }, [token, verifiedEmail, session?.user?.email, session?.user?.name]);
@@ -497,22 +504,63 @@ export default function SharedFolderPage({
 
   // ── Email verification screen ──
   if (!verifiedEmail) {
+    const isAutoChecking = verifying && !!session?.user?.email;
+    const autoCheckFailed = !verifying && !!session?.user?.email && !!verifyError;
     return (
       <div className="min-h-screen flex items-center justify-center bg-background p-6">
         <div className="w-full max-w-sm">
           <div className="text-center mb-8">
             <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-accent/10 border border-accent/20 flex items-center justify-center">
-              <svg className="w-7 h-7 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-              </svg>
+              {isAutoChecking ? (
+                <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+              ) : (
+                <svg className="w-7 h-7 text-accent" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                </svg>
+              )}
             </div>
             <h1 className="text-lg font-semibold">Shared Folder</h1>
-            <p className="text-sm text-muted mt-1">
-              {session?.user?.email
-                ? `Checking access for ${session?.user?.email}...`
-                : "Enter your email to access this folder"}
-            </p>
+            {isAutoChecking ? (
+              <p className="text-sm text-muted mt-1">
+                Checking access for <span className="font-medium text-foreground">{session?.user?.email}</span>...
+              </p>
+            ) : autoCheckFailed ? (
+              <p className="text-sm text-muted mt-1">
+                Signed in as <span className="font-medium text-foreground">{session?.user?.email}</span>,
+                but that email doesn't have access.
+              </p>
+            ) : (
+              <p className="text-sm text-muted mt-1">
+                Enter your email to access this folder
+              </p>
+            )}
           </div>
+
+          {/* Google sign-in — show when not signed in, or when signed in with an unauthorized email */}
+          {(!session?.user?.email || autoCheckFailed) && (
+            <button
+              onClick={() => signIn("google")}
+              className="w-full mb-4 flex items-center justify-center gap-3 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm font-medium hover:bg-surface-hover transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 01-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z" fill="#4285F4" />
+                <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0012 23z" fill="#34A853" />
+                <path d="M5.84 14.09a6.6 6.6 0 010-4.18V7.07H2.18a11 11 0 000 9.86l3.66-2.84z" fill="#FBBC05" />
+                <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15A11 11 0 002.18 7.07l3.66 2.84C6.71 7.31 9.14 5.38 12 5.38z" fill="#EA4335" />
+              </svg>
+              {session?.user?.email
+                ? "Sign in with a different Google account"
+                : "Continue with Google"}
+            </button>
+          )}
+
+          {(session?.user?.email || autoCheckFailed) && (
+            <div className="flex items-center gap-3 my-4">
+              <div className="h-px flex-1 bg-border" />
+              <span className="text-[10px] text-muted uppercase tracking-wider">or use email</span>
+              <div className="h-px flex-1 bg-border" />
+            </div>
+          )}
 
           <form onSubmit={handleVerify} className="space-y-3">
             <input
@@ -521,7 +569,8 @@ export default function SharedFolderPage({
               onChange={(e) => setEmailInput(e.target.value)}
               placeholder="your@email.com"
               required
-              autoFocus
+              autoFocus={!session?.user?.email}
+              defaultValue={!session?.user?.email && verifyError ? undefined : undefined}
               className="w-full rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
             />
             {verifyError && (
