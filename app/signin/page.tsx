@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
+import LandingBackground from "@/components/LandingBackground";
 
 
 function SignInContent() {
@@ -10,10 +11,8 @@ function SignInContent() {
   const callbackUrl = searchParams.get("callbackUrl") ?? "/";
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4 bg-cover bg-center bg-no-repeat relative"
-      style={{ backgroundImage: "url('/bg.jpg')" }}
-    >
+    <div className="min-h-screen flex items-center justify-center px-4 relative">
+      <LandingBackground />
       <div className="w-full max-w-sm text-center bg-background/80 backdrop-blur-sm rounded-2xl p-8 shadow-xl relative z-20">
         <h1 className="text-3xl font-bold mb-8">MARGINALIA: Vestigia</h1>
 
