@@ -50,9 +50,15 @@ body {
 }
 
 /* ── Landing background animations ── */
+/* SVG transform-box fix: pins/stars must scale from their own center,
+   not the SVG viewBox origin (the default for SVG elements). */
+.lb-origin {
+  transform-box: fill-box;
+  transform-origin: center;
+}
 @keyframes lb-pin {
-  0%, 100% { transform: translateY(-50%) scale(1); opacity: 0.6; }
-  50% { transform: translateY(-50%) scale(1.5); opacity: 1; }
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.5); opacity: 1; }
 }
 @keyframes lb-twinkle {
   0%, 100% { opacity: 0.15; transform: scale(0.7); }
@@ -71,10 +77,17 @@ body {
   50% { opacity: 0.9; }
 }
 @keyframes lb-playhead {
-  0% { left: 0%; }
-  100% { left: 100%; }
+  0% { transform: translateX(0); }
+  100% { transform: translateX(1200px); }
 }
 @keyframes lb-drift {
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-6px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .landing-bg,
+  .landing-bg * {
+    animation: none !important;
+  }
 }

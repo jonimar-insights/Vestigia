@@ -19,12 +19,12 @@ export default function LandingBackground() {
   return (
     <div
       aria-hidden
-      className="pointer-events-none fixed inset-0 z-0 overflow-hidden"
+      className="landing-bg pointer-events-none fixed inset-0 z-0 overflow-hidden"
       style={{
         background:
-          "radial-gradient(1200px 600px at 15% -10%, hsl(var(--accent) / 0.08), transparent 60%)," +
-          "radial-gradient(1000px 500px at 90% 110%, hsl(var(--accent) / 0.06), transparent 60%)," +
-          "linear-gradient(180deg, transparent, hsl(var(--background)))",
+          "radial-gradient(1200px 600px at 15% -10%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%)," +
+          "radial-gradient(1000px 500px at 90% 110%, color-mix(in srgb, var(--accent) 6%, transparent), transparent 60%)," +
+          "linear-gradient(180deg, transparent, var(--background))",
       }}
     >
       {/* ── Timeline spine ── */}
@@ -40,51 +40,51 @@ export default function LandingBackground() {
           y1="60"
           x2="1200"
           y2="60"
-          stroke="hsl(var(--accent) / 0.12)"
+          stroke="color-mix(in srgb, var(--accent) 12%, transparent)"
           strokeWidth="2"
           strokeDasharray="4 6"
         />
 
         {/* Scene segments */}
-        <rect x="40" y="52" width="180" height="16" rx="8" fill="hsl(var(--accent) / 0.05)" style={{ animation: "lb-scene 6s ease-in-out infinite" }} />
-        <rect x="260" y="52" width="220" height="16" rx="8" fill="hsl(var(--accent) / 0.05)" style={{ animation: "lb-scene 7s ease-in-out 1s infinite" }} />
-        <rect x="520" y="52" width="160" height="16" rx="8" fill="hsl(var(--accent) / 0.05)" style={{ animation: "lb-scene 5.5s ease-in-out 2s infinite" }} />
-        <rect x="720" y="52" width="200" height="16" rx="8" fill="hsl(var(--accent) / 0.05)" style={{ animation: "lb-scene 6.5s ease-in-out 0.5s infinite" }} />
-        <rect x="960" y="52" width="180" height="16" rx="8" fill="hsl(var(--accent) / 0.05)" style={{ animation: "lb-scene 7.5s ease-in-out 1.5s infinite" }} />
+        <rect x="40" y="52" width="180" height="16" rx="8" fill="color-mix(in srgb, var(--accent) 5%, transparent)" style={{ animation: "lb-scene 6s ease-in-out infinite" }} />
+        <rect x="260" y="52" width="220" height="16" rx="8" fill="color-mix(in srgb, var(--accent) 5%, transparent)" style={{ animation: "lb-scene 7s ease-in-out 1s infinite" }} />
+        <rect x="520" y="52" width="160" height="16" rx="8" fill="color-mix(in srgb, var(--accent) 5%, transparent)" style={{ animation: "lb-scene 5.5s ease-in-out 2s infinite" }} />
+        <rect x="720" y="52" width="200" height="16" rx="8" fill="color-mix(in srgb, var(--accent) 5%, transparent)" style={{ animation: "lb-scene 6.5s ease-in-out 0.5s infinite" }} />
+        <rect x="960" y="52" width="180" height="16" rx="8" fill="color-mix(in srgb, var(--accent) 5%, transparent)" style={{ animation: "lb-scene 7.5s ease-in-out 1.5s infinite" }} />
 
         {/* Annotation pins */}
-        <g style={{ animation: "lb-pin 3s ease-in-out infinite" }}>
-          <circle cx="120" cy="60" r="5" fill="hsl(var(--accent) / 0.5)" />
-          <circle cx="120" cy="60" r="9" stroke="hsl(var(--accent) / 0.2)" strokeWidth="1" />
+        <g className="lb-origin" style={{ animation: "lb-pin 3s ease-in-out infinite" }}>
+          <circle cx="120" cy="60" r="5" fill="color-mix(in srgb, var(--accent) 50%, transparent)" />
+          <circle cx="120" cy="60" r="9" stroke="color-mix(in srgb, var(--accent) 20%, transparent)" strokeWidth="1" />
         </g>
-        <g style={{ animation: "lb-pin 3.4s ease-in-out 0.4s infinite" }}>
-          <circle cx="340" cy="60" r="5" fill="hsl(var(--accent) / 0.5)" />
-          <circle cx="340" cy="60" r="9" stroke="hsl(var(--accent) / 0.2)" strokeWidth="1" />
+        <g className="lb-origin" style={{ animation: "lb-pin 3.4s ease-in-out 0.4s infinite" }}>
+          <circle cx="340" cy="60" r="5" fill="color-mix(in srgb, var(--accent) 50%, transparent)" />
+          <circle cx="340" cy="60" r="9" stroke="color-mix(in srgb, var(--accent) 20%, transparent)" strokeWidth="1" />
         </g>
-        <g style={{ animation: "lb-pin 3.8s ease-in-out 0.8s infinite" }}>
-          <circle cx="580" cy="60" r="5" fill="hsl(var(--accent) / 0.5)" />
-          <circle cx="580" cy="60" r="9" stroke="hsl(var(--accent) / 0.2)" strokeWidth="1" />
+        <g className="lb-origin" style={{ animation: "lb-pin 3.8s ease-in-out 0.8s infinite" }}>
+          <circle cx="580" cy="60" r="5" fill="color-mix(in srgb, var(--accent) 50%, transparent)" />
+          <circle cx="580" cy="60" r="9" stroke="color-mix(in srgb, var(--accent) 20%, transparent)" strokeWidth="1" />
         </g>
-        <g style={{ animation: "lb-pin 3.2s ease-in-out 1.2s infinite" }}>
-          <circle cx="800" cy="60" r="5" fill="hsl(var(--accent) / 0.5)" />
-          <circle cx="800" cy="60" r="9" stroke="hsl(var(--accent) / 0.2)" strokeWidth="1" />
+        <g className="lb-origin" style={{ animation: "lb-pin 3.2s ease-in-out 1.2s infinite" }}>
+          <circle cx="800" cy="60" r="5" fill="color-mix(in srgb, var(--accent) 50%, transparent)" />
+          <circle cx="800" cy="60" r="9" stroke="color-mix(in srgb, var(--accent) 20%, transparent)" strokeWidth="1" />
         </g>
-        <g style={{ animation: "lb-pin 3.6s ease-in-out 1.6s infinite" }}>
-          <circle cx="1040" cy="60" r="5" fill="hsl(var(--accent) / 0.5)" />
-          <circle cx="1040" cy="60" r="9" stroke="hsl(var(--accent) / 0.2)" strokeWidth="1" />
+        <g className="lb-origin" style={{ animation: "lb-pin 3.6s ease-in-out 1.6s infinite" }}>
+          <circle cx="1040" cy="60" r="5" fill="color-mix(in srgb, var(--accent) 50%, transparent)" />
+          <circle cx="1040" cy="60" r="9" stroke="color-mix(in srgb, var(--accent) 20%, transparent)" strokeWidth="1" />
         </g>
 
         {/* Key-moment stars */}
-        <path d="M200 20l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z" fill="hsl(var(--accent) / 0.4)" style={{ animation: "lb-twinkle 4s ease-in-out infinite" }} />
-        <path d="M460 30l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="hsl(var(--accent) / 0.35)" style={{ animation: "lb-twinkle 4.5s ease-in-out 0.6s infinite" }} />
-        <path d="M680 18l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="hsl(var(--accent) / 0.4)" style={{ animation: "lb-twinkle 3.8s ease-in-out 1.1s infinite" }} />
-        <path d="M900 26l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z" fill="hsl(var(--accent) / 0.35)" style={{ animation: "lb-twinkle 4.2s ease-in-out 1.7s infinite" }} />
-        <path d="M1120 22l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="hsl(var(--accent) / 0.4)" style={{ animation: "lb-twinkle 5s ease-in-out 2.2s infinite" }} />
+        <path className="lb-origin" d="M200 20l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z" fill="color-mix(in srgb, var(--accent) 40%, transparent)" style={{ animation: "lb-twinkle 4s ease-in-out infinite" }} />
+        <path className="lb-origin" d="M460 30l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="color-mix(in srgb, var(--accent) 35%, transparent)" style={{ animation: "lb-twinkle 4.5s ease-in-out 0.6s infinite" }} />
+        <path className="lb-origin" d="M680 18l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="color-mix(in srgb, var(--accent) 40%, transparent)" style={{ animation: "lb-twinkle 3.8s ease-in-out 1.1s infinite" }} />
+        <path className="lb-origin" d="M900 26l2.2 4.5 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5-3.6-3.5 5-.7z" fill="color-mix(in srgb, var(--accent) 35%, transparent)" style={{ animation: "lb-twinkle 4.2s ease-in-out 1.7s infinite" }} />
+        <path className="lb-origin" d="M1120 22l1.8 3.6 4 .6-2.9 2.8.7 4-3.6-1.9-3.6 1.9.7-4-2.9-2.8 4-.6z" fill="color-mix(in srgb, var(--accent) 40%, transparent)" style={{ animation: "lb-twinkle 5s ease-in-out 2.2s infinite" }} />
 
         {/* Moving playhead */}
         <g style={{ animation: "lb-playhead 14s linear infinite" }}>
-          <line x1="0" y1="40" x2="0" y2="80" stroke="hsl(var(--accent) / 0.5)" strokeWidth="2" />
-          <circle cx="0" cy="60" r="4" fill="hsl(var(--accent) / 0.6)" />
+          <line x1="0" y1="40" x2="0" y2="80" stroke="color-mix(in srgb, var(--accent) 50%, transparent)" strokeWidth="2" />
+          <circle cx="0" cy="60" r="4" fill="color-mix(in srgb, var(--accent) 60%, transparent)" />
         </g>
       </svg>
 
@@ -127,7 +127,7 @@ export default function LandingBackground() {
         height="44"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="hsl(var(--accent) / 0.6)"
+        stroke="color-mix(in srgb, var(--accent) 60%, transparent)"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -144,7 +144,7 @@ export default function LandingBackground() {
         height="60"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="hsl(var(--accent) / 0.6)"
+        stroke="color-mix(in srgb, var(--accent) 60%, transparent)"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -164,7 +164,7 @@ export default function LandingBackground() {
         height="40"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="hsl(var(--accent) / 0.6)"
+        stroke="color-mix(in srgb, var(--accent) 60%, transparent)"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
@@ -182,14 +182,14 @@ export default function LandingBackground() {
         height="40"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="hsl(var(--accent) / 0.6)"
+        stroke="color-mix(in srgb, var(--accent) 60%, transparent)"
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
         style={{ animation: "lb-drift 7.5s ease-in-out 1.5s infinite" }}
       >
         <circle cx="12" cy="12" r="9" />
-        <path d="M10 8.5v7l6-3.5z" fill="hsl(var(--accent) / 0.4)" stroke="none" />
+        <path d="M10 8.5v7l6-3.5z" fill="color-mix(in srgb, var(--accent) 40%, transparent)" stroke="none" />
       </svg>
     </div>
   );
