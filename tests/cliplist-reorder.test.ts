@@ -40,7 +40,8 @@ const jsonHeaders = { "Content-Type": "application/json" };
 
 async function main() {
   const ownerToken = await forgeToken("jonimar@gmail.com", "Joao");
-  const ownerHeaders = { "Cookie": `authjs.session-token=${ownerToken}`, ...jsonHeaders };
+  const cookieName = BASE.startsWith("https://") ? "__Secure-authjs.session-token" : "authjs.session-token";
+  const ownerHeaders = { "Cookie": `${cookieName}=${ownerToken}`, ...jsonHeaders };
 
   // create list
   const createdList = await fetch(`${BASE}/api/cliplists`, {
