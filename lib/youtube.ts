@@ -30,6 +30,43 @@ export function sanitizeHtml(html: string): string {
     .replace(/'/g, "&#39;");
 }
 
+export type NoteToken =
+  | { kind: "text"; value: string }
+  | { kind: "link"; href: string; display: string };
+
+const NOTE_LINK_RE = /\[([^\]\n]+)\]\(((?:https?:\/\/|www\.)[^\s)]+)\)|((?:https?:\/\/|www\.)[^\s<>"']+)/gi;
+
+export function normalizeHref(url: string): string {
+  return /^www\./i.test(url) ? `https://${url}` : url;
+}
+
+export function tokenizeNoteLinks(text: string): NoteToken[] {
+  const tokens: NoteToken[] = [];
+  let last = 0;
+  for (const match of text.matchAll(NOTE_LINK_RE)) {
+    const idx = match.index;
+    if (idx > last) tokens.push({ kind: "text", value: text.slice(last, idx) });
+    if (match[2] !== undefined) {
+      tokens.push({ kind: "link", href: normalizeHref(match[2]), display: match[1] });
+      last = idx + match[0].length;
+    } else {
+      let url = match[3].replace(/[.,;:!?]+$/, "");
+      if (url.endsWith(")") && !url.slice(0, -1).includes("(")) {
+        url = url.slice(0, -1).replace(/[.,;:!?]+$/, "");
+      }
+      if (!url) {
+        tokens.push({ kind: "text", value: match[0] });
+        last = idx + match[0].length;
+        continue;
+      }
+      tokens.push({ kind: "link", href: normalizeHref(url), display: url });
+      last = idx + url.length;
+    }
+  }
+  if (last < text.length) tokens.push({ kind: "text", value: text.slice(last) });
+  return tokens;
+}
+
 export function parseYouTubeChaptersUrl(url: string): string | null {
   try {
     const id = extractYouTubeId(url);

@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
+import { tokenizeNoteLinks } from "@/lib/youtube";
 
 interface VideoData {
   id: number;
@@ -40,6 +41,28 @@ function formatTs(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function NoteText({ note }: { note: string }) {
+  return (
+    <>
+      {tokenizeNoteLinks(note).map((tok, i) =>
+        tok.kind === "link" ? (
+          <a
+            key={i}
+            href={tok.href}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="text-accent underline decoration-accent/40 break-all hover:text-accent-hover"
+          >
+            {tok.display}
+          </a>
+        ) : (
+          <span key={i}>{tok.value}</span>
+        )
+      )}
+    </>
+  );
 }
 
 interface YTPlayer {
@@ -527,7 +550,7 @@ export default function SharedFolderPage({
             ) : autoCheckFailed ? (
               <p className="text-sm text-muted mt-1">
                 Signed in as <span className="font-medium text-foreground">{session?.user?.email}</span>,
-                but that email doesn't have access.
+                but that email doesn&apos;t have access.
               </p>
             ) : (
               <p className="text-sm text-muted mt-1">
@@ -937,7 +960,9 @@ export default function SharedFolderPage({
                         </span>
                       </div>
                       {a.note && (
-                        <p className="text-[10px] text-muted/80 line-clamp-2">{a.note}</p>
+                        <p className="text-[10px] text-muted/80 line-clamp-2">
+                          <NoteText note={a.note} />
+                        </p>
                       )}
                       {/* Edit + Delete buttons for own annotations */}
                       {canEdit && a.email === verifiedEmail && (

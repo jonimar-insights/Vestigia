@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
-import { formatTimestamp, sanitizeHtml } from "@/lib/youtube";
+import { formatTimestamp, sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -47,13 +47,25 @@ interface VideoData {
 }
 
 function renderNote(text: string): string {
-  const safe = sanitizeHtml(text);
-  return safe
+  const anchors: string[] = [];
+  let s = "";
+  for (const tok of tokenizeNoteLinks(text)) {
+    if (tok.kind === "link") {
+      anchors.push(
+        `<a href="${sanitizeHtml(tok.href)}" target="_blank" rel="noopener noreferrer nofollow" class="text-accent hover:text-accent-hover underline decoration-accent/40 break-all">${sanitizeHtml(tok.display)}</a>`
+      );
+      s += `\u0000${anchors.length - 1}\u0000`;
+    } else {
+      s += tok.value;
+    }
+  }
+  s = s
     .replace(/\$(.+?)\$/g, '<span class="text-accent font-mono">$1</span>')
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/\*(.+?)\*/g, "<em>$1</em>")
     .replace(/`(.+?)`/g, '<code class="bg-surface-hover rounded px-1 font-mono text-xs">$1</code>')
     .replace(/\n/g, "<br>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i: string) => anchors[Number(i)] ?? "");
 }
 
 const LABEL_COLORS: Record<string, { border: string; dot: string; badge: string; badgeText: string; ring: string }> = {
@@ -412,9 +424,9 @@ export default function VideoPage() {
     }
   }, [videoId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { loadVideo(); }, [loadVideo]);
-
-  useEffect(() => { loadVideo(); }, [loadVideo]);
+  // All setState calls inside loadVideo run after `await`, so there is no
+  // synchronous cascading render — the rule can't see through the callback.
+  useEffect(() => { loadVideo(); }, [loadVideo]); // eslint-disable-line react-hooks/set-state-in-effect
 
   // Load saved summaries on mount
   useEffect(() => {
@@ -1084,14 +1096,14 @@ export default function VideoPage() {
               <svg className="w-3.5 h-3.5 text-muted shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" /></svg>
               <span className="text-[10px] text-muted font-medium">{t("translate")}</span>
               <div className="flex items-center ml-auto rounded-md border border-border/60 overflow-hidden">
-                <button onClick={() => { if (translatedLang) clearTranslations(); }}
-                  disabled={!translatedLang}
+                <button onClick={() => { if (translatedLang && !translating) clearTranslations(); }}
+                  disabled={!translatedLang || translating}
                   className={`px-2.5 py-1 text-[10px] font-medium transition-all ${translatedLang ? "bg-accent text-white" : "text-muted/40"}`}>
                   EN
                 </button>
                 <div className="w-px h-3 bg-border/60" />
-                <button onClick={() => { if (!translatedLang) translateAll(); }}
-                  disabled={!!translatedLang}
+                <button onClick={() => { if (!translatedLang && !translating) translateAll(); }}
+                  disabled={!!translatedLang || translating}
                   className={`px-2.5 py-1 text-[10px] font-medium transition-all ${!translatedLang ? "text-muted hover:text-foreground" : "bg-accent text-white"}`}>
                   PT
                 </button>
