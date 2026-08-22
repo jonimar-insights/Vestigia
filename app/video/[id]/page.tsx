@@ -144,6 +144,7 @@ export default function VideoPage() {
   const [scrubberDragging, setScrubberDragging] = useState(false);
   const [scrubberPos, setScrubberPos] = useState<number | null>(null);
   const [filterLabel, setFilterLabel] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkLabel, setBulkLabel] = useState("");
   const [summaryMoments, setSummaryMoments] = useState<Array<{ timestamp: number; endTimestamp?: number; title: string; summary: string; importance: string }>>([]);
@@ -197,9 +198,11 @@ export default function VideoPage() {
 
   const displayedAnnotations = useMemo(() => {
     if (!video) return [];
-    if (!filterLabel) return video.annotations;
-    return video.annotations.filter(a => a.label === filterLabel);
-  }, [video, filterLabel]);
+    let list = video.annotations;
+    if (filterLabel) list = list.filter(a => a.label === filterLabel);
+    if (filterTag) list = list.filter(a => a.tags.includes(filterTag));
+    return list;
+  }, [video, filterLabel, filterTag]);
 
   const labelCounts = useMemo(() => {
     if (!video) return {};
@@ -207,6 +210,23 @@ export default function VideoPage() {
     for (const a of video.annotations) { counts[a.label] = (counts[a.label] || 0) + 1; }
     return counts;
   }, [video]);
+
+  const uniqueTags = useMemo(() => {
+    if (!video) return [];
+    return Array.from(new Set(video.annotations.flatMap(a => a.tags))).sort((a, b) => a.localeCompare(b));
+  }, [video]);
+
+  const tagCounts = useMemo(() => {
+    if (!video) return {};
+    const counts: Record<string, number> = {};
+    for (const a of video.annotations) for (const tg of a.tags) { counts[tg] = (counts[tg] || 0) + 1; }
+    return counts;
+  }, [video]);
+
+  const hasAnnotationFilter = !!filterLabel || !!filterTag;
+  const feedTitle = !video ? "" : hasAnnotationFilter
+    ? `${[filterLabel, filterTag ? `#${filterTag}` : null].filter(Boolean).join(" · ")} (${displayedAnnotations.length})`
+    : `${video.annotations.length} ${t("video.annotations")}`;
 
   // ── YouTube IFrame API ──
   useEffect(() => {
@@ -1353,6 +1373,26 @@ export default function VideoPage() {
                     </div>
             )}
 
+            {/* Tag filter chips */}
+            {uniqueTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3 shrink-0">
+                {uniqueTags.map(tag => {
+                  const active = filterTag === tag;
+                  return (
+                    <button key={tag} onClick={() => setFilterTag(active ? null : tag)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium font-mono transition-all ${
+                        active
+                          ? "bg-accent text-white shadow-sm"
+                          : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+                      }`}>
+                      #{tag}
+                      <span className="opacity-50">{tagCounts[tag]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Feed header */}
             <div className="flex items-center justify-between mb-3 shrink-0">
               <div className="flex items-center gap-2">
@@ -1376,7 +1416,7 @@ export default function VideoPage() {
                   </button>
                 )}
                 <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">
-                  {filterLabel ? `${filterLabel} (${displayedAnnotations.length})` : `${video.annotations.length} ${t("video.annotations")}`}
+                  {feedTitle}
                 </h2>
               </div>
               <div className="flex items-center gap-1.5">
@@ -1423,12 +1463,12 @@ export default function VideoPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                     </div>
-                    <p className="text-sm font-medium text-muted mb-1">{filterLabel ? t("annotation.noMatching") : t("annotation.noAnnotationsYet")}</p>
+                    <p className="text-sm font-medium text-muted mb-1">{hasAnnotationFilter ? t("annotation.noMatching") : t("annotation.noAnnotationsYet")}</p>
                     <p className="text-xs text-muted/60 mb-4">
-                      {filterLabel ? t("annotation.tryDifferentFilter") : t("annotation.press")} {!filterLabel && <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>}
-                      {!filterLabel ? t("annotation.toCreateFirst") : ""}
+                      {hasAnnotationFilter ? t("annotation.tryDifferentFilter") : t("annotation.press")} {!hasAnnotationFilter && <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>}
+                      {!hasAnnotationFilter ? t("annotation.toCreateFirst") : ""}
                     </p>
-                    {!filterLabel && (
+                    {!hasAnnotationFilter && (
                       <button onClick={() => setShowForm(true)}
                         className="text-xs text-accent hover:text-accent-hover font-medium transition-colors">
                         {t("annotation.createFirstAction")}
@@ -1595,9 +1635,11 @@ export default function VideoPage() {
                                   {ann.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-0.5" onClick={e => e.stopPropagation()}>
                                       {ann.tags.map(tag => (
-                                        <span key={tag} className="text-[9px] text-muted/50 font-mono">
+                                        <button key={tag} onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                                          title={t("annotation.filterByTag")}
+                                          className={`text-[9px] font-mono transition-colors ${filterTag === tag ? "text-accent" : "text-muted/50 hover:text-accent"}`}>
                                           #{tag}
-                                        </span>
+                                        </button>
                                       ))}
                                     </div>
                                   )}

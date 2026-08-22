@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
 import { tokenizeNoteLinks } from "@/lib/youtube";
@@ -105,6 +105,7 @@ export default function SharedFolderPage({
   const [selectedVideo, setSelectedVideo] = useState<VideoData | null>(null);
   const [annotations, setAnnotations] = useState<SharedAnnotation[]>([]);
   const [annotationsLoading, setAnnotationsLoading] = useState(false);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
 
   // Add video (edit collaborators)
   const [newVideoUrl, setNewVideoUrl] = useState("");
@@ -314,6 +315,7 @@ export default function SharedFolderPage({
   const loadAnnotations = useCallback(async (videoId: number) => {
     if (!token) return;
     setAnnotationsLoading(true);
+    setFilterTag(null);
     try {
       const res = await fetch(`/api/shared/folder/${token}/annotations?videoId=${videoId}`);
       if (res.ok) setAnnotations(await res.json());
@@ -341,6 +343,11 @@ export default function SharedFolderPage({
     }, 5000);
     return () => clearInterval(poll);
   }, [selectedVideo, token]);
+
+  const visibleAnnotations = useMemo(
+    () => (filterTag ? annotations.filter((a) => a.tags.includes(filterTag)) : annotations),
+    [annotations, filterTag]
+  );
 
   function selectVideo(video: VideoData) {
     setSelectedVideo(video);
@@ -870,7 +877,18 @@ export default function SharedFolderPage({
               <div className="flex-1 min-h-0">
                 <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   Annotations
-                  <span className="text-[10px] text-muted/50 font-normal">{annotations.length}</span>
+                  <span className="text-[10px] text-muted/50 font-normal">
+                    {filterTag ? `${visibleAnnotations.length} / ${annotations.length}` : annotations.length}
+                  </span>
+                  {filterTag && (
+                    <button
+                      onClick={() => setFilterTag(null)}
+                      className="ml-1 inline-flex items-center gap-1 rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent normal-case hover:bg-accent/20 transition-colors"
+                      title="Clear tag filter"
+                    >
+                      #{filterTag} ×
+                    </button>
+                  )}
                 </h3>
                 <div className="space-y-2 max-h-96 overflow-y-auto">
                   {annotationsLoading && (
@@ -878,14 +896,16 @@ export default function SharedFolderPage({
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-accent border-t-transparent" />
                     </div>
                   )}
-                  {!annotationsLoading && annotations.length === 0 && (
+                  {!annotationsLoading && visibleAnnotations.length === 0 && (
                     <p className="text-xs text-muted/60 text-center py-6">
-                      {canEdit
+                      {filterTag
+                        ? `No annotations tagged #${filterTag}.`
+                        : canEdit
                         ? "No annotations yet. Play the video and add one!"
                         : "No annotations yet."}
                     </p>
                   )}
-                  {annotations.map((a) => {
+                  {visibleAnnotations.map((a) => {
                     const isEditing = editingAnnotation?.id === a.id;
                     return (
                     <div key={a.id}
@@ -963,6 +983,21 @@ export default function SharedFolderPage({
                         <p className="text-[10px] text-muted/80 line-clamp-2">
                           <NoteText note={a.note} />
                         </p>
+                      )}
+                      {a.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1" onClick={(e) => e.stopPropagation()}>
+                          {a.tags.map((tag) => (
+                            <button
+                              key={tag}
+                              onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                              className={`text-[9px] font-mono transition-colors ${
+                                filterTag === tag ? "text-accent" : "text-muted/50 hover:text-accent"
+                              }`}
+                            >
+                              #{tag}
+                            </button>
+                          ))}
+                        </div>
                       )}
                       {/* Edit + Delete buttons for own annotations */}
                       {canEdit && a.email === verifiedEmail && (

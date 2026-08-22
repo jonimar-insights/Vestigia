@@ -67,6 +67,7 @@ export const dict = {
 
     "annotation.new": "New Annotation",
     "annotation.filterByLabel": "Filter by label",
+    "annotation.filterByTag": "Filter by tag",
     "annotation.noResults": "No annotations found",
     "annotation.noMatching": "No matching annotations",
     "annotation.noAnnotationsYet": "No annotations yet",
@@ -354,6 +355,7 @@ export const dict = {
 
     "annotation.new": "Nova Anotação",
     "annotation.filterByLabel": "Filtrar por etiqueta",
+    "annotation.filterByTag": "Filtrar por etiqueta",
     "annotation.noResults": "Nenhuma anotação encontrada",
     "annotation.noMatching": "Nenhuma anotação correspondente",
     "annotation.noAnnotationsYet": "Ainda sem anotações",

@@ -17,6 +17,9 @@ export async function GET(request: NextRequest) {
   }
 
   const pattern = `%${q}%`;
+  // tags are stored as a JSON array string, e.g. ["physics","math"] — match
+  // whole tags only by searching for the quoted value
+  const tagPattern = `%"${q.replace(/[\\%_"]/g, "\\$&")}"%`;
 
   // Get user's video IDs first
   const userVideoIds = await db
@@ -46,7 +49,7 @@ export async function GET(request: NextRequest) {
         or(
           like(annotations.label, pattern),
           like(annotations.note, pattern),
-          like(annotations.tags, pattern),
+          like(annotations.tags, tagPattern),
         ),
         inArray(annotations.videoId, userVideoIdArr),
       ),
