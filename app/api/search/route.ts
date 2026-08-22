@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, annotations, scenes, keyMoments } from "@/lib/schema";
-import { like, or, eq, and, inArray } from "drizzle-orm";
+import { ilike, or, eq, and, inArray } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(request: NextRequest) {
@@ -47,9 +47,9 @@ export async function GET(request: NextRequest) {
     .where(
       and(
         or(
-          like(annotations.label, pattern),
-          like(annotations.note, pattern),
-          like(annotations.tags, tagPattern),
+          ilike(annotations.label, pattern),
+          ilike(annotations.note, pattern),
+          ilike(annotations.tags, tagPattern),
         ),
         inArray(annotations.videoId, userVideoIdArr),
       ),
@@ -66,8 +66,8 @@ export async function GET(request: NextRequest) {
     .where(
       and(
         or(
-          like(scenes.aiDescription, pattern),
-          like(scenes.aiTags, pattern),
+          ilike(scenes.aiDescription, pattern),
+          ilike(scenes.aiTags, pattern),
         ),
         inArray(scenes.videoId, userVideoIdArr),
       ),
@@ -84,8 +84,8 @@ export async function GET(request: NextRequest) {
     .where(
       and(
         or(
-          like(keyMoments.title, pattern),
-          like(keyMoments.description, pattern),
+          ilike(keyMoments.title, pattern),
+          ilike(keyMoments.description, pattern),
         ),
         inArray(keyMoments.videoId, userVideoIdArr),
       ),
