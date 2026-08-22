@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { cliplists, clipItems, videos } from "@/lib/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, asc } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(
@@ -33,7 +33,7 @@ export async function GET(
     .select()
     .from(clipItems)
     .where(eq(clipItems.cliplistId, listId))
-    .orderBy(desc(clipItems.createdAt));
+    .orderBy(asc(clipItems.position), desc(clipItems.createdAt));
 
   const videoIds = [...new Set(items.map((i) => i.videoId))];
   const videoMap = new Map<number, { title: string | null; thumbnailUrl: string | null }>();

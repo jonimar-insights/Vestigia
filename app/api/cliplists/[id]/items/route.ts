@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { clipItems, cliplists } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, sql } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function PATCH(
@@ -29,7 +29,33 @@ export async function PATCH(
   }
 
   const body = await request.json();
-  const { itemId, title, detail, endTimestamp } = body;
+  const { itemId, title, detail, endTimestamp, order } = body;
+
+  // Reorder mode: body { order: number[] } — full list of item ids in the
+  // desired playback order. Items not included keep their old position.
+  if (order !== undefined) {
+    if (!Array.isArray(order) || order.length === 0 || order.some((id: unknown) => !Number.isInteger(id))) {
+      return NextResponse.json({ error: "order must be a non-empty array of item ids" }, { status: 400 });
+    }
+    const owned = await db
+      .select({ id: clipItems.id })
+      .from(clipItems)
+      .where(eq(clipItems.cliplistId, listId));
+    const ownedSet = new Set(owned.map((r) => r.id));
+    if (!order.every((id: number) => ownedSet.has(id))) {
+      return NextResponse.json({ error: "order contains items that are not in this cliplist" }, { status: 400 });
+    }
+    for (let i = 0; i < order.length; i++) {
+      await db
+        .update(clipItems)
+        .set({ position: i })
+        .where(and(eq(clipItems.id, order[i]), eq(clipItems.cliplistId, listId)));
+    }
+    await db.update(cliplists)
+      .set({ updatedAt: new Date().toISOString() })
+      .where(eq(cliplists.id, listId));
+    return NextResponse.json({ success: true });
+  }
 
   if (!itemId) {
     return NextResponse.json({ error: "itemId is required" }, { status: 400 });
@@ -93,6 +119,13 @@ export async function POST(
     return NextResponse.json({ error: "Missing required fields: type, title" }, { status: 400 });
   }
 
+  // New items are appended at the end of the playback order
+  const [maxRow] = await db
+    .select({ maxPos: sql<number>`coalesce(max(${clipItems.position}), -1)` })
+    .from(clipItems)
+    .where(eq(clipItems.cliplistId, listId));
+  const nextPosition = Number(maxRow?.maxPos ?? -1) + 1;
+
   // Slides don't need videoId/timestamp — they're inter-title cards
   if (type === "slide") {
     const [result] = await db
@@ -106,6 +139,7 @@ export async function POST(
         title,
         detail: detail || null,
         tags: tags ? JSON.stringify(tags) : null,
+        position: nextPosition,
       })
       .returning();
 
@@ -131,6 +165,7 @@ export async function POST(
       title,
       detail: detail || null,
       tags: tags ? JSON.stringify(tags) : null,
+      position: nextPosition,
     })
     .returning();
 

@@ -119,6 +119,9 @@ export default function Home() {
   const [slideTitle, setSlideTitle] = useState("");
   const [slideDetail, setSlideDetail] = useState("");
   const [slideDuration, setSlideDuration] = useState(5);
+  const [dragArmedId, setDragArmedId] = useState<number | null>(null);
+  const [dragItemId, setDragItemId] = useState<number | null>(null);
+  const [dragOverItemId, setDragOverItemId] = useState<number | null>(null);
   const [editingSlideId, setEditingSlideId] = useState<number | null>(null);
   const [editSlideTitle, setEditSlideTitle] = useState("");
   const [editSlideDetail, setEditSlideDetail] = useState("");
@@ -891,6 +894,35 @@ export default function Home() {
       }
       await loadCliplists();
     } catch {}
+  }
+
+  function handleDropOnItem(targetId: number) {
+    if (!selectedCliplist || dragItemId === null || dragItemId === targetId) return;
+    const items = [...selectedCliplist.items];
+    const from = items.findIndex((i) => i.id === dragItemId);
+    if (from === -1) return;
+    const [moved] = items.splice(from, 1);
+    const to = items.findIndex((i) => i.id === targetId);
+    items.splice(to, 0, moved);
+    setSelectedCliplist({ ...selectedCliplist, items });
+    setDragArmedId(null);
+    setDragItemId(null);
+    setDragOverItemId(null);
+    reorderClipItems(selectedCliplist.id, items.map((i) => i.id));
+  }
+
+  async function reorderClipItems(cliplistId: number, orderedIds: number[]) {
+    try {
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order: orderedIds }),
+      });
+      if (!res.ok) throw new Error("reorder failed");
+      await loadCliplists();
+    } catch {
+      openCliplist(cliplistId); // refetch to roll back optimistic order
+    }
   }
 
   const playlistActive = playlistVideos.length > 0 || playlistLoading;
@@ -2227,7 +2259,29 @@ export default function Home() {
                   ) : (
                     <div className="divide-y divide-border/50 max-h-[60vh] overflow-y-auto">
                       {selectedCliplist.items.map((item) => (
-                        <div key={item.id} className="flex items-center gap-3 px-4 py-2.5 hover:bg-surface-hover/50 transition-colors group/item">
+                        <div key={item.id}
+                          draggable={dragArmedId === item.id}
+                          onDragStart={(e) => { setDragItemId(item.id); e.dataTransfer.effectAllowed = "move"; }}
+                          onDragOver={(e) => { e.preventDefault(); if (dragOverItemId !== item.id) setDragOverItemId(item.id); }}
+                          onDragLeave={() => setDragOverItemId((prev) => (prev === item.id ? null : prev))}
+                          onDrop={(e) => { e.preventDefault(); handleDropOnItem(item.id); }}
+                          onDragEnd={() => { setDragArmedId(null); setDragItemId(null); setDragOverItemId(null); }}
+                          className={`flex items-center gap-3 px-4 py-2.5 transition-colors group/item ${
+                            dragOverItemId === item.id && dragItemId !== null && dragItemId !== item.id
+                              ? "bg-accent/10"
+                              : "hover:bg-surface-hover/50"
+                          }`}
+                        >
+                          {editingSlideId !== item.id && (
+                            <button
+                              onMouseDown={() => setDragArmedId(item.id)}
+                              onTouchStart={() => setDragArmedId(item.id)}
+                              className="-ml-1 p-0.5 shrink-0 cursor-grab active:cursor-grabbing text-muted/30 hover:text-accent opacity-0 group-hover/item:opacity-100 transition-all"
+                              title={t("cliplist.reorder")}
+                            >
+                              <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>
+                            </button>
+                          )}
                           {item.type === "slide" ? (
                             editingSlideId === item.id ? (
                               /* ── Slide edit form ── */

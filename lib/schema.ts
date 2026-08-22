@@ -104,6 +104,7 @@ export const clipItems = pgTable("clip_items", {
   title: text("title").notNull(),
   detail: text("detail"),
   tags: text("tags"), // JSON array of strings
+  position: integer("position").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
