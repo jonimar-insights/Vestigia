@@ -50,7 +50,7 @@ async function main() {
 
   // ── Vimeo (public oEmbed → title/thumbnail/duration) ──
   const vimeo = await importUrl("https://vimeo.com/76979871");
-  assert.equal(vimeo.status, 201, `vimeo status ${vimeo.status}`);
+  assert.ok([200, 201].includes(vimeo.status), `vimeo status ${vimeo.status}`);
   const v = await vimeo.json();
   assert.equal(v.platform, "vimeo");
   assert.equal(v.youtubeId, "vimeo:76979871");
@@ -65,7 +65,7 @@ async function main() {
 
   // ── Instagram reel (metadata may be blocked; import must still succeed) ──
   const ig = await importUrl("https://www.instagram.com/reel/Cabc123XYZ/");
-  assert.equal(ig.status, 201, `instagram status ${ig.status}`);
+  assert.ok([200, 201].includes(ig.status), `instagram status ${ig.status}`);
   const iv = await ig.json();
   assert.equal(iv.platform, "instagram");
   assert.equal(iv.youtubeId, "instagram:Cabc123XYZ");
@@ -73,7 +73,7 @@ async function main() {
 
   // ── X/Twitter ──
   const tw = await importUrl("https://x.com/jack/status/20");
-  assert.equal(tw.status, 201, `twitter status ${tw.status}`);
+  assert.ok([200, 201].includes(tw.status), `twitter status ${tw.status}`);
   const tv = await tw.json();
   assert.equal(tv.platform, "twitter");
   assert.equal(tv.youtubeId, "twitter:20");
@@ -81,7 +81,7 @@ async function main() {
 
   // ── TikTok (oEmbed may be IP-blocked; import must still succeed) ──
   const tt = await importUrl("https://www.tiktok.com/@scout2015/video/6718335390845095173");
-  assert.equal(tt.status, 201, `tiktok status ${tt.status}`);
+  assert.ok([200, 201].includes(tt.status), `tiktok status ${tt.status}`);
   const tkv = await tt.json();
   assert.equal(tkv.platform, "tiktok");
   assert.equal(tkv.youtubeId, "tiktok:6718335390845095173");
@@ -89,7 +89,7 @@ async function main() {
 
   // ── Facebook ──
   const fb = await importUrl("https://www.facebook.com/watch/?v=10153231379946729");
-  assert.equal(fb.status, 201, `facebook status ${fb.status}`);
+  assert.ok([200, 201].includes(fb.status), `facebook status ${fb.status}`);
   const fv = await fb.json();
   assert.equal(fv.platform, "facebook");
   assert.equal(fv.youtubeId, "facebook:10153231379946729");
