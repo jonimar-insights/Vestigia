@@ -16,8 +16,9 @@ export const users = pgTable("users", {
 
 export const videos = pgTable("videos", {
   id: serial("id").primaryKey(),
-  youtubeUrl: text("youtube_url").notNull(),
-  youtubeId: text("youtube_id").notNull(),
+  youtubeUrl: text("youtube_url").notNull(), // canonical source URL (any supported platform)
+  youtubeId: text("youtube_id").notNull(), // youtube id, or "platform:id" for social videos
+  platform: text("platform").notNull().default("youtube"), // youtube | tiktok | instagram | twitter | facebook | vimeo
   title: text("title"),
   thumbnailUrl: text("thumbnail_url"),
   durationSeconds: integer("duration_seconds"),
