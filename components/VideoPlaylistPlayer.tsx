@@ -53,6 +53,14 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const advancedRef = useRef(false);
   const slideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Latest-items mirror for effects that intentionally narrow their deps to
+  // specific triggers (index/ready/map changes) but still need fresh values
+  // when they run. Declared first so it updates before the effects below.
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  });
+
   useEffect(() => {
     const uniqueIds = [...new Set(items.filter(i => i.videoId > 0).map((i) => i.videoId))];
     const missingIds = uniqueIds.filter((id) => !fetchedIdsRef.current.has(id));
@@ -81,11 +89,12 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   }, [items]);
 
   useEffect(() => {
-    if (item?.type === "slide") {
+    const cur = itemsRef.current[currentIdx];
+    if (cur?.type === "slide") {
       clearTimeInterval();
-      const ms = (item.endTimestamp ?? 5) * 1000;
+      const ms = (cur.endTimestamp ?? 5) * 1000;
       slideTimerRef.current = setTimeout(() => {
-        setCurrentIdx((prev) => (prev < items.length - 1 ? prev + 1 : 0));
+        setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
       }, ms);
       return () => { if (slideTimerRef.current) clearTimeout(slideTimerRef.current); };
     }
@@ -96,18 +105,18 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   }
 
   useEffect(() => {
-    if (!playerReady || !playerRef.current || !item || item?.type === "slide") return;
-    const ytId = videoIds.get(item.videoId);
+    const cur = itemsRef.current[currentIdx];
+    if (!playerReady || !playerRef.current || !cur || cur.type === "slide") return;
+    const ytId = videoIds.get(cur.videoId);
     if (!ytId) return;
 
     advancedRef.current = false;
     clearTimeInterval();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync displayed time to clip start when switching clips
-    setCurrentTime(item.timestamp);
+    setCurrentTime(cur.timestamp);
     lastVideoIdRef.current = ytId;
 
     try {
-      playerRef.current.loadVideoById(ytId, item.timestamp);
+      playerRef.current.loadVideoById(ytId, cur.timestamp);
       playerRef.current.playVideo();
     } catch {}
   }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type, videoIds]);
@@ -115,7 +124,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   useEffect(() => {
     const container = playerContainerRef.current;
     if (!container || playerRef.current) return;
-    const firstVideoItem = items.find((i) => i.videoId > 0);
+    const firstVideoItem = itemsRef.current.find((i) => i.videoId > 0);
     const firstYtId = firstVideoItem ? videoIds.get(firstVideoItem.videoId) : undefined;
     if (!firstYtId) return;
     lastVideoIdRef.current = firstYtId;
@@ -153,7 +162,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 if (advancedRef.current) {
                   advancedRef.current = false;
                 } else {
-                  setCurrentIdx((prev) => (prev < items.length - 1 ? prev + 1 : 0));
+                  setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
                 }
               }
             },
@@ -182,18 +191,19 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   }, [videoIds]);
 
   useEffect(() => {
-    if (!playing || !item || !currentTime || !playerRef.current) return;
+    if (!playing || !currentTime || !playerRef.current) return;
+    const cur = itemsRef.current[currentIdx];
+    if (!cur) return;
     try {
       if (playerRef.current.getPlayerState() !== 1) return;
     } catch { return; }
-    if (currentTime < item.timestamp) return;
-    const end = item.endTimestamp ?? (item.timestamp + 30);
+    if (currentTime < cur.timestamp) return;
+    const end = cur.endTimestamp ?? (cur.timestamp + 30);
     if (currentTime >= end) {
       advancedRef.current = true;
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-advance to next clip when playback crosses its end
-      setCurrentIdx((prev) => (prev < items.length - 1 ? prev + 1 : 0));
+      setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
     }
-  }, [currentTime, playing]);
+  }, [currentTime, playing, currentIdx]);
 
   function goTo(idx: number) {
     if (idx < 0 || idx >= items.length) return;
