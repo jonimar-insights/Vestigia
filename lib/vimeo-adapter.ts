@@ -11,6 +11,11 @@ export interface MinimalVimeoPlayer {
   setCurrentTime(seconds: number): Promise<unknown>;
   play(): Promise<void>;
   pause(): Promise<void>;
+  /** Swap another video into the same embed (SDK supports this). */
+  loadVideo?(id: number): Promise<unknown>;
+  setPlaybackRate?(rate: number): Promise<unknown>;
+  setMuted?(muted: boolean): Promise<unknown>;
+  destroy?(): Promise<void> | void;
 }
 
 export interface SyncPlayerInterface {
@@ -117,15 +122,37 @@ export class VimeoAdapter implements SyncPlayerInterface {
     return this.state;
   }
 
-  loadVideoById(_videoId: string, _startSeconds: number): void {
-    // not applicable — one Vimeo video per page load
+  loadVideoById(videoId: string, startSeconds: number): void {
+    this.time = startSeconds;
+    if (!this.p.loadVideo) return;
+    this.p
+      .loadVideo(Number(videoId))
+      .then(() => {
+        if (!this.destroyed && startSeconds > 0) return this.p.setCurrentTime(startSeconds);
+      })
+      .catch(() => {});
   }
 
-  cueVideoById(_videoId: string, _startSeconds: number): void {
-    // not applicable
+  cueVideoById(videoId: string, startSeconds: number): void {
+    // SDK has no cue-only mode; loading without play() is close enough —
+    // callers that want playback invoke playVideo() right after.
+    this.loadVideoById(videoId, startSeconds);
+  }
+
+  setPlaybackRate(rate: number): void {
+    this.p.setPlaybackRate?.(rate)?.catch(() => {});
+  }
+
+  mute(): void {
+    this.p.setMuted?.(true)?.catch(() => {});
+  }
+
+  unMute(): void {
+    this.p.setMuted?.(false)?.catch(() => {});
   }
 
   destroy(): void {
     this.destroyed = true;
+    try { this.p.destroy?.(); } catch {}
   }
 }

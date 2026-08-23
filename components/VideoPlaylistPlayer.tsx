@@ -3,6 +3,16 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
+import { VimeoAdapter } from "@/lib/vimeo-adapter";
+
+declare global {
+  interface Window {
+    // New property only — YT/onYouTubeIframeAPIReady are declared by the
+    // video/shared pages with their local YTPlayer symbol and must not
+    // be redeclared here with a different identity.
+    Vimeo?: { Player: new (element: HTMLElement, options?: Record<string, unknown>) => unknown };
+  }
+}
 
 // Same rich-note rendering as the video page: highlighted hyperlinks,
 // $math$, **bold**, *italic*, `code`, newlines.
@@ -85,6 +95,14 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const item = items[currentIdx];
 
   const [videoIds, setVideoIds] = useState<Map<number, string>>(new Map());
+  const [vimeoIds, setVimeoIds] = useState<Map<number, string>>(new Map());
+  const videoIdsRef = useRef<Map<number, string>>(videoIds);
+  useEffect(() => { videoIdsRef.current = videoIds; });
+  const vimeoIdsRef = useRef<Map<number, string>>(vimeoIds);
+  useEffect(() => { vimeoIdsRef.current = vimeoIds; });
+  const vimeoPlayerRef = useRef<VimeoAdapter | null>(null);
+  const vimeoContainerRef = useRef<HTMLDivElement>(null);
+  const [vimeoReady, setVimeoReady] = useState(false);
   const fetchedIdsRef = useRef<Set<number>>(new Set());
   const lastVideoIdRef = useRef<string | null>(null);
   const advancedRef = useRef(false);
@@ -128,10 +146,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           const res = await fetch(`/api/videos/${vid}`);
           if (res.ok) {
             const data = await res.json();
-            // Only real YouTube ids can play here; social/self-hosted ids
-            // ("facebook:…", "upload:…") get "" = fetched but unplayable.
-            const playable = /^[A-Za-z0-9_-]{11}$/.test(String(data.youtubeId));
-            return { videoId: vid, youtubeId: playable ? String(data.youtubeId) : "" };
+            // Classify by youtubeId shape: 11-char = YouTube, "vimeo:<id>" =
+            // Vimeo; other social/self-hosted prefixes stay unplayable ("").
+            const raw = String(data.youtubeId ?? "");
+            const ytOk = /^[A-Za-z0-9_-]{11}$/.test(raw);
+            return {
+              videoId: vid,
+              youtubeId: ytOk ? raw : "",
+              vimeoId: !ytOk && raw.startsWith("vimeo:") ? raw.slice("vimeo:".length) : "",
+            };
           }
         } catch {}
         return null;
@@ -141,6 +164,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         const next = new Map(prev);
         for (const r of results) {
           if (r) next.set(r.videoId, r.youtubeId);
+        }
+        return next;
+      });
+      setVimeoIds((prev) => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r) next.set(r.videoId, r.vimeoId);
         }
         return next;
       });
@@ -174,6 +204,27 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
   }
 
+  // The player backing the current clip (Vimeo adapter or YouTube iframe).
+  function getActivePlayer(): YTPlayer | null {
+    const cur = itemsRef.current[currentIdxRef.current];
+    if (!cur) return null;
+    if (vimeoIdsRef.current.get(cur.videoId)) return vimeoPlayerRef.current;
+    return playerRef.current;
+  }
+
+  function startTimePolling() {
+    if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+    timeIntervalRef.current = setInterval(() => {
+      try {
+        const ap = getActivePlayer();
+        if (ap && ap.getPlayerState() === 1) {
+          if (ap instanceof VimeoAdapter) ap.refreshTime();
+          setCurrentTime(ap.getCurrentTime());
+        }
+      } catch {}
+    }, 250);
+  }
+
   useEffect(() => {
     const cur = itemsRef.current[currentIdx];
     if (!playerReady || !playerRef.current || !cur || cur.type === "slide") return;
@@ -182,6 +233,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
     advancedRef.current = false;
     clearTimeInterval();
+    try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
     setCurrentTime(cur.timestamp);
     lastVideoIdRef.current = ytId;
 
@@ -216,21 +268,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             },
             onStateChange: (e: { data: number }) => {
               if (destroyed) return;
+              // Ignore YouTube events while a Vimeo clip is active —
+              // pausing the hidden YT player must not flip shared UI state.
+              const curItem = itemsRef.current[currentIdxRef.current];
+              if (curItem && vimeoIdsRef.current.get(curItem.videoId)) return;
               const state = e.data;
               const pl = state === 1;
               setPlaying(pl);
-              if (pl) {
-                if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
-                timeIntervalRef.current = setInterval(() => {
-                  try {
-                    if (playerRef.current && playerRef.current.getPlayerState() === 1) {
-                      setCurrentTime(playerRef.current.getCurrentTime());
-                    }
-                  } catch {}
-                }, 250);
-              } else {
-                if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
-              }
+              if (pl) startTimePolling();
+              else clearTimeInterval();
               if (state === 0) {
                 if (loopOneRef.current) {
                   const it = itemsRef.current[currentIdxRef.current];
@@ -267,22 +313,116 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     }, 100);
 
     return () => { destroyed = true; clearInterval(poll); clearTimeInterval(); };
+    // Deps narrowed to their trigger (metadata map): startTimePolling closes
+    // over refs only, and recreating the YT player per render would be wrong.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoIds]);
 
+  // Load the current clip into the Vimeo player when it's a Vimeo video.
   useEffect(() => {
-    if (!playing || !currentTime || !playerRef.current) return;
+    const cur = itemsRef.current[currentIdx];
+    if (!vimeoReady || !vimeoPlayerRef.current || !cur || cur.type === "slide") return;
+    const vmId = vimeoIds.get(cur.videoId);
+    if (!vmId) return;
+
+    advancedRef.current = false;
+    clearTimeInterval();
+    setCurrentTime(cur.timestamp);
+
+    try {
+      playerRef.current?.pauseVideo();
+      vimeoPlayerRef.current.loadVideoById(vmId, cur.timestamp);
+      vimeoPlayerRef.current.playVideo();
+      if (speedRef.current !== 1) vimeoPlayerRef.current.setPlaybackRate(speedRef.current);
+    } catch {}
+  }, [currentIdx, vimeoReady, item?.videoId, item?.timestamp, item?.type, vimeoIds]);
+
+  // ── Vimeo Player SDK (created on demand from the first Vimeo clip) ──
+  useEffect(() => {
+    const container = vimeoContainerRef.current;
+    if (!container || vimeoPlayerRef.current) return;
+    const firstVmItem = itemsRef.current.find((i) => i.videoId > 0 && vimeoIds.get(i.videoId));
+    if (!firstVmItem) return;
+    const firstVmId = vimeoIds.get(firstVmItem.videoId)!;
+    let destroyed = false;
+
+    function createVimeoPlayer() {
+      if (destroyed || vimeoPlayerRef.current || !window.Vimeo?.Player || !container) return;
+      try {
+        const p = new window.Vimeo.Player(container, { id: Number(firstVmId), width: "100%" }) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
+        const adapter = new VimeoAdapter(p);
+        vimeoPlayerRef.current = adapter;
+        adapter.onReady(() => {
+          if (destroyed) return;
+          setVimeoReady(true);
+          if (speedRef.current !== 1) adapter.setPlaybackRate(speedRef.current);
+        });
+        adapter.onPlayState((pl) => {
+          if (destroyed) return;
+          // Ignore events from the hidden player when a YouTube clip is active.
+          const curItem = itemsRef.current[currentIdxRef.current];
+          if (!curItem || !vimeoIdsRef.current.get(curItem.videoId)) return;
+          setPlaying(pl);
+          if (pl) startTimePolling();
+          else clearTimeInterval();
+          if (adapter.getPlayerState() === 0) {
+            if (loopOneRef.current) {
+              const it = itemsRef.current[currentIdxRef.current];
+              try { adapter.seekTo(it.timestamp, true); adapter.playVideo(); } catch {}
+            } else if (advancedRef.current) {
+              advancedRef.current = false;
+            } else {
+              setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
+            }
+          }
+        });
+      } catch (err) {
+        console.error("[Vimeo Player] createVimeoPlayer failed:", err);
+      }
+    }
+
+    if (window.Vimeo?.Player) {
+      createVimeoPlayer();
+      return () => { destroyed = true; };
+    }
+
+    if (!document.querySelector('script[src*="player.vimeo.com/api/player.js"]')) {
+      const s = document.createElement("script");
+      s.src = "https://player.vimeo.com/api/player.js";
+      document.head.appendChild(s);
+    }
+    const poll = setInterval(() => {
+      if (!destroyed && window.Vimeo?.Player) { clearInterval(poll); createVimeoPlayer(); }
+    }, 100);
+
+    return () => {
+      destroyed = true;
+      clearInterval(poll);
+      if (vimeoPlayerRef.current) {
+        try { vimeoPlayerRef.current.destroy(); } catch {}
+        vimeoPlayerRef.current = null;
+      }
+    };
+    // Same narrowing rationale as the YT creation effect above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vimeoIds]);
+
+  useEffect(() => {
+    if (!playing || !currentTime) return;
+    const ap = getActivePlayer();
+    if (!ap) return;
     const cur = itemsRef.current[currentIdx];
     if (!cur) return;
     try {
-      if (playerRef.current.getPlayerState() !== 1) return;
+      if (ap.getPlayerState() !== 1) return;
     } catch { return; }
     if (currentTime < cur.timestamp) return;
     const end = cur.endTimestamp ?? (cur.timestamp + 30);
     if (currentTime >= end) {
-      // Loop-one: clips are windows into longer videos — YT's ended event
+      // Loop-one: clips are windows into longer videos — YT/Vimeo ended events
       // won't fire, so seek back as soon as playback crosses the clip end.
       if (loopOneRef.current) {
-        try { playerRef.current.seekTo(cur.timestamp, true); setCurrentTime(cur.timestamp); } catch {}
+        try { ap.seekTo(cur.timestamp, true); setCurrentTime(cur.timestamp); } catch {}
         return;
       }
       advancedRef.current = true;
@@ -295,11 +435,11 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     setCurrentIdx(idx);
   }
 
-  // Apply speed changes immediately to the loaded video
+  // Apply speed changes immediately to both players (active one takes effect)
   useEffect(() => {
-    if (!playerReady || !playerRef.current) return;
-    try { playerRef.current.setPlaybackRate?.(SPEEDS[speedIdx]); } catch {}
-  }, [speedIdx, playerReady]);
+    try { playerRef.current?.setPlaybackRate?.(SPEEDS[speedIdx]); } catch {}
+    try { vimeoPlayerRef.current?.setPlaybackRate(SPEEDS[speedIdx]); } catch {}
+  }, [speedIdx, playerReady, vimeoReady]);
 
   // Keyboard shortcuts: ←/→ prev-next clip, Space play/pause, Esc close
   useEffect(() => {
@@ -342,43 +482,50 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   // Clip progress scrubbing
   function seekWithinClip(e: React.PointerEvent<HTMLDivElement>) {
     const cur = itemsRef.current[currentIdxRef.current];
-    if (!cur || !playerRef.current) return;
+    const ap = getActivePlayer();
+    if (!cur || !ap) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     const end = cur.endTimestamp ?? cur.timestamp + 30;
     const target = cur.timestamp + ratio * (end - cur.timestamp);
     try {
-      playerRef.current.seekTo(target, true);
+      ap.seekTo(target, true);
       setCurrentTime(target);
     } catch {}
   }
 
   function toggleMute() {
-    if (!playerRef.current) return;
+    const ap = getActivePlayer();
+    if (!ap) return;
     try {
-      if (muted) playerRef.current.unMute?.();
-      else playerRef.current.mute?.();
+      if (muted) ap.unMute?.();
+      else ap.mute?.();
       setMuted(!muted);
     } catch {}
   }
 
   function togglePlay() {
-    if (!playerRef.current) return;
+    const ap = getActivePlayer();
+    if (!ap) return;
     try {
-      const state = playerRef.current.getPlayerState();
-      if (state === 1) playerRef.current.pauseVideo();
-      else playerRef.current.playVideo();
+      const state = ap.getPlayerState();
+      if (state === 1) ap.pauseVideo();
+      else ap.playVideo();
     } catch {}
   }
 
   if (items.length === 0) return null;
 
   const ytId = videoIds.get(item.videoId);
+  const vmId = vimeoIds.get(item.videoId);
   const isSlide = item?.type === "slide";
+  const playable = !!(ytId || vmId);
+  const readyNow = ytId ? playerReady : vmId ? vimeoReady : false;
+  const activeKind: "youtube" | "vimeo" | null = isSlide ? null : vmId ? "vimeo" : "youtube";
   const clipEnd = item ? (item.endTimestamp ?? item.timestamp + 30) : 0;
-  const clipFrac = isSlide || !ytId ? 0 : Math.min(1, Math.max(0, (currentTime - item.timestamp) / Math.max(1, clipEnd - item.timestamp)));
+  const clipFrac = isSlide || !playable ? 0 : Math.min(1, Math.max(0, (currentTime - item.timestamp) / Math.max(1, clipEnd - item.timestamp)));
   const slideMs = slideDeadlineRef.current?.ms ?? 5000;
-  const upNext = !isSlide && ytId && items.length > 1 && clipEnd - currentTime <= 5
+  const upNext = !isSlide && playable && items.length > 1 && clipEnd - currentTime <= 5
     ? items[(currentIdx + 1) % items.length]
     : null;
   const remainingSec = items.reduce((acc, it, i) => {
@@ -412,7 +559,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               >
                 {SPEEDS[speedIdx]}×
               </button>
-              <button onClick={toggleMute} disabled={!playerReady}
+              <button onClick={toggleMute} disabled={!readyNow}
                 className={`p-1 rounded transition-colors ${muted ? "text-accent" : "text-white/60 hover:text-white hover:bg-white/10"} disabled:opacity-30`}
                 title={muted ? "Unmute" : "Mute"}>
                 {muted ? (
@@ -432,25 +579,30 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           </div>
 
           <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
-            <div ref={playerContainerRef} className="w-full h-full" />
-            {!playerReady || !ytId ? (
-              item?.type !== "slide" && ytId === "" ? (
+            {/* SDK players replace their mount node (YT swaps the div for an
+                iframe), so visibility is toggled on these React-owned wrappers */}
+            <div className="absolute inset-0" style={{ display: activeKind === "youtube" ? undefined : "none" }}>
+              <div ref={playerContainerRef} className="w-full h-full" />
+            </div>
+            <div className="absolute inset-0 [&_iframe]:w-full [&_iframe]:h-full" style={{ display: activeKind === "vimeo" ? undefined : "none" }}>
+              <div ref={vimeoContainerRef} className="w-full h-full" />
+            </div>
+            {item?.type !== "slide" && (
+              ytId === "" && !vmId ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
                   <span className="text-xs text-white/40">
                     This clip&apos;s video isn&apos;t playable in the playlist (social or self-hosted) — use Next to continue.
                   </span>
                 </div>
-              ) : (
-                item?.type !== "slide" && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black">
-                    <div className="flex items-center gap-2 text-white/40">
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                      <span className="text-xs">Loading player...</span>
-                    </div>
+              ) : !readyNow ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black">
+                  <div className="flex items-center gap-2 text-white/40">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                    <span className="text-xs">Loading player...</span>
                   </div>
-                )
-              )
-            ) : null}
+                </div>
+              ) : null
+            )}
             {isSlide && (
               <div className="absolute inset-0 flex items-end justify-center px-12 pt-10 pb-14 bg-black">
                 <div className="text-center max-w-2xl w-full">
@@ -489,7 +641,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             className="mx-auto w-full max-w-4xl px-0 shrink-0"
             onClick={(e) => e.stopPropagation()}
           >
-            {!isSlide && ytId && playerReady ? (
+            {!isSlide && playable && readyNow ? (
               <div
                 className="group relative h-1.5 mx-1 cursor-pointer"
                 onPointerDown={(e) => {

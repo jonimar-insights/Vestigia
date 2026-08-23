@@ -84,7 +84,7 @@ declare global {
   interface Window {
     YT: { Player: new (id: string | HTMLElement, config: Record<string, unknown>) => YTPlayer };
     onYouTubeIframeAPIReady: () => void;
-    Vimeo?: { Player: new (element: HTMLIFrameElement) => unknown };
+    Vimeo?: { Player: new (element: HTMLElement, options?: Record<string, unknown>) => unknown };
   }
 }
 
