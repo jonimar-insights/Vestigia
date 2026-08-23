@@ -47,8 +47,9 @@ async function main() {
     headers,
     body: JSON.stringify({ url: blobUrl, title: "Upload Test Clip", durationSeconds: 62 }),
   });
-  assert.equal(created.status, 201, `create status ${created.status}: ${await created.text()}`);
-  const v = await created.json();
+  const createdBody = await created.json();
+  assert.equal(created.status, 201, `create status ${created.status}: ${JSON.stringify(createdBody)}`);
+  const v = createdBody;
   assert.equal(v.platform, "upload");
   assert.ok(String(v.youtubeId).startsWith("upload:"), `youtubeId ${v.youtubeId}`);
   assert.equal(v.durationSeconds, 62);

@@ -62,7 +62,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - NOTE: `GET /api/videos` returns only UNFILED videos (excluded: ids present in the user's `folder_videos`) — the home "All Videos" count ≠ total owned videos.
 
 ### Active
-- (none)
+- **Self-hosted video uploads (implemented, deployed, E2E-verified on prod):** "Upload video file" in the Import tab → direct browser-to-Blob upload (`@vercel/blob/client` `upload()` + `POST /api/upload` `handleUpload`, auth-gated, video/*+jpeg/png only) → `createVideo` classifies any `*.public.blob.vercel-storage.com` URL as `platform:"upload"` (`youtubeId = upload:<pathname>`, idempotent). Client probes duration + captures a JPEG frame (~10% in) and uploads it as thumbnail before POST /api/videos. Video page + shared page gained `playerKind/sharedKind === "html5"`: native `<video data-html5-player>` wrapped by `lib/html5-adapter.ts` (SyncPlayerInterface) → FULL annotation UX (scrubber, ±10s, space/arrows, annotate-from-current-time) like YouTube. Verified on prod: real ffmpeg-generated mp4 uploaded via the SDK flow, native player readyState 4/duration wired (0:00/0:06), Forward-10s seeks UI, Annotate prefills from position. Test artifacts cleaned up (video row + blob deleted).
+  - Blob store `vestigia-uploads` (store_HTNlwpgAhdGlQRqW, iad1, public access) connected to project for production/preview/development; `BLOB_READ_WRITE_TOKEN` added to all envs and pulled into `.env.local`.
+  - Node-script quirk: the Blob client SDK fetches its token via undici's own `fetch` — global-fetch cookie patching does NOT work; pass `headers: { cookie }` to `upload()` instead.
+  - LOCAL DEV FORGED COOKIES BROKEN since blob env-pull: after `vercel env pull` rewrote `.env.local` (AUTH_SECRET now differs between `.env` 233-char and `.env.local` 44-char), the localhost dev server rejects ALL forged tokens (307) even when forged with either secret — cause unknown; prod forging unaffected. Until diagnosed, run API tests against prod: `TEST_BASE=https://vestigia-vercel.vercel.app npx tsx tests/upload-video.test.ts`.
 
 ### Blocked
 - (none)
