@@ -2,6 +2,31 @@
 
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
+import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
+
+// Same rich-note rendering as the video page: highlighted hyperlinks,
+// $math$, **bold**, *italic*, `code`, newlines.
+function renderNoteHtml(text: string): string {
+  const anchors: string[] = [];
+  let s = "";
+  for (const tok of tokenizeNoteLinks(text)) {
+    if (tok.kind === "link") {
+      anchors.push(
+        `<a href="${sanitizeHtml(tok.href)}" target="_blank" rel="noopener noreferrer nofollow" class="text-accent hover:text-accent-hover underline decoration-accent/40 break-all">${sanitizeHtml(tok.display)}</a>`
+      );
+      s += `\u0000${anchors.length - 1}\u0000`;
+    } else {
+      s += tok.value;
+    }
+  }
+  s = s
+    .replace(/\$(.+?)\$/g, '<span class="text-accent font-mono">$1</span>')
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`(.+?)`/g, '<code class="bg-white/10 rounded px-1 font-mono text-[11px]">$1</code>')
+    .replace(/\n/g, "<br>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i: string) => anchors[Number(i)] ?? "");
+}
 
 export interface YTPlayer {
   getCurrentTime(): number;
@@ -436,7 +461,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   </div>
                   <h2 className="text-2xl font-bold text-white mb-3">{item.title}</h2>
                   {item.detail && (
-                    <p className="text-base text-white/60">{item.detail}</p>
+                    <div
+                      className="text-base text-white/60 leading-relaxed max-h-56 overflow-y-auto"
+                      dangerouslySetInnerHTML={{ __html: renderNoteHtml(item.detail) }}
+                    />
                   )}
                   <div className="mt-8 flex items-center justify-center gap-2 text-white/30 text-xs">
                     <div className="w-1.5 h-1.5 rounded-full bg-purple-400/50 animate-pulse" />
@@ -521,6 +549,12 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 <h3 className="text-sm font-semibold text-white truncate">{item.title}</h3>
                 {item.videoTitle && (
                   <p className="text-[10px] text-white/40 truncate">{item.videoTitle}</p>
+                )}
+                {item.detail && (
+                  <div
+                    className="mt-1 text-xs text-white/60 leading-relaxed max-h-24 overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
+                    dangerouslySetInnerHTML={{ __html: renderNoteHtml(item.detail) }}
+                  />
                 )}
               </div>
               <div className="flex items-center gap-1 shrink-0">
