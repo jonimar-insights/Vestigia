@@ -16,8 +16,18 @@ export interface ImportVideoOptions {
   title?: string;
   thumbnailUrl?: string;
   extractKeyMoments?: boolean;
+  durationSeconds?: number | null;
   userId: string | null;
   userName?: string | null;
+}
+
+/** True for Vercel Blob public-store URLs (self-hosted uploads). */
+export function isUploadedFileUrl(url: string): boolean {
+  try {
+    return new URL(url).hostname.endsWith(".public.blob.vercel-storage.com");
+  } catch {
+    return false;
+  }
 }
 
 export type CreateVideoResult =
@@ -31,12 +41,56 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     title: clientTitle,
     thumbnailUrl: clientThumbnail,
     extractKeyMoments = false,
+    durationSeconds: clientDuration,
     userId,
     userName,
   } = opts;
 
   if (!url) {
     return { error: "URL is required", status: 400 };
+  }
+
+  // ── Self-hosted uploads (Vercel Blob) ──
+  // youtubeUrl = blob URL (playable src), youtubeId = "upload:<pathname>",
+  // platform "upload" → native HTML5 player with full seek control.
+  if (isUploadedFileUrl(url)) {
+    let pathname = "";
+    try {
+      pathname = decodeURIComponent(new URL(url).pathname).replace(/^\//, "");
+    } catch {}
+    const storageId = `upload:${pathname}`;
+    const uploadExisting = await db
+      .select()
+      .from(videos)
+      .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
+      .limit(1);
+    if (uploadExisting[0]) {
+      return { video: uploadExisting[0], existing: true };
+    }
+
+    const fallbackTitle = pathname.split("/").pop()?.replace(/\.[^.]+$/, "") || null;
+    try {
+      const [video] = await db
+        .insert(videos)
+        .values({
+          youtubeUrl: url.trim(),
+          youtubeId: storageId,
+          platform: "upload",
+          title: clientTitle ?? fallbackTitle,
+          thumbnailUrl: clientThumbnail ?? null,
+          durationSeconds: typeof clientDuration === "number" && Number.isFinite(clientDuration)
+            ? Math.round(clientDuration)
+            : null,
+          createdBy: userName ?? "anonymous",
+          userId: userId ?? null,
+        })
+        .returning();
+      return { video, existing: false };
+    } catch (e: unknown) {
+      console.error("[upload video insert]", e);
+      const msg = e instanceof Error ? e.message : "Insert failed";
+      return { error: msg, status: 500 };
+    }
   }
 
   // ── Social media posts (TikTok/Instagram/X/Facebook/Vimeo) ──

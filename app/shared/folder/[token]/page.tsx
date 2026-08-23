@@ -6,6 +6,7 @@ import { useSession, signIn } from "next-auth/react";
 import { tokenizeNoteLinks } from "@/lib/youtube";
 import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
+import { Html5Adapter } from "@/lib/html5-adapter";
 
 interface VideoData {
   id: number;
@@ -393,12 +394,18 @@ export default function SharedFolderPage({
   const sharedSocial = selectedVideo && selectedVideo.platform !== "youtube"
     ? parseSocialStorageId(selectedVideo.youtubeId)
     : null;
-  const sharedKind: "youtube" | "vimeo" | "embed" =
-    !sharedSocial ? "youtube" : sharedSocial.platform === "vimeo" ? "vimeo" : "embed";
+  const sharedKind: "youtube" | "vimeo" | "html5" | "embed" =
+    selectedVideo?.platform === "upload"
+      ? "html5"
+      : !sharedSocial
+        ? "youtube"
+        : sharedSocial.platform === "vimeo"
+          ? "vimeo"
+          : "embed";
 
   // YT IFrame API init
   useEffect(() => {
-    if (sharedSocial) return;
+    if (sharedSocial || sharedKind === "html5") return;
     const container = playerContainerRef.current;
     const ytId = selectedVideo?.youtubeId;
     if (!container || playerRef.current || !ytId) return;
@@ -453,7 +460,7 @@ export default function SharedFolderPage({
     }, 100);
 
     return () => { destroyed = true; clearInterval(poll); if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
-  }, [selectedVideo, sharedSocial]);
+  }, [selectedVideo, sharedSocial, sharedKind]);
 
   // Vimeo Player SDK init (full seek/time control over the embed iframe)
   useEffect(() => {
@@ -505,6 +512,42 @@ export default function SharedFolderPage({
     }
 
     return () => { destroyed = true; if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
+  }, [selectedVideo, sharedKind]);
+
+  // Native HTML5 player init for self-hosted uploads
+  useEffect(() => {
+    if (!selectedVideo || sharedKind !== "html5") return;
+    let destroyed = false;
+    const el = document.querySelector<HTMLVideoElement>("video[data-html5-player]");
+    if (!el || playerRef.current) return;
+
+    const adapter = new Html5Adapter(el);
+    playerRef.current = adapter;
+    adapter.onPlayState((playing) => {
+      if (destroyed) return;
+      setIsPlaying(playing);
+      if (playing) {
+        if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = setInterval(() => {
+          if (playerRef.current) setCurrentTime(playerRef.current.getCurrentTime());
+        }, 250);
+      } else {
+        if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+        if (playerRef.current) setCurrentTime(playerRef.current.getCurrentTime());
+      }
+    });
+    adapter.onReady(() => {
+      if (destroyed) return;
+      setDuration(adapter.getDuration());
+      setPlayerReady(true);
+    });
+
+    return () => {
+      destroyed = true;
+      adapter.destroy();
+      playerRef.current = null;
+      if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+    };
   }, [selectedVideo, sharedKind]);
 
   function seekTo(seconds: number) {
@@ -814,7 +857,16 @@ export default function SharedFolderPage({
             {/* Player */}
             <div className="flex-1 min-w-0">
               <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-                {sharedKind === "vimeo" && sharedSocial ? (
+                {sharedKind === "html5" && selectedVideo ? (
+                  <video
+                    key={selectedVideo.id}
+                    data-html5-player
+                    src={selectedVideo.youtubeUrl}
+                    controls
+                    preload="metadata"
+                    className="w-full h-full bg-black"
+                  />
+                ) : sharedKind === "vimeo" && sharedSocial ? (
                   <iframe
                     key={selectedVideo.id}
                     src={`${socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}?api=1`}

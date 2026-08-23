@@ -7,6 +7,7 @@ import { useLanguage } from "@/components/LanguageProvider";
 import { formatTimestamp, sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
+import { Html5Adapter } from "@/lib/html5-adapter";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -237,9 +238,16 @@ export default function VideoPage() {
     ? parseSocialStorageId(video.youtubeId)
     : null;
   // youtube: full YT IFrame player · vimeo: full control via Player SDK ·
-  // embed: platform iframe without seek API → manual timestamps only
-  const playerKind: "youtube" | "vimeo" | "embed" =
-    !social ? "youtube" : social.platform === "vimeo" ? "vimeo" : "embed";
+  // html5: self-hosted upload (native element) · embed: platform iframe
+  // without seek API → manual timestamps only
+  const playerKind: "youtube" | "vimeo" | "html5" | "embed" =
+    video?.platform === "upload"
+      ? "html5"
+      : !social
+        ? "youtube"
+        : social.platform === "vimeo"
+          ? "vimeo"
+          : "embed";
   const isSocial = !!social;
 
   // ── YouTube IFrame API ──
@@ -358,6 +366,44 @@ export default function VideoPage() {
 
     return () => {
       destroyed = true;
+      playerRef.current = null;
+      if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+    };
+  }, [video, playerKind]);
+
+  // ── Native HTML5 player for self-hosted uploads ──
+  useEffect(() => {
+    if (!video || playerKind !== "html5") return;
+    let destroyed = false;
+    const el = document.querySelector<HTMLVideoElement>("video[data-html5-player]");
+    if (!el || playerRef.current) return;
+
+    const adapter = new Html5Adapter(el);
+    playerRef.current = adapter;
+    adapter.onPlayState((playing) => {
+      if (destroyed) return;
+      setIsPlaying(playing);
+      if (playing) {
+        if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+        timeIntervalRef.current = setInterval(() => {
+          if (playerRef.current) setCurrentTime(playerRef.current.getCurrentTime());
+        }, 250);
+      } else {
+        if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+        if (playerRef.current) setCurrentTime(playerRef.current.getCurrentTime());
+      }
+    });
+    adapter.onReady(() => {
+      if (destroyed) return;
+      setDuration(adapter.getDuration());
+      setPlayerReady(true);
+      const t = new URLSearchParams(window.location.search).get("t");
+      if (t) { adapter.seekTo(parseFloat(t), true); setCurrentTime(parseFloat(t)); }
+    });
+
+    return () => {
+      destroyed = true;
+      adapter.destroy();
       playerRef.current = null;
       if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
     };
@@ -1019,7 +1065,16 @@ export default function VideoPage() {
           <div style={{ width: `${panelRatio}%` }} className="flex flex-col gap-4 min-w-0">
             {/* Video Player */}
             <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-              {playerKind === "vimeo" && social ? (
+              {playerKind === "html5" && video ? (
+                <video
+                  key={video.id}
+                  data-html5-player
+                  src={video.youtubeUrl}
+                  controls
+                  preload="metadata"
+                  className="w-full h-full bg-black"
+                />
+              ) : playerKind === "vimeo" && social ? (
                 <>
                   <iframe
                     key={video.id}

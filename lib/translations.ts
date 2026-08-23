@@ -41,6 +41,8 @@ export const dict = {
     "import.importingProgress": "Importing {done}/{total}...",
     "import.selectAll": "Select all ({count})",
     "import.deselectAll": "Deselect all",
+    "upload.pick": "Upload video file",
+    "upload.uploading": "Uploading…",
 
     "video.import": "Import",
     "video.importing": "Importing...",
@@ -330,6 +332,8 @@ export const dict = {
     "import.importingProgress": "A importar {done}/{total}...",
     "import.selectAll": "Selecionar tudo ({count})",
     "import.deselectAll": "Desselecionar tudo",
+    "upload.pick": "Carregar ficheiro de vídeo",
+    "upload.uploading": "A carregar…",
 
     "video.import": "Importar",
     "video.importing": "A importar...",
