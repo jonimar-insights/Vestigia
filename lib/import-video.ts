@@ -1,11 +1,7 @@
 import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
-import {
-  detectSocialPlatform,
-  socialStorageId,
-  fetchSocialMeta,
-} from "@/lib/social";
+import { detectSocialPlatform } from "@/lib/social";
 import { eq, and } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
 import { extractYouTubeChapters, extractTranscriptKeyMoments, extractAIKeyMoments } from "@/lib/key-moments";
@@ -93,54 +89,20 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     }
   }
 
-  // ── Social media posts (TikTok/Instagram/X/Facebook/Vimeo) ──
-  // Stored with youtubeUrl = canonical post URL, youtubeId = "platform:id",
-  // platform column set; no transcript/key-moment extraction (embed-only).
+  // ── Social media imports are discontinued (YouTube only) ──
+  // Existing social rows still play via their platform embeds; new imports
+  // of TikTok/Instagram/X/Facebook/Vimeo URLs are rejected.
   const social = detectSocialPlatform(url);
   if (social) {
-    const storageId = socialStorageId(social);
-    const socialExisting = await db
-      .select()
-      .from(videos)
-      .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
-      .limit(1);
-    if (socialExisting[0]) {
-      return { video: socialExisting[0], existing: true };
-    }
-
-    let title: string | null = clientTitle ?? null;
-    let thumbnailUrl: string | null = clientThumbnail ?? null;
-    if (!title || !thumbnailUrl) {
-      const meta = await fetchSocialMeta(url, social);
-      title = title ?? meta.title;
-      thumbnailUrl = thumbnailUrl ?? meta.thumbnailUrl;
-    }
-
-    try {
-      const [video] = await db
-        .insert(videos)
-        .values({
-          youtubeUrl: url.trim(),
-          youtubeId: storageId,
-          platform: social.platform,
-          title,
-          thumbnailUrl,
-          durationSeconds: null,
-          createdBy: userName ?? "anonymous",
-          userId: userId ?? null,
-        })
-        .returning();
-      return { video, existing: false };
-    } catch (e: unknown) {
-      console.error("[social video insert]", e);
-      const msg = e instanceof Error ? e.message : "Insert failed";
-      return { error: msg, status: 500 };
-    }
+    return {
+      error: `Imports from ${social.platform} are no longer supported — YouTube links only`,
+      status: 400,
+    };
   }
 
   const youtubeId = extractYouTubeId(url);
   if (!youtubeId) {
-    return { error: "Unsupported video URL (supported: YouTube, TikTok, Instagram, X/Twitter, Facebook, Vimeo)", status: 400 };
+    return { error: "Unsupported video URL (supported: YouTube)", status: 400 };
   }
 
   // Check if this user already imported this video

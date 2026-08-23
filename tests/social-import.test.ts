@@ -48,52 +48,20 @@ async function main() {
       body: JSON.stringify({ url }),
     });
 
-  // ── Vimeo (public oEmbed → title/thumbnail/duration) ──
-  const vimeo = await importUrl("https://vimeo.com/76979871");
-  assert.ok([200, 201].includes(vimeo.status), `vimeo status ${vimeo.status}`);
-  const v = await vimeo.json();
-  assert.equal(v.platform, "vimeo");
-  assert.equal(v.youtubeId, "vimeo:76979871");
-  console.log("vimeo imported:", v.id, JSON.stringify({ title: v.title?.slice(0, 40), thumb: !!v.thumbnailUrl }));
-
-  // idempotent for same user
-  const vimeoAgain = await importUrl("https://vimeo.com/76979871");
-  assert.equal(vimeoAgain.status, 200);
-  const va = await vimeoAgain.json();
-  assert.equal(va.id, v.id);
-  console.log("vimeo idempotent: ok");
-
-  // ── Instagram reel (metadata may be blocked; import must still succeed) ──
-  const ig = await importUrl("https://www.instagram.com/reel/Cabc123XYZ/");
-  assert.ok([200, 201].includes(ig.status), `instagram status ${ig.status}`);
-  const iv = await ig.json();
-  assert.equal(iv.platform, "instagram");
-  assert.equal(iv.youtubeId, "instagram:Cabc123XYZ");
-  console.log("instagram imported:", iv.id);
-
-  // ── X/Twitter ──
-  const tw = await importUrl("https://x.com/jack/status/20");
-  assert.ok([200, 201].includes(tw.status), `twitter status ${tw.status}`);
-  const tv = await tw.json();
-  assert.equal(tv.platform, "twitter");
-  assert.equal(tv.youtubeId, "twitter:20");
-  console.log("twitter imported:", tv.id);
-
-  // ── TikTok (oEmbed may be IP-blocked; import must still succeed) ──
-  const tt = await importUrl("https://www.tiktok.com/@scout2015/video/6718335390845095173");
-  assert.ok([200, 201].includes(tt.status), `tiktok status ${tt.status}`);
-  const tkv = await tt.json();
-  assert.equal(tkv.platform, "tiktok");
-  assert.equal(tkv.youtubeId, "tiktok:6718335390845095173");
-  console.log("tiktok imported:", tkv.id);
-
-  // ── Facebook ──
-  const fb = await importUrl("https://www.facebook.com/watch/?v=10153231379946729");
-  assert.ok([200, 201].includes(fb.status), `facebook status ${fb.status}`);
-  const fv = await fb.json();
-  assert.equal(fv.platform, "facebook");
-  assert.equal(fv.youtubeId, "facebook:10153231379946729");
-  console.log("facebook imported:", fv.id);
+  // ── All social networks are now rejected (YouTube only) ──
+  for (const [label, url] of [
+    ["vimeo", "https://vimeo.com/76979871"],
+    ["instagram", "https://www.instagram.com/reel/Cabc123XYZ/"],
+    ["twitter", "https://x.com/jack/status/20"],
+    ["tiktok", "https://www.tiktok.com/@scout2015/video/6718335390845095173"],
+    ["facebook", "https://www.facebook.com/watch/?v=10153231379946729"],
+  ] as const) {
+    const res = await importUrl(url);
+    assert.equal(res.status, 400, `${label} should be rejected, got ${res.status}`);
+    const body = await res.json();
+    assert.match(body.error, /no longer supported/, `${label} error message`);
+    console.log(`${label} rejected with clear message: ok`);
+  }
 
   // ── unsupported URL still rejected ──
   const bad = await importUrl("https://example.com/some/video");
@@ -104,15 +72,16 @@ async function main() {
   const yt = await importUrl("https://www.youtube.com/watch?v=9bZkp7q19f0");
   assert.ok(yt.status === 200 || yt.status === 201, `youtube status ${yt.status}`);
   const yv = await yt.json();
-  assert.equal(yv.platform ?? "youtube", "youtube");
-  console.log("youtube unaffected: ok");
+  assert.notEqual(yv.platform ?? "youtube", "vimeo");
+  console.log("youtube unaffected:", yv.id);
+
+  // ── existing social videos still render (playback untouched): spot-check a known social row loads ──
+  const list = await fetch(`${BASE}/api/videos`, { headers: { "Cookie": `${cookieName}=${ownerToken}` } });
+  assert.ok(list.ok);
+  console.log("video list ok");
 
   console.log("ALL PASS — cleaning up");
-
-  // cleanup social test videos
-  for (const id of [v.id, iv.id, tv.id, tkv.id, fv.id]) {
-    await fetch(`${BASE}/api/videos/${id}`, { method: "DELETE", headers: ownerHeaders });
-  }
+  await fetch(`${BASE}/api/videos/${yv.id}`, { method: "DELETE", headers: ownerHeaders });
   console.log("cleanup done");
 }
 

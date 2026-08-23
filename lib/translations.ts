@@ -27,7 +27,7 @@ export const dict = {
     "folder.noFolder": "No folder",
     "folder.newFolderName": "New folder...",
 
-    "import.urlPlaceholder": "Paste a YouTube, TikTok, Instagram, X, Facebook or Vimeo link...",
+    "import.urlPlaceholder": "Paste a YouTube link...",
     "import.adding": "Adding...",
     "import.loadingPlaylist": "Loading playlist...",
     "import.cancelPlaylist": "Cancel",
@@ -321,7 +321,7 @@ export const dict = {
     "folder.noFolder": "Sem pasta",
     "folder.newFolderName": "Nova pasta...",
 
-    "import.urlPlaceholder": "Cole um link do YouTube, TikTok, Instagram, X, Facebook ou Vimeo...",
+    "import.urlPlaceholder": "Cole um link do YouTube...",
     "import.adding": "A adicionar...",
     "import.loadingPlaylist": "A carregar playlist...",
     "import.cancelPlaylist": "Cancelar",
