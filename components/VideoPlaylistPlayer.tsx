@@ -205,12 +205,28 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   }
 
   // The player backing the current clip (Vimeo adapter or YouTube iframe).
+  // Returns null for slides and unplayable items so controls never act on a
+  // hidden player from the previous clip.
   function getActivePlayer(): YTPlayer | null {
     const cur = itemsRef.current[currentIdxRef.current];
     if (!cur) return null;
     if (vimeoIdsRef.current.get(cur.videoId)) return vimeoPlayerRef.current;
-    return playerRef.current;
+    if (videoIdsRef.current.get(cur.videoId)) return playerRef.current;
+    return null;
   }
+
+  // Pause both players whenever the current item can't play (slide, social,
+  // self-hosted or still-fetching) — otherwise the previous clip's audio
+  // keeps running underneath. setPlaying(false) directly because the hidden
+  // players' state callbacks are guarded off for non-active items.
+  useEffect(() => {
+    const cur = itemsRef.current[currentIdx];
+    if (!cur) return;
+    if (videoIds.get(cur.videoId) || vimeoIds.get(cur.videoId)) return;
+    try { playerRef.current?.pauseVideo(); } catch {}
+    try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+    setPlaying(false);
+  }, [currentIdx, item?.type, videoIds, vimeoIds]);
 
   function startTimePolling() {
     if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
@@ -412,7 +428,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     const ap = getActivePlayer();
     if (!ap) return;
     const cur = itemsRef.current[currentIdx];
-    if (!cur) return;
+    // Only real clips have clip windows — slides advance via their own timer
+    // and unplayable items must not phantom-advance off stale currentTime.
+    if (!cur || cur.type === "slide") return;
+    if (!videoIdsRef.current.get(cur.videoId) && !vimeoIdsRef.current.get(cur.videoId)) return;
     try {
       if (ap.getPlayerState() !== 1) return;
     } catch { return; }

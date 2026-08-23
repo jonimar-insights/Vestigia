@@ -40,6 +40,8 @@ export class VimeoAdapter implements SyncPlayerInterface {
   private readyCbs: Array<() => void> = [];
   private readyFired = false;
   private destroyed = false;
+  private loading = false;
+  private pendingPlay = false;
 
   constructor(player: MinimalVimeoPlayer) {
     this.p = player;
@@ -111,6 +113,12 @@ export class VimeoAdapter implements SyncPlayerInterface {
   }
 
   playVideo(): void {
+    // While a loadVideo swap is in flight the SDK swallows play() — queue it
+    // so playback starts right after the load+seek settle.
+    if (this.loading) {
+      this.pendingPlay = true;
+      return;
+    }
     this.p.play().catch(() => {});
   }
 
@@ -124,13 +132,22 @@ export class VimeoAdapter implements SyncPlayerInterface {
 
   loadVideoById(videoId: string, startSeconds: number): void {
     this.time = startSeconds;
+    this.pendingPlay = false;
     if (!this.p.loadVideo) return;
+    this.loading = true;
     this.p
       .loadVideo(Number(videoId))
-      .then(() => {
-        if (!this.destroyed && startSeconds > 0) return this.p.setCurrentTime(startSeconds);
+      .then(async () => {
+        if (this.destroyed) return;
+        if (startSeconds > 0) await this.p.setCurrentTime(startSeconds).catch(() => {});
+        this.loading = false;
+        this.time = startSeconds;
+        if (this.pendingPlay) {
+          this.pendingPlay = false;
+          await this.p.play().catch(() => {});
+        }
       })
-      .catch(() => {});
+      .catch(() => { this.loading = false; });
   }
 
   cueVideoById(videoId: string, startSeconds: number): void {
