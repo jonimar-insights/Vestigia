@@ -456,6 +456,9 @@ export default function VideoPage() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      // Native <video> controls handle Space/arrows themselves when focused —
+      // let them, or every keypress would double-seek/double-toggle.
+      if (e.target instanceof HTMLVideoElement) return;
       if (playerKind === "embed") {
         // platform iframe without seek API — prev/next navigation + manual annotation entry
         if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {

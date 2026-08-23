@@ -72,7 +72,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           const res = await fetch(`/api/videos/${vid}`);
           if (res.ok) {
             const data = await res.json();
-            return { videoId: vid, youtubeId: data.youtubeId };
+            // Only real YouTube ids can play here; social/self-hosted ids
+            // ("facebook:…", "upload:…") get "" = fetched but unplayable.
+            const playable = /^[A-Za-z0-9_-]{11}$/.test(String(data.youtubeId));
+            return { videoId: vid, youtubeId: playable ? String(data.youtubeId) : "" };
           }
         } catch {}
         return null;
@@ -124,8 +127,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   useEffect(() => {
     const container = playerContainerRef.current;
     if (!container || playerRef.current) return;
-    const firstVideoItem = itemsRef.current.find((i) => i.videoId > 0);
-    const firstYtId = firstVideoItem ? videoIds.get(firstVideoItem.videoId) : undefined;
+    // Create the player from the first item that is actually playable on YT
+    const firstPlayable = itemsRef.current.find((i) => i.videoId > 0 && videoIds.get(i.videoId));
+    const firstYtId = firstPlayable ? videoIds.get(firstPlayable.videoId) : undefined;
     if (!firstYtId) return;
     lastVideoIdRef.current = firstYtId;
     let destroyed = false;
@@ -243,14 +247,24 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
           <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
             <div ref={playerContainerRef} className="w-full h-full" />
-            {(!playerReady || !ytId) && item?.type !== "slide" && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black">
-                <div className="flex items-center gap-2 text-white/40">
-                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                  <span className="text-xs">Loading player...</span>
+            {!playerReady || !ytId ? (
+              item?.type !== "slide" && ytId === "" ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
+                  <span className="text-xs text-white/40">
+                    This clip&apos;s video isn&apos;t playable in the playlist (social or self-hosted) — use Next to continue.
+                  </span>
                 </div>
-              </div>
-            )}
+              ) : (
+                item?.type !== "slide" && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-black">
+                    <div className="flex items-center gap-2 text-white/40">
+                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                      <span className="text-xs">Loading player...</span>
+                    </div>
+                  </div>
+                )
+              )
+            ) : null}
             {item?.type === "slide" && (
               <div className="absolute inset-0 flex items-center justify-center px-12 bg-black">
                 <div className="text-center max-w-2xl">

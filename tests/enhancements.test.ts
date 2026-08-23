@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { encode } from "@auth/core/jwt";
 
 const BASE = "http://localhost:3000";
-const SHARE_TOKEN = "fe1e019b-a874-480a-86cb-b08d3eb055ac";
 const VIDEO_904 = 904;
 
 function loadEnv() {
@@ -86,6 +85,33 @@ async function main() {
   console.log("atomic invalid url: 400");
 
   // ── 2. Edit annotation via shared folder (as invitee with edit permission) ──
+  const shareRes = await fetch(`${BASE}/api/folders/${folder.id}/share`, {
+    method: "POST",
+    headers: { ...ownerHeaders, "Content-Type": "application/json" },
+  });
+  assert.equal(shareRes.status, 200);
+  const SHARE_TOKEN = (await shareRes.json()).token;
+  assert.ok(SHARE_TOKEN, "share token missing");
+
+  // Video must be in the folder for shared annotations; the caller does not
+  // own video 904, so this links a fresh duplicate row we clean up below.
+  const linkRes = await fetch(`${BASE}/api/folders/${folder.id}/videos`, {
+    method: "POST",
+    headers: { ...ownerHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" }),
+  });
+  assert.equal(linkRes.status, 201);
+  const linked = await linkRes.json();
+  const linkedVideoId = linked.videoId as number;
+
+  // Invite the collaborator with edit permission (invite email send may fail
+  // locally — the folderShares row is what matters for authorization).
+  await fetch(`${BASE}/api/folders/${folder.id}/shares`, {
+    method: "POST",
+    headers: { ...ownerHeaders, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "notasdevideo@gmail.com", permission: "edit" }),
+  }).catch(() => {});
+
   const collabToken = await forgeToken("notasdevideo@gmail.com", "Notas");
   const collabHeaders = { "Cookie": `authjs.session-token=${collabToken}` };
   const jsonHeaders = { "Content-Type": "application/json" };
@@ -93,7 +119,7 @@ async function main() {
   const created = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ videoId: VIDEO_904, name: "Notas", email: "notasdevideo@gmail.com", timestampStart: 5, timestampEnd: 8, note: "first note" }),
+    body: JSON.stringify({ videoId: linkedVideoId, name: "Notas", email: "notasdevideo@gmail.com", timestampStart: 5, timestampEnd: 8, note: "first note" }),
   });
   assert.equal(created.status, 201);
   const ann = await created.json();
@@ -118,7 +144,7 @@ async function main() {
   assert.equal(otherEdit.status, 403);
   console.log("edit someone else's annotation: 403");
 
-  const editedGet = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations?videoId=${VIDEO_904}`, { headers: collabHeaders });
+  const editedGet = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations?videoId=${linkedVideoId}`, { headers: collabHeaders });
   const list = await editedGet.json();
   const found = list.find((a: { id: number }) => a.id === ann.id);
   assert.equal(found.timestampStart, 20);
@@ -134,10 +160,13 @@ async function main() {
   assert.equal(del.status, 200);
   console.log("cleanup delete: ok");
 
-  // cleanup folder (and the video only if this request created it)
+  // cleanup folder (and the videos only if these requests created them)
   await fetch(`${BASE}/api/folders/${folder.id}`, { method: "DELETE", headers: ownerHeaders });
   if (atomicData.created) {
     await fetch(`${BASE}/api/videos/${atomicData.videoId}`, { method: "DELETE", headers: ownerHeaders });
+  }
+  if (linked.created) {
+    await fetch(`${BASE}/api/videos/${linkedVideoId}`, { method: "DELETE", headers: ownerHeaders });
   }
   console.log("cleanup: ok");
   console.log("ALL PASS");
