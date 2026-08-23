@@ -66,7 +66,7 @@ export async function POST(
 
   const { token } = await params;
   const body = await _request.json();
-  const { videoId, name, email, timestampStart, timestampEnd, note } = body;
+  const { videoId, name, email, timestampStart, timestampEnd, note, title } = body;
 
   if (!videoId || !name || timestampStart === undefined || timestampEnd === undefined) {
     return NextResponse.json(
@@ -124,7 +124,7 @@ export async function POST(
       videoId,
       timestampStart,
       timestampEnd,
-      label: "Note",
+      label: typeof title === "string" && title.trim() ? title.trim() : "Note",
       tags: JSON.stringify([]),
       note: note || null,
       createdBy: name,
@@ -144,7 +144,7 @@ export async function PUT(
 
   const { token } = await params;
   const body = await _request.json();
-  const { annotationId, email, timestampStart, timestampEnd, note } = body;
+  const { annotationId, email, timestampStart, timestampEnd, note, title } = body;
 
   if (!annotationId || !email || timestampStart === undefined || timestampEnd === undefined) {
     return NextResponse.json(
@@ -198,6 +198,7 @@ export async function PUT(
       timestampStart,
       timestampEnd,
       note: note ?? null,
+      ...(typeof title === "string" && { label: title.trim() || "Note" }),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(annotations.id, annotationId))

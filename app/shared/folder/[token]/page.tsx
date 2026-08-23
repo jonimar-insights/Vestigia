@@ -121,6 +121,7 @@ export default function SharedFolderPage({
   const [startSec, setStartSec] = useState(-1);
   const [endSec, setEndSec] = useState(-1);
   const [note, setNote] = useState("");
+  const [newTitle, setNewTitle] = useState("");
   const [saving, setSaving] = useState(false);
 
   // Annotation editing
@@ -133,6 +134,7 @@ export default function SharedFolderPage({
   const [editStart, setEditStart] = useState(0);
   const [editEnd, setEditEnd] = useState(0);
   const [editNote, setEditNote] = useState("");
+  const [editTitle, setEditTitle] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
 
   // YT Player
@@ -592,12 +594,14 @@ export default function SharedFolderPage({
           timestampStart: startSec,
           timestampEnd: endSec,
           note: note.trim() || null,
+          title: newTitle.trim() || undefined,
         }),
       });
       if (res.ok) {
         setStartSec(-1);
         setEndSec(-1);
         setNote("");
+        setNewTitle("");
         await loadAnnotations(selectedVideo.id);
       } else {
         const data = await res.json();
@@ -627,6 +631,7 @@ export default function SharedFolderPage({
     setEditStart(a.timestampStart);
     setEditEnd(a.timestampEnd);
     setEditNote(a.note ?? "");
+    setEditTitle(a.label ?? "");
   }
 
   function cancelEditAnnotation() {
@@ -647,6 +652,7 @@ export default function SharedFolderPage({
           timestampStart: editStart,
           timestampEnd: editEnd,
           note: editNote.trim() || null,
+          title: editTitle.trim(),
         }),
       });
       if (res.ok && selectedVideo) {
@@ -1025,6 +1031,13 @@ export default function SharedFolderPage({
                         </div>
                       </div>
                     </div>
+                    <input
+                      value={newTitle}
+                      onChange={(e) => setNewTitle(e.target.value)}
+                      placeholder="Title (optional)"
+                      maxLength={120}
+                      className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                    />
                     <textarea
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
@@ -1095,6 +1108,13 @@ export default function SharedFolderPage({
                             <span className="text-[10px] font-semibold text-accent/80 truncate">{a.createdBy}</span>
                             <span className="text-[9px] text-muted/40">Editing</span>
                           </div>
+                          <input
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            placeholder="Title"
+                            maxLength={120}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-medium focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                          />
                           <div className="grid grid-cols-2 gap-2">
                             <div className="min-w-0">
                               <div className="text-[9px] text-muted/60 mb-0.5">Start (s)</div>
@@ -1156,6 +1176,9 @@ export default function SharedFolderPage({
                           {formatTs(a.timestampStart)} – {formatTs(a.timestampEnd)}
                         </span>
                       </div>
+                      {a.label && a.label !== "Note" && (
+                        <p className="text-xs font-medium text-foreground truncate mb-0.5">{a.label}</p>
+                      )}
                       {a.note && (
                         <p className="text-[10px] text-muted/80 line-clamp-2">
                           <NoteText note={a.note} />

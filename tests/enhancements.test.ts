@@ -118,22 +118,35 @@ async function main() {
   const created = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
     method: "POST",
     headers: jsonHeaders,
-    body: JSON.stringify({ videoId: linkedVideoId, name: "Notas", email: "notasdevideo@gmail.com", timestampStart: 5, timestampEnd: 8, note: "first note" }),
+    body: JSON.stringify({ videoId: linkedVideoId, name: "Notas", email: "notasdevideo@gmail.com", timestampStart: 5, timestampEnd: 8, note: "first note", title: "Seeded Title" }),
   });
   assert.equal(created.status, 201);
   const ann = await created.json();
-  console.log("created annotation:", ann.id);
+  assert.equal(ann.label, "Seeded Title");
+  console.log("created annotation:", ann.id, "label:", ann.label);
+
+  // create WITHOUT a title falls back to the default label
+  const createdNoTitle = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
+    method: "POST",
+    headers: jsonHeaders,
+    body: JSON.stringify({ videoId: linkedVideoId, name: "Notas", email: "notasdevideo@gmail.com", timestampStart: 9, timestampEnd: 12, note: "no title" }),
+  });
+  assert.equal(createdNoTitle.status, 201);
+  const noTitleAnn = await createdNoTitle.json();
+  assert.equal(noTitleAnn.label, "Note");
+  console.log("default label on untitled annotation: ok");
 
   const edited = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
     method: "PUT",
     headers: jsonHeaders,
-    body: JSON.stringify({ annotationId: ann.id, email: "notasdevideo@gmail.com", timestampStart: 20, timestampEnd: 25, note: "edited note" }),
+    body: JSON.stringify({ annotationId: ann.id, email: "notasdevideo@gmail.com", timestampStart: 20, timestampEnd: 25, note: "edited note", title: "Renamed Title" }),
   });
   assert.equal(edited.status, 200);
   const editedAnn = await edited.json();
   assert.equal(editedAnn.timestampStart, 20);
   assert.equal(editedAnn.note, "edited note");
-  console.log("edit own annotation: ok");
+  assert.equal(editedAnn.label, "Renamed Title");
+  console.log("edit own annotation (incl. title): ok");
 
   const otherEdit = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
     method: "PUT",
@@ -148,8 +161,16 @@ async function main() {
   const found = list.find((a: { id: number }) => a.id === ann.id);
   assert.equal(found.timestampStart, 20);
   assert.equal(found.note, "edited note");
+  assert.equal(found.label, "Renamed Title");
   assert.ok(found.updatedAt);
-  console.log("poll GET reflects edit (updatedAt present): ok");
+  console.log("poll GET reflects edit (updatedAt + title present): ok");
+
+  const del1 = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
+    method: "DELETE",
+    headers: jsonHeaders,
+    body: JSON.stringify({ annotationId: noTitleAnn.id, email: "notasdevideo@gmail.com" }),
+  });
+  assert.equal(del1.status, 200);
 
   const del = await fetch(`${BASE}/api/shared/folder/${SHARE_TOKEN}/annotations`, {
     method: "DELETE",
