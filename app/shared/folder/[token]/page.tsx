@@ -188,6 +188,30 @@ export default function SharedFolderPage({
     })();
   }, [token, verifiedEmail]);
 
+  // Returning visitor: email restored from localStorage skips the effect
+  // above, so load the folder (and clear the spinner) here instead.
+  useEffect(() => {
+    if (!token || !verifiedEmail || folder) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/shared/folder/${token}`);
+        if (cancelled) return;
+        if (!res.ok) {
+          setError("Folder not found");
+          return;
+        }
+        const data = await res.json();
+        if (!cancelled) setFolder(data);
+      } catch {
+        if (!cancelled) setError("Failed to load folder");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [token, verifiedEmail, folder]);
+
   // Auto-verify with Google session email if signed in
   useEffect(() => {
     const sessionEmail = session?.user?.email;
@@ -792,6 +816,7 @@ export default function SharedFolderPage({
               <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
                 {sharedKind === "vimeo" && sharedSocial ? (
                   <iframe
+                    key={selectedVideo.id}
                     src={`${socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}?api=1`}
                     data-vimeo-player
                     title={selectedVideo.title ?? "Video"}
@@ -801,6 +826,7 @@ export default function SharedFolderPage({
                   />
                 ) : sharedKind === "embed" && sharedSocial ? (
                   <iframe
+                    key={selectedVideo.id}
                     src={socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}
                     title={selectedVideo.title ?? "Video"}
                     className="w-full h-full"

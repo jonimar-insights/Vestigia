@@ -102,6 +102,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
     advancedRef.current = false;
     clearTimeInterval();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync displayed time to clip start when switching clips
     setCurrentTime(item.timestamp);
     lastVideoIdRef.current = ytId;
 
@@ -189,11 +190,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     const end = item.endTimestamp ?? (item.timestamp + 30);
     if (currentTime >= end) {
       advancedRef.current = true;
-      if (currentIdx < items.length - 1) {
-        setCurrentIdx((prev) => prev + 1);
-      } else {
-        setCurrentIdx(0);
-      }
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-advance to next clip when playback crosses its end
+      setCurrentIdx((prev) => (prev < items.length - 1 ? prev + 1 : 0));
     }
   }, [currentTime, playing]);
 

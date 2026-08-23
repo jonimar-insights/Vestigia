@@ -1022,6 +1022,7 @@ export default function VideoPage() {
               {playerKind === "vimeo" && social ? (
                 <>
                   <iframe
+                    key={video.id}
                     src={`${socialEmbedUrl(social.platform, social.platformId, video.youtubeUrl)}?api=1`}
                     data-vimeo-player
                     title={video.title ?? "Video"}
@@ -1047,6 +1048,7 @@ export default function VideoPage() {
               ) : isSocial && social ? (
                 <>
                   <iframe
+                    key={video.id}
                     src={socialEmbedUrl(social.platform, social.platformId, video.youtubeUrl)}
                     title={video.title ?? "Video"}
                     className="w-full h-full"

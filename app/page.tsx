@@ -163,8 +163,6 @@ export default function Home() {
   const [newShareEmail, setNewShareEmail] = useState("");
   const [newSharePermission, setNewSharePermission] = useState<"view" | "edit">("view");
   const [addingShare, setAddingShare] = useState(false);
-  const [appUsers, setAppUsers] = useState<Array<{ email: string; name: string | null }>>([]);
-  const [appUsersLoading, setAppUsersLoading] = useState(false);
   const [savedEmails, setSavedEmails] = useState<string[]>([]);
   const [saveEmailForFuture, setSaveEmailForFuture] = useState(true);
 
@@ -450,13 +448,6 @@ export default function Home() {
     } catch {}
     // Load existing shares
     await loadShareList(folderId);
-    // Load Google-authenticated users for suggestions
-    setAppUsersLoading(true);
-    try {
-      const res = await fetch("/api/users");
-      if (res.ok) setAppUsers(await res.json());
-    } catch {}
-    setAppUsersLoading(false);
     // Load saved emails for future shares
     try {
       const res = await fetch("/api/users/saved-emails");

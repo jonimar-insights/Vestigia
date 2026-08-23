@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { cliplists, clipItems, videos } from "@/lib/schema";
+import { cliplists } from "@/lib/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 
