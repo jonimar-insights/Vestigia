@@ -49,9 +49,10 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - FIXED pre-existing bug in `app/api/shared/folder/[token]/verify/route.ts`: session email used to override the manually-submitted email, so signed-in users could never pass the email gate with an invited address. Now explicit body email wins: `email?.trim()?.toLowerCase() || sessionEmail`.
   - eslint.config.mjs: `@typescript-eslint/no-unused-vars` warn with `^_` ignore pattern.
   - Verified in-browser locally: vimeo video page (duration 1:02, seek 0:00→0:10), shared folder via email gate (same), youtube regression OK, home page renders social thumbnails. NOTE: actual playback can't be exercised in Playwright-driven browsers — even player.vimeo.com direct embed stalls (`readyState` stays 1) / PlaybackError; seek+events prove the adapter wiring.
+  - COMMITTED as 60ca310 and DEPLOYED to Vercel prod (`vercel --prod` — project has no git auto-deploy). Verified on prod: home page renders social thumbnails, /video/935 vimeo player duration+seek, shared folder email gate passes while signed-in as a different account (the verify fix), shared-page player seek OK. Test folder deleted.
 
 ### Active
-- Vimeo support pending commit + Vercel deploy (all checks green: tsc, eslint, unit test, browser verify)
+- (none)
 
 ### Blocked
 - (none)
