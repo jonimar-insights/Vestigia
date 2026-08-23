@@ -50,6 +50,12 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - eslint.config.mjs: `@typescript-eslint/no-unused-vars` warn with `^_` ignore pattern.
   - Verified in-browser locally: vimeo video page (duration 1:02, seek 0:00→0:10), shared folder via email gate (same), youtube regression OK, home page renders social thumbnails. NOTE: actual playback can't be exercised in Playwright-driven browsers — even player.vimeo.com direct embed stalls (`readyState` stays 1) / PlaybackError; seek+events prove the adapter wiring.
   - COMMITTED as 60ca310 and DEPLOYED to Vercel prod (`vercel --prod` — project has no git auto-deploy). Verified on prod: home page renders social thumbnails, /video/935 vimeo player duration+seek, shared folder email gate passes while signed-in as a different account (the verify fix), shared-page player seek OK. Test folder deleted.
+- **Issue sweep (committed as ebb65d8 and DEPLOYED to prod):**
+  - FIXED: shared folder page infinite "Loading..." for returning collaborators — email restored from localStorage set `verifiedEmail` before mount effects, which made the only folder-loading effect early-return without ever clearing the loading flag. Added a dedicated effect that loads the folder when `verifiedEmail` is set but `folder` is null. Verified on prod (gate → reload → folder loads).
+  - FIXED: switching between two Vimeo videos on the shared page produced a dead player (no duration/controls) — React updated the existing iframe's src in place, breaking the already-attached Player SDK handshake. Social/vimeo iframes are now keyed by `video.id` so each video gets a fresh embed. Verified vimeo→vimeo + vimeo↔youtube switches locally (duration + seek OK after each switch).
+  - Video page remounts on /video/:id navigation in App Router — no stale-player issue there (verified youtube→vimeo→youtube via prev/next).
+  - Lint: fixed all `npx eslint .` errors (`.vimeo-setup.mts` anys typed; dead `appUsers` state removed; unused imports removed; playlist player's intentional sync-setState/auto-advance annotated with targeted `react-hooks/set-state-in-effect` disables). Remaining: 4 pre-existing exhaustive-deps warnings in `components/VideoPlaylistPlayer.tsx` (deliberate dep-narrowing — do NOT "fix" by adding deps, it changes auto-advance behavior).
+  - NOTE: Vimeo embeds resume playback position via localStorage per browser (e.g. reselecting a video may start at 0:30) — standard Vimeo behavior, not a bug.
 
 ### Active
 - (none)
