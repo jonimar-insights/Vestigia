@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { encode } from "@auth/core/jwt";
 
 const BASE = "http://localhost:3000";
-const VIDEO_904 = 904;
 
 function loadEnv() {
   for (const line of readFileSync(process.env.PWD + "/.env", "utf8").split("\n")) {
