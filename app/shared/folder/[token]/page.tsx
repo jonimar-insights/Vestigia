@@ -4,6 +4,8 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
 import { tokenizeNoteLinks } from "@/lib/youtube";
+import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
+import { VimeoAdapter } from "@/lib/vimeo-adapter";
 
 interface VideoData {
   id: number;
@@ -12,6 +14,7 @@ interface VideoData {
   title: string | null;
   thumbnailUrl: string | null;
   durationSeconds: number | null;
+  platform?: string;
   annotationCount: number;
 }
 
@@ -80,6 +83,7 @@ declare global {
   interface Window {
     YT: { Player: new (id: string | HTMLElement, config: Record<string, unknown>) => YTPlayer };
     onYouTubeIframeAPIReady: () => void;
+    Vimeo?: { Player: new (element: HTMLIFrameElement) => unknown };
   }
 }
 
@@ -361,8 +365,16 @@ export default function SharedFolderPage({
     setEditingAnnotation(null);
   }
 
+  // Social platform handling for the selected video
+  const sharedSocial = selectedVideo && selectedVideo.platform !== "youtube"
+    ? parseSocialStorageId(selectedVideo.youtubeId)
+    : null;
+  const sharedKind: "youtube" | "vimeo" | "embed" =
+    !sharedSocial ? "youtube" : sharedSocial.platform === "vimeo" ? "vimeo" : "embed";
+
   // YT IFrame API init
   useEffect(() => {
+    if (sharedSocial) return;
     const container = playerContainerRef.current;
     const ytId = selectedVideo?.youtubeId;
     if (!container || playerRef.current || !ytId) return;
@@ -417,7 +429,59 @@ export default function SharedFolderPage({
     }, 100);
 
     return () => { destroyed = true; clearInterval(poll); if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
-  }, [selectedVideo]);
+  }, [selectedVideo, sharedSocial]);
+
+  // Vimeo Player SDK init (full seek/time control over the embed iframe)
+  useEffect(() => {
+    if (!selectedVideo || sharedKind !== "vimeo") return;
+    let destroyed = false;
+    const iframe = document.querySelector<HTMLIFrameElement>("iframe[data-vimeo-player]");
+    if (!iframe) return;
+
+    function createVimeoPlayer() {
+      if (destroyed || playerRef.current || !window.Vimeo?.Player || !iframe) return;
+      try {
+        const adapter = new VimeoAdapter(new window.Vimeo.Player(iframe) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer);
+        playerRef.current = adapter;
+        adapter.onPlayState((playing) => {
+          setIsPlaying(playing);
+          if (playing) {
+            if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+            timeIntervalRef.current = setInterval(() => {
+              adapter.refreshTime();
+              setCurrentTime(adapter.getCurrentTime());
+            }, 250);
+          } else {
+            if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+            adapter.refreshTime();
+            setCurrentTime(adapter.getCurrentTime());
+          }
+        });
+        adapter.onReady(() => {
+          if (destroyed) return;
+          setDuration(adapter.getDuration());
+          setPlayerReady(true);
+        });
+      } catch (err) {
+        console.error("[Vimeo Player] create failed:", err);
+      }
+    }
+
+    if (window.Vimeo?.Player) {
+      createVimeoPlayer();
+    } else {
+      if (!document.querySelector('script[src*="player.vimeo.com/api/player.js"]')) {
+        const s = document.createElement("script");
+        s.src = "https://player.vimeo.com/api/player.js";
+        document.head.appendChild(s);
+      }
+      const poll = setInterval(() => {
+        if (!destroyed && window.Vimeo?.Player) { clearInterval(poll); createVimeoPlayer(); }
+      }, 100);
+    }
+
+    return () => { destroyed = true; if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
+  }, [selectedVideo, sharedKind]);
 
   function seekTo(seconds: number) {
     playerRef.current?.seekTo(seconds, true);
@@ -726,19 +790,54 @@ export default function SharedFolderPage({
             {/* Player */}
             <div className="flex-1 min-w-0">
               <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-                <div ref={playerContainerRef} className="w-full h-full" />
-                {!playerReady && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-black">
-                    <div className="flex items-center gap-3 text-white/60">
-                      <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white/80" />
-                      <span className="text-sm">Loading player...</span>
-                    </div>
+                {sharedKind === "vimeo" && sharedSocial ? (
+                  <iframe
+                    src={`${socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}?api=1`}
+                    data-vimeo-player
+                    title={selectedVideo.title ?? "Video"}
+                    className="w-full h-full"
+                    allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
+                    allowFullScreen
+                  />
+                ) : sharedKind === "embed" && sharedSocial ? (
+                  <iframe
+                    src={socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}
+                    title={selectedVideo.title ?? "Video"}
+                    className="w-full h-full"
+                    allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
+                    allowFullScreen
+                  />
+                ) : (
+                  <>
+                    <div ref={playerContainerRef} className="w-full h-full" />
+                    {!playerReady && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black">
+                        <div className="flex items-center gap-3 text-white/60">
+                          <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white/80" />
+                          <span className="text-sm">Loading player...</span>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+                {sharedKind === "embed" && (
+                  <div className="absolute top-2 right-2 z-10">
+                    <a href={selectedVideo.youtubeUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-full bg-black/60 backdrop-blur px-2.5 py-1 text-[10px] font-medium text-white/90 hover:bg-black/80 transition-colors">
+                      Watch on {sharedSocial?.platform}
+                    </a>
                   </div>
                 )}
               </div>
 
+              {sharedKind === "embed" && (
+                <div className="mt-3 rounded-xl border border-border/60 bg-surface px-4 py-3 text-xs text-muted flex items-center gap-2">
+                  This platform doesn&apos;t allow player control here — play it above and read the timestamps below.
+                </div>
+              )}
+
               {/* Player controls */}
-              {playerReady && (
+              {playerReady && sharedKind !== "embed" && (
                 <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${isPlaying ? "bg-emerald-500 animate-pulse" : "bg-muted/40"}`} />
@@ -783,7 +882,7 @@ export default function SharedFolderPage({
               )}
 
               {/* Scrubber */}
-              {playerReady && duration > 0 && (
+              {playerReady && sharedKind !== "embed" && duration > 0 && (
                 <div className="mt-2">
                   <div className="flex items-center gap-2">
                     <span className="text-[10px] font-mono text-muted tabular-nums">0:00</span>

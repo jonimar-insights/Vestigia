@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
 import { formatTimestamp, sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
+import { VimeoAdapter } from "@/lib/vimeo-adapter";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -23,6 +24,7 @@ declare global {
   interface Window {
     YT: { Player: new (id: string | HTMLElement, config: Record<string, unknown>) => YTPlayer };
     onYouTubeIframeAPIReady: () => void;
+    Vimeo?: { Player: new (element: HTMLIFrameElement) => unknown };
   }
 }
 
@@ -234,11 +236,15 @@ export default function VideoPage() {
   const social = video && video.platform && video.platform !== "youtube"
     ? parseSocialStorageId(video.youtubeId)
     : null;
+  // youtube: full YT IFrame player · vimeo: full control via Player SDK ·
+  // embed: platform iframe without seek API → manual timestamps only
+  const playerKind: "youtube" | "vimeo" | "embed" =
+    !social ? "youtube" : social.platform === "vimeo" ? "vimeo" : "embed";
   const isSocial = !!social;
 
   // ── YouTube IFrame API ──
   useEffect(() => {
-    if (!video || isSocial) return;
+    if (!video || playerKind !== "youtube") return;
     const container = playerContainerRef.current;
     const ytId = video?.youtubeId;
     if (!container || playerRef.current || !ytId) return;
@@ -297,7 +303,65 @@ export default function VideoPage() {
     }, 100);
 
     return () => { destroyed = true; clearInterval(poll); if (timeIntervalRef.current) clearInterval(timeIntervalRef.current); };
-  }, [video, isSocial]);  
+  }, [video, playerKind]);
+
+  // ── Vimeo Player SDK (full seek/time control over the embed iframe) ──
+  useEffect(() => {
+    if (!video || playerKind !== "vimeo") return;
+    let destroyed = false;
+    const iframe = document.querySelector<HTMLIFrameElement>("iframe[data-vimeo-player]");
+    if (!iframe) return;
+
+    function createVimeoPlayer() {
+      if (destroyed || playerRef.current || !window.Vimeo?.Player || !iframe) return;
+      try {
+        const adapter = new VimeoAdapter(new window.Vimeo.Player(iframe) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer);
+        playerRef.current = adapter;
+        adapter.onPlayState((playing) => {
+          setIsPlaying(playing);
+          if (playing) {
+            if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
+            timeIntervalRef.current = setInterval(() => {
+              adapter.refreshTime();
+              setCurrentTime(adapter.getCurrentTime());
+            }, 250);
+          } else {
+            if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+            adapter.refreshTime();
+            setCurrentTime(adapter.getCurrentTime());
+          }
+        });
+        adapter.onReady(() => {
+          if (destroyed) return;
+          setDuration(adapter.getDuration());
+          setPlayerReady(true);
+          const t = new URLSearchParams(window.location.search).get("t");
+          if (t) { adapter.seekTo(parseFloat(t), true); setCurrentTime(parseFloat(t)); }
+        });
+      } catch (err) {
+        console.error("[Vimeo Player] create failed:", err);
+      }
+    }
+
+    if (window.Vimeo?.Player) {
+      createVimeoPlayer();
+    } else {
+      if (!document.querySelector('script[src*="player.vimeo.com/api/player.js"]')) {
+        const s = document.createElement("script");
+        s.src = "https://player.vimeo.com/api/player.js";
+        document.head.appendChild(s);
+      }
+      const poll = setInterval(() => {
+        if (!destroyed && window.Vimeo?.Player) { clearInterval(poll); createVimeoPlayer(); }
+      }, 100);
+    }
+
+    return () => {
+      destroyed = true;
+      playerRef.current = null;
+      if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+    };
+  }, [video, playerKind]);
 
   // ── Player control helpers ──
   function seekTo(seconds: number) {
@@ -309,6 +373,9 @@ export default function VideoPage() {
       const url = new URL(window.location.href);
       url.searchParams.set("t", String(Math.floor(seconds)));
       window.history.replaceState({}, "", url.toString());
+    } else if (playerKind === "embed") {
+      // Platform iframe has no seek API — clicking annotations can't seek
+      return;
     } else {
       // Fallback if player not ready
       const url = new URL(window.location.href);
@@ -343,13 +410,20 @@ export default function VideoPage() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (isSocial) {
-        // still allow prev/next video navigation
+      if (playerKind === "embed") {
+        // platform iframe without seek API — prev/next navigation + manual annotation entry
         if (e.shiftKey && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
           const idx = siblingVideos.findIndex((v) => v.id === Number(videoId));
           if (e.key === "ArrowLeft" && idx > 0) router.push(`/video/${siblingVideos[idx - 1].id}`);
           else if (e.key === "ArrowRight" && idx >= 0 && idx < siblingVideos.length - 1) router.push(`/video/${siblingVideos[idx + 1].id}`);
         }
+        if (e.key === "a" || e.key === "A") {
+          // open form with empty timestamps — user types them manually
+          e.preventDefault();
+          setStart(0); setEnd(0); setStartDisplay(""); setEndDisplay("");
+          setShowForm(true);
+        }
+        if (e.key === "Escape" && showForm) setShowForm(false);
         return;
       }
       if (e.key === "a" || e.key === "A") {
@@ -395,7 +469,7 @@ export default function VideoPage() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [showForm, duration, siblingVideos, videoId, router, isSocial]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showForm, duration, siblingVideos, videoId, router, playerKind]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Panel resize drag ──
   useEffect(() => {
@@ -832,7 +906,7 @@ export default function VideoPage() {
     setScrubberPos(pct);
     const seconds = (pct / 100) * duration;
     seekTo(seconds);
-  }, [duration]);
+  }, [duration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!scrubberDragging) return;
@@ -917,12 +991,16 @@ export default function VideoPage() {
               {language === "en" ? "PT" : "EN"}
             </button>
             <button onClick={() => {
-                const t = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
-                const dur = duration || 3600;
-                setStart(t);
-                setEnd(Math.min(t + 30, dur));
-                setStartDisplay(formatTimestamp(t));
-                setEndDisplay(formatTimestamp(Math.min(t + 30, dur)));
+                if (playerKind === "embed") {
+                  setStart(0); setEnd(0); setStartDisplay(""); setEndDisplay("");
+                } else {
+                  const t = playerRef.current ? playerRef.current.getCurrentTime() : currentTime;
+                  const dur = duration || 3600;
+                  setStart(t);
+                  setEnd(Math.min(t + 30, dur));
+                  setStartDisplay(formatTimestamp(t));
+                  setEndDisplay(formatTimestamp(Math.min(t + 30, dur)));
+                }
                 setShowForm(true);
               }}
               className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover active:scale-[0.97] transition-all flex items-center gap-1.5">
@@ -941,7 +1019,32 @@ export default function VideoPage() {
           <div style={{ width: `${panelRatio}%` }} className="flex flex-col gap-4 min-w-0">
             {/* Video Player */}
             <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-              {isSocial && social ? (
+              {playerKind === "vimeo" && social ? (
+                <>
+                  <iframe
+                    src={`${socialEmbedUrl(social.platform, social.platformId, video.youtubeUrl)}?api=1`}
+                    data-vimeo-player
+                    title={video.title ?? "Video"}
+                    className="w-full h-full"
+                    allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
+                    allowFullScreen
+                  />
+                  <div className="absolute top-2 right-2 z-10">
+                    <a href={video.youtubeUrl} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 rounded-full bg-black/60 backdrop-blur px-2.5 py-1 text-[10px] font-medium text-white/90 hover:bg-black/80 transition-colors">
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      Watch on {social.platform}
+                    </a>
+                  </div>
+                  {!playerReady && (
+                    <div className="absolute inset-x-0 bottom-0 flex justify-center pb-2 pointer-events-none">
+                      <div className="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-white/70 text-xs">
+                        <div className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80" />
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : isSocial && social ? (
                 <>
                   <iframe
                     src={socialEmbedUrl(social.platform, social.platformId, video.youtubeUrl)}
@@ -974,7 +1077,7 @@ export default function VideoPage() {
             </div>
 
             {/* Live time + Timeline Scrubber */}
-            {!isSocial && (
+            {playerKind !== "embed" && (
             <div className="rounded-xl border border-border bg-surface p-4 shadow-sm">
               {/* Current time display */}
               <div className="flex items-center justify-between mb-3">
@@ -1086,10 +1189,10 @@ export default function VideoPage() {
             </div>
             )}
 
-            {isSocial && (
+            {playerKind === "embed" && (
               <div className="rounded-xl border border-border/60 bg-surface px-4 py-3 text-xs text-muted flex items-center gap-2">
                 <svg className="w-3.5 h-3.5 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Timestamps and annotations aren&apos;t available for social media posts.
+                This platform doesn&apos;t allow player control — type timestamps manually (e.g. 1:23). Press A to add an annotation.
               </div>
             )}
           </div>
@@ -1107,7 +1210,7 @@ export default function VideoPage() {
           <div style={{ width: `${100 - panelRatio}%` }} className="flex flex-col min-h-0 min-w-0">
 
             {/* ── Inline Create Form ── */}
-            {isSocial ? null : showForm ? (
+            {showForm ? (
               <div className="rounded-xl border border-accent/30 bg-surface shadow-sm mb-3 overflow-hidden relative">
                 {/* Timeline dot placeholder */}
                 <div className="absolute left-[11px] top-[18px] w-[10px] h-[10px] rounded-full border-2 border-background bg-accent ring-2 ring-accent/20 animate-pulse" />
@@ -1121,16 +1224,20 @@ export default function VideoPage() {
                         onBlur={() => { const s = parseTimeInput(startDisplay); setStart(s); setStartDisplay(s > 0 ? formatTimestamp(s) : ""); }}
                         placeholder="0:00"
                         className="w-14 rounded border border-border/60 bg-background px-1.5 py-px text-[10px] font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
-                      <button type="button" onClick={() => { setStart(currentTime); setStartDisplay(formatTimestamp(currentTime)); }}
-                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setStartNow")}>{t("annotation.now")}</button>
+                      {playerKind !== "embed" && (
+                        <button type="button" onClick={() => { setStart(currentTime); setStartDisplay(formatTimestamp(currentTime)); }}
+                          className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setStartNow")}>{t("annotation.now")}</button>
+                      )}
                       <span className="text-[9px] text-muted/30">&ndash;</span>
                       <input type="text" value={endDisplay} required
                         onChange={e => setEndDisplay(e.target.value)}
                         onBlur={() => { const s = parseTimeInput(endDisplay); setEnd(s); setEndDisplay(s > 0 ? formatTimestamp(s) : ""); }}
                         placeholder="0:00"
                         className="w-14 rounded border border-border/60 bg-background px-1.5 py-px text-[10px] font-mono text-accent/80 focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none transition-all tabular-nums" />
-                      <button type="button" onClick={() => { setEnd(currentTime); setEndDisplay(formatTimestamp(currentTime)); }}
-                        className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setEndNow")}>{t("annotation.now")}</button>
+                      {playerKind !== "embed" && (
+                        <button type="button" onClick={() => { setEnd(currentTime); setEndDisplay(formatTimestamp(currentTime)); }}
+                          className="text-[9px] text-accent/60 hover:text-accent transition-colors shrink-0" title={t("annotation.setEndNow")}>{t("annotation.now")}</button>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 shrink-0">
                       <button type="submit" disabled={saving || !start || !end}
@@ -1179,7 +1286,7 @@ export default function VideoPage() {
             </div>
 
             {/* ── AI Summary ── */}
-            {!showForm && !isSocial && (
+            {!showForm && playerKind === "youtube" && (
               <div className="mb-3 shrink-0">
                 {!showSummary ? (
                   <button onClick={() => runSummary()} disabled={summaryLoading}

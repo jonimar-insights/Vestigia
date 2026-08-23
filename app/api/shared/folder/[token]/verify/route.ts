@@ -20,7 +20,10 @@ export async function POST(
   const session = await auth();
   const sessionEmail = session?.user?.email?.toLowerCase();
 
-  const effectiveEmail = sessionEmail || email?.trim()?.toLowerCase();
+  // Honor an explicitly submitted email (the manual gate) before the
+  // session email — otherwise signed-in users could never verify as an
+  // invited address different from their Google account.
+  const effectiveEmail = email?.trim()?.toLowerCase() || sessionEmail;
 
   if (!effectiveEmail) {
     return NextResponse.json({ error: "Email is required" }, { status: 400 });
