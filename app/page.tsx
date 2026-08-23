@@ -128,6 +128,11 @@ export default function Home() {
   const [editSlideTitle, setEditSlideTitle] = useState("");
   const [editSlideDetail, setEditSlideDetail] = useState("");
   const [editSlideDuration, setEditSlideDuration] = useState(5);
+  const [editingClipId, setEditingClipId] = useState<number | null>(null);
+  const [editClipTitle, setEditClipTitle] = useState("");
+  const [editClipDetail, setEditClipDetail] = useState("");
+  const [editClipStart, setEditClipStart] = useState(0);
+  const [editClipEnd, setEditClipEnd] = useState(0);
   const [shareCopied, setShareCopied] = useState(false);
   const [sharing, setSharing] = useState(false);
 
@@ -985,6 +990,29 @@ export default function Home() {
         }),
       });
       setEditingSlideId(null);
+      if (selectedCliplist?.id === cliplistId) {
+        const res = await fetch(`/api/cliplists/${cliplistId}`);
+        if (res.ok) setSelectedCliplist(await res.json());
+      }
+      await loadCliplists();
+    } catch {}
+  }
+
+  async function updateClipItem(cliplistId: number, itemId: number) {
+    if (!editClipTitle.trim()) return;
+    try {
+      await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          itemId,
+          title: editClipTitle.trim(),
+          detail: editClipDetail.trim() || null,
+          timestamp: Math.max(0, editClipStart),
+          endTimestamp: Math.max(0, editClipEnd),
+        }),
+      });
+      setEditingClipId(null);
       if (selectedCliplist?.id === cliplistId) {
         const res = await fetch(`/api/cliplists/${cliplistId}`);
         if (res.ok) setSelectedCliplist(await res.json());
@@ -2397,7 +2425,7 @@ export default function Home() {
                               : "hover:bg-surface-hover/50"
                           }`}
                         >
-                          {editingSlideId !== item.id && (
+                          {editingSlideId !== item.id && editingClipId !== item.id && (
                             <button
                               onMouseDown={() => setDragArmedId(item.id)}
                               onTouchStart={() => setDragArmedId(item.id)}
@@ -2496,6 +2524,70 @@ export default function Home() {
                           )
                         ) : (
                           <>
+                          {editingClipId === item.id ? (
+                            /* ── Clip edit form ── */
+                            <form
+                              onSubmit={(e) => { e.preventDefault(); updateClipItem(selectedCliplist.id, item.id); }}
+                              className="w-full space-y-2 py-1"
+                            >
+                              <div className="flex items-center gap-2">
+                                <input
+                                  autoFocus
+                                  type="text"
+                                  value={editClipTitle}
+                                  onChange={(e) => setEditClipTitle(e.target.value)}
+                                  placeholder={t("cliplist.slideTitle")}
+                                  className="flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                />
+                                <button
+                                  type="submit"
+                                  disabled={!editClipTitle.trim() || editClipEnd <= editClipStart}
+                                  className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all shrink-0"
+                                >
+                                  {t("cliplist.saveSlide")}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingClipId(null)}
+                                  className="text-[10px] text-muted hover:text-foreground transition-colors shrink-0"
+                                >
+                                  {t("cliplist.cancelEdit")}
+                                </button>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="text"
+                                  value={editClipDetail}
+                                  onChange={(e) => setEditClipDetail(e.target.value)}
+                                  placeholder={t("cliplist.editSubtitle")}
+                                  className="flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                />
+                                <label className="flex items-center gap-1 shrink-0">
+                                  <span className="text-[9px] text-muted">{t("cliplist.startSec")}</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={editClipStart}
+                                    onChange={(e) => setEditClipStart(Math.max(0, Number(e.target.value)))}
+                                    className="w-16 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  />
+                                </label>
+                                <label className="flex items-center gap-1 shrink-0">
+                                  <span className="text-[9px] text-muted">{t("cliplist.endSec")}</span>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    step="any"
+                                    value={editClipEnd}
+                                    onChange={(e) => setEditClipEnd(Math.max(0, Number(e.target.value)))}
+                                    className="w-16 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                  />
+                                </label>
+                              </div>
+                            </form>
+                          ) : (
+                          <>
                           {item.videoThumbnail && (
                             <div className="relative shrink-0 w-20 h-12">
                               <Image src={item.videoThumbnail} alt="" fill className="object-cover rounded" />
@@ -2522,13 +2614,23 @@ export default function Home() {
                             )}
                           </Link>
                           <button
+                            onClick={() => { setEditingClipId(item.id); setEditClipTitle(item.title); setEditClipDetail(item.detail ?? ""); setEditClipStart(item.timestamp); setEditClipEnd(item.endTimestamp ?? item.timestamp + 30); }}
+                            className="p-1 rounded text-muted/40 hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover/item:opacity-100"
+                            title={t("cliplist.editItem")}
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                          </button>
+                          <button
                             onClick={() => removeClipItem(selectedCliplist.id, item.id)}
                             className="p-1 rounded text-muted/40 hover:text-danger hover:bg-danger/10 transition-all opacity-0 group-hover/item:opacity-100"
                             title={t("cliplist.removeItem")}
                           >
                             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                           </button>
-                          </>)}
+                          </>
+                          )}
+                          </>
+                        )}
                         </div>
                       ))}
                     </div>

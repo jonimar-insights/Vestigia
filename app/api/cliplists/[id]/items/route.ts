@@ -29,7 +29,7 @@ export async function PATCH(
   }
 
   const body = await request.json();
-  const { itemId, title, detail, endTimestamp, order } = body;
+  const { itemId, title, detail, endTimestamp, timestamp, order } = body;
 
   // Reorder mode: body { order: number[] } — full list of item ids in the
   // desired playback order. Items not included keep their old position.
@@ -64,7 +64,27 @@ export async function PATCH(
   const updateData: Record<string, unknown> = {};
   if (title !== undefined) updateData.title = title.trim();
   if (detail !== undefined) updateData.detail = detail || null;
-  if (endTimestamp !== undefined) updateData.endTimestamp = endTimestamp;
+  if (endTimestamp !== undefined) {
+    const end = Number(endTimestamp);
+    if (!Number.isFinite(end) || end < 0) {
+      return NextResponse.json({ error: "endTimestamp must be a non-negative number" }, { status: 400 });
+    }
+    updateData.endTimestamp = end;
+  }
+  if (timestamp !== undefined) {
+    const start = Number(timestamp);
+    if (!Number.isFinite(start) || start < 0) {
+      return NextResponse.json({ error: "timestamp must be a non-negative number" }, { status: 400 });
+    }
+    updateData.timestamp = start;
+  }
+  if (
+    updateData.timestamp !== undefined &&
+    updateData.endTimestamp !== undefined &&
+    (updateData.endTimestamp as number) <= (updateData.timestamp as number)
+  ) {
+    return NextResponse.json({ error: "endTimestamp must be greater than timestamp" }, { status: 400 });
+  }
 
   if (Object.keys(updateData).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });

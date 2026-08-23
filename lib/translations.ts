@@ -146,6 +146,9 @@ export const dict = {
     "cliplist.saveRename": "Save",
     "cliplist.cancelRename": "Cancel",
     "cliplist.editSubtitle": "Subtitle",
+    "cliplist.editItem": "Edit clip",
+    "cliplist.startSec": "Start (s)",
+    "cliplist.endSec": "End (s)",
 
     "search.placeholder": "Search annotations, scenes, key moments...",
     "search.noResults": "No results found",
@@ -437,6 +440,9 @@ export const dict = {
     "cliplist.saveRename": "Guardar",
     "cliplist.cancelRename": "Cancelar",
     "cliplist.editSubtitle": "Subtítulo",
+    "cliplist.editItem": "Editar clipe",
+    "cliplist.startSec": "Início (s)",
+    "cliplist.endSec": "Fim (s)",
 
     "search.placeholder": "Pesquisar anotações, cenas, momentos-chave...",
     "search.noResults": "Nenhum resultado encontrado",
