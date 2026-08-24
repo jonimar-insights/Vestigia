@@ -641,6 +641,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                     <img
                       src={item.imageUrl}
                       alt=""
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
                       className="mb-5 max-h-[45%] max-w-full object-contain rounded-lg shadow-lg"
                     />
                   )}
@@ -707,7 +708,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   key={`${currentIdx}-${item.createdAt}`}
                   className="absolute left-0 top-0 h-1 rounded bg-purple-400/70"
                   style={{
-                    width: `${slideRemainingSec === null ? 100 : Math.max(0, (slideRemainingSec * 1000) / slideMs * 100)}%`,
+                    width: `${slideRemainingSec === null ? 0 : Math.max(0, (slideRemainingSec * 1000) / slideMs * 100)}%`,
                     transition: "width 200ms linear",
                   }}
                 />

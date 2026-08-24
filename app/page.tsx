@@ -945,6 +945,11 @@ export default function Home() {
   }
 
   async function openCliplist(id: number) {
+    // Reset the slide-creation form when switching between cliplists — a stale
+    // insert index or leftover title would silently target the wrong list.
+    setShowSlideForm(false);
+    setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setSlideHold(false);
+    setSlideColor(""); setSlideImage(""); setSlideInsertIdx(-1); setBulkMode(false); setBulkText(""); setBulkStatus("");
     try {
       const res = await fetch(`/api/cliplists/${id}`);
       if (res.ok) setSelectedCliplist(await res.json());
@@ -2566,17 +2571,19 @@ export default function Home() {
                                 <span className="text-[10px] text-muted">{t("cliplist.holdSlide")}</span>
                               </label>
                             </div>
-                            <div className="flex items-center gap-1" title={t("cliplist.theme")}>
-                              {SLIDE_COLORS.map((c) => (
-                                <button
-                                  key={c || "none"}
-                                  type="button"
-                                  onClick={() => setSlideColor(c)}
-                                  className={`w-4 h-4 rounded-full border transition-all ${slideColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-surface scale-110" : "border-border/60"} ${c ? "" : "bg-gradient-to-br from-white/10 to-transparent checkerboard"}`}
-                                  style={c ? { backgroundColor: c } : undefined}
-                                />
-                              ))}
-                            </div>
+                                  <div className="flex items-center gap-1" title={t("cliplist.theme")}>
+                                    {SLIDE_COLORS.map((c) => (
+                                      <button
+                                        key={c || "none"}
+                                        type="button"
+                                        onClick={() => setSlideColor(c)}
+                                        title={c || t("cliplist.noTheme")}
+                                        aria-label={`${t("cliplist.theme")}: ${c || t("cliplist.noTheme")}`}
+                                        className={`w-4 h-4 rounded-full border transition-all ${slideColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-surface scale-110" : "border-border/60"} ${c ? "" : "bg-gradient-to-br from-white/10 to-transparent"}`}
+                                        style={c ? { backgroundColor: c } : undefined}
+                                      />
+                                    ))}
+                                  </div>
                             <input
                               type="url"
                               value={slideImage}
@@ -2708,6 +2715,8 @@ export default function Home() {
                                         key={c || "none"}
                                         type="button"
                                         onClick={() => setEditSlideColor(c)}
+                                        title={c || t("cliplist.noTheme")}
+                                        aria-label={`${t("cliplist.theme")}: ${c || t("cliplist.noTheme")}`}
                                         className={`w-4 h-4 rounded-full border transition-all ${editSlideColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-surface scale-110" : "border-border/60"} ${c ? "" : "bg-gradient-to-br from-white/10 to-transparent"}`}
                                         style={c ? { backgroundColor: c } : undefined}
                                       />

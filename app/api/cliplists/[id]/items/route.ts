@@ -66,6 +66,18 @@ export async function PATCH(
   if (detail !== undefined) updateData.detail = detail || null;
   if (endTimestamp === null) {
     // Slides support "hold" mode: NULL means wait for manual advance.
+    // Clips must keep a numeric window — a null end would corrupt playback bounds.
+    const [item] = await db
+      .select({ type: clipItems.type })
+      .from(clipItems)
+      .where(and(eq(clipItems.id, itemId), eq(clipItems.cliplistId, listId)))
+      .limit(1);
+    if (!item) {
+      return NextResponse.json({ error: "Item not found" }, { status: 404 });
+    }
+    if (item.type !== "slide") {
+      return NextResponse.json({ error: "endTimestamp can only be null for slides" }, { status: 400 });
+    }
     updateData.endTimestamp = null;
   } else if (endTimestamp !== undefined) {
     const end = Number(endTimestamp);
