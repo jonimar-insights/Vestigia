@@ -81,6 +81,8 @@ function getSnapshot(): HistoryState {
   return state;
 }
 
+const SERVER_SNAPSHOT: HistoryState = { entries: [], pointer: -1, busy: false };
+
 export function useHistory(): HistoryState & { canUndo: boolean; canRedo: boolean } {
   const s = useSyncExternalStore(
     (cb) => {
@@ -88,6 +90,7 @@ export function useHistory(): HistoryState & { canUndo: boolean; canRedo: boolea
       return () => listeners.delete(cb);
     },
     getSnapshot,
+    () => SERVER_SNAPSHOT,
   );
   return {
     ...s,
