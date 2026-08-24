@@ -8,6 +8,8 @@ import { formatTimestamp, sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube"
 import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { Html5Adapter } from "@/lib/html5-adapter";
+import HistoryPanel from "@/components/HistoryPanel";
+import { pushHistory } from "@/lib/history";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -644,6 +646,25 @@ export default function VideoPage() {
         const created = await res.json();
         const annId = created?.id;
         if (annId) {
+          const recreateBody = {
+            timestampStart: start, timestampEnd: end,
+            label: "Note", tags: [] as string[], note: note.trim() || null,
+          };
+          const annIdRef = { current: annId as number };
+          pushHistory({
+            label: `${t("history.newAnnotation")} — ${(note.trim() || "Note").slice(0, 30)}`,
+            undo: async () => {
+              await fetch(`/api/videos/${videoId}/annotations`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: annIdRef.current }) });
+              await loadVideo();
+            },
+            redo: async () => {
+              const r = await fetch(`/api/videos/${videoId}/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recreateBody) });
+              if (r.ok) annIdRef.current = (await r.json()).id;
+              await loadVideo();
+            },
+          });
+        }
+        if (annId) {
           const matchingCliplists = videoCliplistItems.filter(c =>
             Math.abs(c.timestamp - start) < 1 && (c.endTimestamp == null || Math.abs(c.endTimestamp - end) < 1)
           );
@@ -675,17 +696,44 @@ export default function VideoPage() {
     if (!editLabel.trim()) return;
     const ts = parseTimeInput(editStart);
     const te = parseTimeInput(editEnd);
+    const before = video?.annotations.find(a => a.id === id);
+    const newFields = {
+      label: editLabel.trim(),
+      tags: editTags.split(",").map(t => t.trim()).filter(Boolean),
+      note: editNote.trim() || null,
+      ...(ts > 0 && { timestampStart: ts }),
+      ...(te > 0 && { timestampEnd: te }),
+    };
     await fetch(`/api/videos/${videoId}/annotations`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        annotationId: id,
-        label: editLabel.trim(),
-        tags: editTags.split(",").map(t => t.trim()).filter(Boolean),
-        note: editNote.trim() || null,
-        ...(ts > 0 && { timestampStart: ts }),
-        ...(te > 0 && { timestampEnd: te }),
-      }),
+      body: JSON.stringify({ annotationId: id, ...newFields }),
     });
+    if (before) {
+      pushHistory({
+        label: `${t("history.editAnnotation")} — ${newFields.label.slice(0, 30)}`,
+        undo: async () => {
+          await fetch(`/api/videos/${videoId}/annotations`, {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              annotationId: id,
+              label: before.label,
+              tags: before.tags,
+              note: before.note,
+              timestampStart: before.timestampStart,
+              timestampEnd: before.timestampEnd,
+            }),
+          });
+          await loadVideo();
+        },
+        redo: async () => {
+          await fetch(`/api/videos/${videoId}/annotations`, {
+            method: "PUT", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ annotationId: id, ...newFields }),
+          });
+          await loadVideo();
+        },
+      });
+    }
     setEditingId(null); await loadVideo();
   }
 
@@ -725,6 +773,25 @@ export default function VideoPage() {
         await fetch(`/api/videos/${videoId}/annotations`, {
           method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
         });
+        if (ann) {
+          const recreateBody = {
+            timestampStart: ann.timestampStart, timestampEnd: ann.timestampEnd,
+            label: ann.label, tags: ann.tags, note: ann.note,
+          };
+          const annIdRef = { current: id };
+          pushHistory({
+            label: `${t("history.deletedAnnotation")} — ${ann.label.slice(0, 30)}`,
+            undo: async () => {
+              const r = await fetch(`/api/videos/${videoId}/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(recreateBody) });
+              if (r.ok) annIdRef.current = (await r.json()).id;
+              await loadVideo();
+            },
+            redo: async () => {
+              await fetch(`/api/videos/${videoId}/annotations`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: annIdRef.current }) });
+              await loadVideo();
+            },
+          });
+        }
         await loadVideo();
       },
       () => {},
@@ -752,11 +819,34 @@ export default function VideoPage() {
     const first = video?.annotations.find(a => a.id === ids[0]);
     const label = ids.length === 1 ? (first?.label ?? `#${ids[0]}`) : `${ids.length} ${t("undo.annotations")}`;
     const doDelete = async () => {
+      const snapshots = (video?.annotations ?? []).filter(a => ids.includes(a.id)).map(a => ({
+        timestampStart: a.timestampStart, timestampEnd: a.timestampEnd,
+        label: a.label, tags: a.tags, note: a.note,
+      }));
       for (const id of ids) {
         await fetch(`/api/videos/${videoId}/annotations`, {
           method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
         });
       }
+      const annIdRef = { current: [...ids] };
+      pushHistory({
+        label,
+        undo: async () => {
+          const newIds: number[] = [];
+          for (const body of snapshots) {
+            const r = await fetch(`/api/videos/${videoId}/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+            if (r.ok) newIds.push((await r.json()).id);
+          }
+          annIdRef.current = newIds;
+          await loadVideo();
+        },
+        redo: async () => {
+          for (const id of annIdRef.current) {
+            await fetch(`/api/videos/${videoId}/annotations`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }) });
+          }
+          await loadVideo();
+        },
+      });
       setSelectedIds(new Set());
       await loadVideo();
     };
@@ -1930,6 +2020,9 @@ export default function VideoPage() {
         .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
         .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted)); }
       `}</style>
+
+      {/* ── Undo/redo history panel ── */}
+      <HistoryPanel />
 
       {/* ── Undo toast ── */}
       {pendingDelete && (

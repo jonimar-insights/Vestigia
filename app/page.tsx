@@ -5,6 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
+import HistoryPanel from "@/components/HistoryPanel";
+import { pushHistory } from "@/lib/history";
 import { useLanguage } from "@/components/LanguageProvider";
 import HelpSection from "@/components/HelpSection";
 
@@ -947,6 +949,17 @@ export default function Home() {
   }
 
   const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  // ── Undo/redo history support ──
+  const openListIdRef = useRef<number | null>(null);
+  useEffect(() => { openListIdRef.current = selectedCliplist?.id ?? null; }, [selectedCliplist]);
+  async function refreshAfterItemChange(cliplistId: number) {
+    await loadCliplists();
+    if (openListIdRef.current === cliplistId) {
+      const res = await fetch(`/api/cliplists/${cliplistId}`);
+      if (res.ok) setSelectedCliplist(await res.json());
+    }
+  }
   function handleSearch(q: string) {
     setSearchQuery(q);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -992,19 +1005,35 @@ export default function Home() {
 
   async function addToCliplist(cliplistId: number, result: SearchResult) {
     try {
-      await fetch(`/api/cliplists/${cliplistId}/items`, {
+      const body = {
+        type: result.type,
+        videoId: result.videoId,
+        timestamp: result.timestamp,
+        endTimestamp: result.endTimestamp,
+        title: result.title,
+        detail: result.detail,
+        tags: result.tags,
+      };
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: result.type,
-          videoId: result.videoId,
-          timestamp: result.timestamp,
-          endTimestamp: result.endTimestamp,
-          title: result.title,
-          detail: result.detail,
-          tags: result.tags,
-        }),
+        body: JSON.stringify(body),
       });
+      if (res.ok) {
+        const itemIdRef = { current: (await res.json()).id as number };
+        pushHistory({
+          label: `${t("history.addClip")} — ${(result.title ?? "").slice(0, 30)}`,
+          undo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: itemIdRef.current }) });
+            await refreshAfterItemChange(cliplistId);
+          },
+          redo: async () => {
+            const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+            if (r.ok) itemIdRef.current = (await r.json()).id;
+            await refreshAfterItemChange(cliplistId);
+          },
+        });
+      }
       setAddToDropdown({ index: -1, open: false });
       // Refresh cliplists if on that tab
       if (tab === "cliplists") loadCliplists();
@@ -1056,21 +1085,35 @@ export default function Home() {
     try {
       const items = selectedCliplist?.id === cliplistId ? selectedCliplist.items : [];
       const afterIdx = slideInsertIdx >= 0 && slideInsertIdx < items.length ? slideInsertIdx : null;
+      const body: Record<string, unknown> = {
+        type: "slide",
+        title: slideTitle.trim(),
+        detail: slideDetail.trim() || null,
+        endTimestamp: slideHold ? null : slideDuration,
+        color: slideColor || null,
+        imageUrl: slideImage.trim() || null,
+        ...(afterIdx !== null && items[afterIdx] ? { position: items[afterIdx].position + 1 } : {}),
+      };
       const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "slide",
-          title: slideTitle.trim(),
-          detail: slideDetail.trim() || null,
-          endTimestamp: slideHold ? null : slideDuration,
-          color: slideColor || null,
-          imageUrl: slideImage.trim() || null,
-          ...(afterIdx !== null && items[afterIdx] ? { position: items[afterIdx].position + 1 } : {}),
-        }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) return;
       const created = await res.json();
+      const itemIdRef = { current: created.id as number };
+      pushHistory({
+        label: `${t("history.newSlide")} — ${body.title as string}`,
+        undo: async () => {
+          await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: itemIdRef.current }) });
+          await refreshAfterItemChange(cliplistId);
+        },
+        redo: async () => {
+          const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (r.ok) itemIdRef.current = (await r.json()).id;
+          await refreshAfterItemChange(cliplistId);
+        },
+      });
       // Quick-add: keep the form open, clear text fields, and continue
       // inserting after the slide just created.
       setSlideTitle("");
@@ -1101,6 +1144,8 @@ export default function Home() {
         ? items[slideInsertIdx].position
         : null;
     let added = 0;
+    const createdBodies: Record<string, unknown>[] = [];
+    const idRef = { current: [] as number[] };
     for (const s of slides) {
       const body: Record<string, unknown> = {
         type: "slide",
@@ -1114,8 +1159,25 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.ok) added++;
+      if (res.ok) { added++; createdBodies.push(body); idRef.current.push((await res.json()).id); }
     }
+    if (added > 0) pushHistory({
+      label: `${added} ${t("history.bulkSlides")}`,
+      undo: async () => {
+        for (const id of idRef.current)
+          await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: id }) });
+        await refreshAfterItemChange(cliplistId);
+      },
+      redo: async () => {
+        const ids: number[] = [];
+        for (const body of createdBodies) {
+          const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          if (r.ok) ids.push((await r.json()).id);
+        }
+        idRef.current = ids;
+        await refreshAfterItemChange(cliplistId);
+      },
+    });
     setBulkText("");
     setBulkStatus(`${added} ${t("cliplist.slidesAdded")}`);
     setTimeout(() => setBulkStatus(""), 4000);
@@ -1127,18 +1189,33 @@ export default function Home() {
   }
 
   async function duplicateSlideItem(cliplistId: number, item: SelectedCliplistItem) {
-    await fetch(`/api/cliplists/${cliplistId}/items`, {
+    const body = {
+      type: "slide",
+      title: item.title,
+      detail: item.detail,
+      endTimestamp: item.endTimestamp,
+      color: item.color ?? null,
+      imageUrl: item.imageUrl ?? null,
+      position: item.position + 1,
+    };
+    const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: "slide",
-        title: item.title,
-        detail: item.detail,
-        endTimestamp: item.endTimestamp,
-        color: item.color ?? null,
-        imageUrl: item.imageUrl ?? null,
-        position: item.position + 1,
-      }),
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) return;
+    const itemIdRef = { current: (await res.json()).id as number };
+    pushHistory({
+      label: `${t("history.duplicateSlide")} — ${item.title.slice(0, 30)}`,
+      undo: async () => {
+        await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: itemIdRef.current }) });
+        await refreshAfterItemChange(cliplistId);
+      },
+      redo: async () => {
+        const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        if (r.ok) itemIdRef.current = (await r.json()).id;
+        await refreshAfterItemChange(cliplistId);
+      },
     });
     if (selectedCliplist?.id === cliplistId) {
       const res = await fetch(`/api/cliplists/${cliplistId}`);
@@ -1148,14 +1225,43 @@ export default function Home() {
   }
 
   async function removeClipItem(cliplistId: number, itemId: number) {
+    const snapshot = selectedCliplist?.items.find((i) => i.id === itemId);
     enqueueDelete(
-      selectedCliplist?.items.find((i) => i.id === itemId)?.title?.slice(0, 40) ?? `#${itemId}`,
+      snapshot?.title?.slice(0, 40) ?? `#${itemId}`,
       async () => {
         await fetch(`/api/cliplists/${cliplistId}/items`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ itemId }),
         });
+        if (snapshot) {
+          const item = snapshot as SelectedCliplistItem & { tags?: string[] };
+          const reinsertBody = {
+            type: item.type,
+            videoId: item.videoId,
+            timestamp: item.timestamp,
+            endTimestamp: item.endTimestamp,
+            title: item.title,
+            detail: item.detail,
+            tags: item.tags ?? [],
+            color: item.color ?? null,
+            imageUrl: item.imageUrl ?? null,
+            position: item.position,
+          };
+          const itemIdRef = { current: itemId };
+          pushHistory({
+            label: `${t("history.removedItem")} — ${(item.title ?? "").slice(0, 30)}`,
+            undo: async () => {
+              const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(reinsertBody) });
+              if (r.ok) itemIdRef.current = (await r.json()).id;
+              await refreshAfterItemChange(cliplistId);
+            },
+            redo: async () => {
+              await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: itemIdRef.current }) });
+              await refreshAfterItemChange(cliplistId);
+            },
+          });
+        }
         if (selectedCliplist?.id === cliplistId) {
           setSelectedCliplist((prev) => {
             if (!prev) return prev;
@@ -1171,19 +1277,39 @@ export default function Home() {
 
   async function updateSlideItem(cliplistId: number, itemId: number) {
     if (!editSlideTitle.trim()) return;
+    const before = selectedCliplist?.items.find((i) => i.id === itemId);
     try {
+      const newFields = {
+        title: editSlideTitle.trim(),
+        detail: editSlideDetail.trim() || null,
+        endTimestamp: editSlideHold ? null : editSlideDuration,
+        color: editSlideColor || null,
+        imageUrl: editSlideImage.trim() || null,
+      };
       await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId,
-          title: editSlideTitle.trim(),
-          detail: editSlideDetail.trim() || null,
-          endTimestamp: editSlideHold ? null : editSlideDuration,
-          color: editSlideColor || null,
-          imageUrl: editSlideImage.trim() || null,
-        }),
+        body: JSON.stringify({ itemId, ...newFields }),
       });
+      if (before) {
+        pushHistory({
+          label: `${t("history.editedItem")} — ${newFields.title.slice(0, 30)}`,
+          undo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ itemId, title: before.title, detail: before.detail, endTimestamp: before.endTimestamp, color: before.color ?? null, imageUrl: before.imageUrl ?? null }),
+            });
+            await refreshAfterItemChange(cliplistId);
+          },
+          redo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ itemId, ...newFields }),
+            });
+            await refreshAfterItemChange(cliplistId);
+          },
+        });
+      }
       setEditingSlideId(null);
       if (selectedCliplist?.id === cliplistId) {
         const res = await fetch(`/api/cliplists/${cliplistId}`);
@@ -1195,18 +1321,38 @@ export default function Home() {
 
   async function updateClipItem(cliplistId: number, itemId: number) {
     if (!editClipTitle.trim()) return;
+    const before = selectedCliplist?.items.find((i) => i.id === itemId);
     try {
+      const newFields = {
+        title: editClipTitle.trim(),
+        detail: editClipDetail.trim() || null,
+        timestamp: Math.max(0, editClipStart),
+        endTimestamp: Math.max(0, editClipEnd),
+      };
       await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          itemId,
-          title: editClipTitle.trim(),
-          detail: editClipDetail.trim() || null,
-          timestamp: Math.max(0, editClipStart),
-          endTimestamp: Math.max(0, editClipEnd),
-        }),
+        body: JSON.stringify({ itemId, ...newFields }),
       });
+      if (before) {
+        pushHistory({
+          label: `${t("history.editedItem")} — ${newFields.title.slice(0, 30)}`,
+          undo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ itemId, title: before.title, detail: before.detail, timestamp: before.timestamp, endTimestamp: before.endTimestamp }),
+            });
+            await refreshAfterItemChange(cliplistId);
+          },
+          redo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, {
+              method: "PATCH", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ itemId, ...newFields }),
+            });
+            await refreshAfterItemChange(cliplistId);
+          },
+        });
+      }
       setEditingClipId(null);
       if (selectedCliplist?.id === cliplistId) {
         const res = await fetch(`/api/cliplists/${cliplistId}`);
@@ -1219,6 +1365,7 @@ export default function Home() {
   function handleDropOnItem(targetId: number) {
     if (!selectedCliplist || dragItemId === null || dragItemId === targetId) return;
     const items = [...selectedCliplist.items];
+    const prevOrder = items.map((i) => i.id);
     const from = items.findIndex((i) => i.id === dragItemId);
     if (from === -1) return;
     const [moved] = items.splice(from, 1);
@@ -1228,10 +1375,19 @@ export default function Home() {
     setDragArmedId(null);
     setDragItemId(null);
     setDragOverItemId(null);
-    reorderClipItems(selectedCliplist.id, items.map((i) => i.id));
+    const cliplistId = selectedCliplist.id;
+    const afterOrder = items.map((i) => i.id);
+    void reorderClipItems(cliplistId, afterOrder).then((ok) => {
+      if (!ok) return;
+      pushHistory({
+        label: t("history.reorder"),
+        undo: async () => { await fetch(`/api/cliplists/${cliplistId}/items`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: prevOrder }) }); await refreshAfterItemChange(cliplistId); },
+        redo: async () => { await fetch(`/api/cliplists/${cliplistId}/items`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ order: afterOrder }) }); await refreshAfterItemChange(cliplistId); },
+      });
+    });
   }
 
-  async function reorderClipItems(cliplistId: number, orderedIds: number[]) {
+  async function reorderClipItems(cliplistId: number, orderedIds: number[]): Promise<boolean> {
     try {
       const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "PATCH",
@@ -1240,8 +1396,10 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("reorder failed");
       await loadCliplists();
+      return true;
     } catch {
       openCliplist(cliplistId); // refetch to roll back optimistic order
+      return false;
     }
   }
 
@@ -3419,6 +3577,9 @@ export default function Home() {
       {slideshowItems && (
         <VideoPlaylistPlayer items={slideshowItems} onClose={() => setSlideshowItems(null)} />
       )}
+
+      {/* ── Undo/redo history panel ── */}
+      <HistoryPanel />
 
       {/* ── Undo toast ── */}
       {pendingDelete && (
