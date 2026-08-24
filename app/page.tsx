@@ -1229,12 +1229,12 @@ export default function Home() {
     enqueueDelete(
       snapshot?.title?.slice(0, 40) ?? `#${itemId}`,
       async () => {
-        await fetch(`/api/cliplists/${cliplistId}/items`, {
+        const delRes = await fetch(`/api/cliplists/${cliplistId}/items`, {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ itemId }),
         });
-        if (snapshot) {
+        if (delRes.ok && snapshot) {
           const item = snapshot as SelectedCliplistItem & { tags?: string[] };
           const reinsertBody = {
             type: item.type,
@@ -1286,11 +1286,12 @@ export default function Home() {
         color: editSlideColor || null,
         imageUrl: editSlideImage.trim() || null,
       };
-      await fetch(`/api/cliplists/${cliplistId}/items`, {
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId, ...newFields }),
       });
+      if (!res.ok) return; // keep the form open so the user can retry
       if (before) {
         pushHistory({
           label: `${t("history.editedItem")} — ${newFields.title.slice(0, 30)}`,
@@ -1329,11 +1330,12 @@ export default function Home() {
         timestamp: Math.max(0, editClipStart),
         endTimestamp: Math.max(0, editClipEnd),
       };
-      await fetch(`/api/cliplists/${cliplistId}/items`, {
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemId, ...newFields }),
       });
+      if (!res.ok) return; // keep the form open so the user can retry
       if (before) {
         pushHistory({
           label: `${t("history.editedItem")} — ${newFields.title.slice(0, 30)}`,

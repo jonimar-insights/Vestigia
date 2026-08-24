@@ -770,9 +770,10 @@ export default function VideoPage() {
     enqueueDelete(
       ann?.label ?? `#${id}`,
       async () => {
-        await fetch(`/api/videos/${videoId}/annotations`, {
+        const delRes = await fetch(`/api/videos/${videoId}/annotations`, {
           method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
         });
+        if (!delRes.ok) return;
         if (ann) {
           const recreateBody = {
             timestampStart: ann.timestampStart, timestampEnd: ann.timestampEnd,
@@ -823,11 +824,14 @@ export default function VideoPage() {
         timestampStart: a.timestampStart, timestampEnd: a.timestampEnd,
         label: a.label, tags: a.tags, note: a.note,
       }));
+      let deletedAny = false;
       for (const id of ids) {
-        await fetch(`/api/videos/${videoId}/annotations`, {
+        const r = await fetch(`/api/videos/${videoId}/annotations`, {
           method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
         });
+        if (r.ok) deletedAny = true;
       }
+      if (!deletedAny) return;
       const annIdRef = { current: [...ids] };
       pushHistory({
         label,

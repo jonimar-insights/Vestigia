@@ -51,6 +51,10 @@ export async function undoHistory(): Promise<boolean> {
     await entry.undo();
     set({ pointer: state.pointer - 1 });
     return true;
+  } catch (err) {
+    console.error("history undo failed", err);
+    // Pointer unchanged — the failed entry stays current and retriable
+    return false;
   } finally {
     set({ busy: false });
   }
@@ -64,6 +68,9 @@ export async function redoHistory(): Promise<boolean> {
     await entry.redo();
     set({ pointer: state.pointer + 1 });
     return true;
+  } catch (err) {
+    console.error("history redo failed", err);
+    return false;
   } finally {
     set({ busy: false });
   }
