@@ -29,7 +29,7 @@ export async function PATCH(
   }
 
   const body = await request.json();
-  const { itemId, title, detail, endTimestamp, timestamp, order } = body;
+  const { itemId, title, detail, endTimestamp, timestamp, order, color, imageUrl } = body;
 
   // Reorder mode: body { order: number[] } — full list of item ids in the
   // desired playback order. Items not included keep their old position.
@@ -64,12 +64,27 @@ export async function PATCH(
   const updateData: Record<string, unknown> = {};
   if (title !== undefined) updateData.title = title.trim();
   if (detail !== undefined) updateData.detail = detail || null;
-  if (endTimestamp !== undefined) {
+  if (endTimestamp === null) {
+    // Slides support "hold" mode: NULL means wait for manual advance.
+    updateData.endTimestamp = null;
+  } else if (endTimestamp !== undefined) {
     const end = Number(endTimestamp);
     if (!Number.isFinite(end) || end < 0) {
-      return NextResponse.json({ error: "endTimestamp must be a non-negative number" }, { status: 400 });
+      return NextResponse.json({ error: "endTimestamp must be a non-negative number or null" }, { status: 400 });
     }
     updateData.endTimestamp = end;
+  }
+  if (color !== undefined) {
+    if (color !== null && (typeof color !== "string" || color.length > 32)) {
+      return NextResponse.json({ error: "color must be a string of at most 32 characters or null" }, { status: 400 });
+    }
+    updateData.color = color || null;
+  }
+  if (imageUrl !== undefined) {
+    if (imageUrl !== null && (typeof imageUrl !== "string" || imageUrl.length > 2048 || !/^https?:\/\//i.test(imageUrl))) {
+      return NextResponse.json({ error: "imageUrl must be an http(s) URL or null" }, { status: 400 });
+    }
+    updateData.imageUrl = imageUrl || null;
   }
   if (timestamp !== undefined) {
     const start = Number(timestamp);
@@ -79,9 +94,9 @@ export async function PATCH(
     updateData.timestamp = start;
   }
   if (
-    updateData.timestamp !== undefined &&
-    updateData.endTimestamp !== undefined &&
-    (updateData.endTimestamp as number) <= (updateData.timestamp as number)
+    typeof updateData.timestamp === "number" &&
+    typeof updateData.endTimestamp === "number" &&
+    updateData.endTimestamp <= updateData.timestamp
   ) {
     return NextResponse.json({ error: "endTimestamp must be greater than timestamp" }, { status: 400 });
   }
@@ -133,21 +148,55 @@ export async function POST(
   }
 
   const body = await request.json();
-  const { type, videoId, timestamp, endTimestamp, title, detail, tags } = body;
+  const { type, videoId, timestamp, endTimestamp, title, detail, tags, position, color, imageUrl } = body;
 
   if (!type || !title) {
     return NextResponse.json({ error: "Missing required fields: type, title" }, { status: 400 });
   }
 
-  // New items are appended at the end of the playback order
+  if (color !== undefined && color !== null && (typeof color !== "string" || color.length > 32)) {
+    return NextResponse.json({ error: "color must be a string of at most 32 characters or null" }, { status: 400 });
+  }
+  if (imageUrl !== undefined && imageUrl !== null &&
+      (typeof imageUrl !== "string" || imageUrl.length > 2048 || !/^https?:\/\//i.test(imageUrl))) {
+    return NextResponse.json({ error: "imageUrl must be an http(s) URL or null" }, { status: 400 });
+  }
+
+  // New items are appended at the end of the playback order, unless an
+  // explicit insert position is requested (existing items shift down).
   const [maxRow] = await db
     .select({ maxPos: sql<number>`coalesce(max(${clipItems.position}), -1)` })
     .from(clipItems)
     .where(eq(clipItems.cliplistId, listId));
-  const nextPosition = Number(maxRow?.maxPos ?? -1) + 1;
+  const maxPos = Number(maxRow?.maxPos ?? -1);
+  let nextPosition = maxPos + 1;
+  if (Number.isInteger(position) && (position as number) >= 0 && (position as number) <= maxPos + 1) {
+    nextPosition = position as number;
+    if (nextPosition <= maxPos) {
+      await db
+        .update(clipItems)
+        .set({ position: sql`${clipItems.position} + 1` })
+        .where(and(eq(clipItems.cliplistId, listId), sql`${clipItems.position} >= ${nextPosition}`));
+    }
+  }
 
-  // Slides don't need videoId/timestamp — they're inter-title cards
+  const extraSlideFields = {
+    color: color || null,
+    imageUrl: imageUrl || null,
+  };
+
+  // Slides don't need videoId/timestamp — they're inter-title cards.
+  // endTimestamp stores the display duration in seconds; null = hold.
   if (type === "slide") {
+    let slideEnd: number | null = 5;
+    if (endTimestamp === null) slideEnd = null;
+    else if (endTimestamp !== undefined) {
+      const d = Number(endTimestamp);
+      if (!Number.isFinite(d) || d < 0 || d > 3600) {
+        return NextResponse.json({ error: "slide duration must be between 0 and 3600 seconds or null" }, { status: 400 });
+      }
+      slideEnd = d;
+    }
     const [result] = await db
       .insert(clipItems)
       .values({
@@ -155,10 +204,11 @@ export async function POST(
         type,
         videoId: 0,
         timestamp: 0,
-        endTimestamp: null,
+        endTimestamp: slideEnd,
         title,
         detail: detail || null,
         tags: tags ? JSON.stringify(tags) : null,
+        ...extraSlideFields,
         position: nextPosition,
       })
       .returning();
@@ -188,7 +238,6 @@ export async function POST(
       position: nextPosition,
     })
     .returning();
-
   await db.update(cliplists)
     .set({ updatedAt: new Date().toISOString() })
     .where(eq(cliplists.id, listId));

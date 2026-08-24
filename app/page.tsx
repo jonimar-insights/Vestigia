@@ -53,6 +53,8 @@ interface CliplistWithItems extends Cliplist {
   items: ClipItem[];
 }
 
+type SelectedCliplistItem = CliplistWithItems["items"][number];
+
 type Tab = "import" | "search" | "cliplists" | "settings" | "help";
 
 function isPlaylistUrl(u: string) {
@@ -74,6 +76,31 @@ function highlight(text: string, query: string) {
       )
     }</>
   );
+}
+
+// Dark slide themes that read well with white text in the playlist player
+const SLIDE_COLORS = ["", "#1e1b4b", "#312e81", "#134e4a", "#0c4a6e", "#4c1d95", "#3f3f46", "#713f12"];
+
+function parseBulkSlides(text: string): Array<{ title: string; detail: string | null; endTimestamp: number | null }> {
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|").map((p) => p.trim());
+      const title = parts[0] || "";
+      const detail = parts[1] || null;
+      let endTimestamp: number | null = 5;
+      if (parts[2]) {
+        if (/^hold$/i.test(parts[2])) endTimestamp = null;
+        else {
+          const n = Number(parts[2]);
+          endTimestamp = Number.isFinite(n) && n > 0 ? Math.min(3600, n) : 5;
+        }
+      }
+      return { title, detail, endTimestamp };
+    })
+    .filter((s) => s.title);
 }
 
 export default function Home() {
@@ -121,6 +148,13 @@ export default function Home() {
   const [slideTitle, setSlideTitle] = useState("");
   const [slideDetail, setSlideDetail] = useState("");
   const [slideDuration, setSlideDuration] = useState(5);
+  const [slideHold, setSlideHold] = useState(false);
+  const [slideColor, setSlideColor] = useState("");
+  const [slideImage, setSlideImage] = useState("");
+  const [slideInsertIdx, setSlideInsertIdx] = useState(-1); // -1 = at end, else insert after items[idx]
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkStatus, setBulkStatus] = useState("");
   const [dragArmedId, setDragArmedId] = useState<number | null>(null);
   const [dragItemId, setDragItemId] = useState<number | null>(null);
   const [dragOverItemId, setDragOverItemId] = useState<number | null>(null);
@@ -128,6 +162,9 @@ export default function Home() {
   const [editSlideTitle, setEditSlideTitle] = useState("");
   const [editSlideDetail, setEditSlideDetail] = useState("");
   const [editSlideDuration, setEditSlideDuration] = useState(5);
+  const [editSlideHold, setEditSlideHold] = useState(false);
+  const [editSlideColor, setEditSlideColor] = useState("");
+  const [editSlideImage, setEditSlideImage] = useState("");
   const [editingClipId, setEditingClipId] = useState<number | null>(null);
   const [editClipTitle, setEditClipTitle] = useState("");
   const [editClipDetail, setEditClipDetail] = useState("");
@@ -938,27 +975,97 @@ export default function Home() {
   async function addSlide(cliplistId: number) {
     if (!slideTitle.trim()) return;
     try {
-      await fetch(`/api/cliplists/${cliplistId}/items`, {
+      const items = selectedCliplist?.id === cliplistId ? selectedCliplist.items : [];
+      const afterIdx = slideInsertIdx >= 0 && slideInsertIdx < items.length ? slideInsertIdx : null;
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: "slide",
           title: slideTitle.trim(),
           detail: slideDetail.trim() || null,
-          endTimestamp: slideDuration,
+          endTimestamp: slideHold ? null : slideDuration,
+          color: slideColor || null,
+          imageUrl: slideImage.trim() || null,
+          ...(afterIdx !== null && items[afterIdx] ? { position: items[afterIdx].position + 1 } : {}),
         }),
       });
+      if (!res.ok) return;
+      const created = await res.json();
+      // Quick-add: keep the form open, clear text fields, and continue
+      // inserting after the slide just created.
       setSlideTitle("");
       setSlideDetail("");
-      setSlideDuration(5);
-      setShowSlideForm(false);
-      // Refresh the current cliplist view
+      setSlideImage("");
+      setShowSlideForm(true);
+      // Refresh the current cliplist view and point the insert position at
+      // the newly created slide so consecutive adds stay in sequence.
       if (selectedCliplist?.id === cliplistId) {
-        const res = await fetch(`/api/cliplists/${cliplistId}`);
-        if (res.ok) setSelectedCliplist(await res.json());
+        const r2 = await fetch(`/api/cliplists/${cliplistId}`);
+        if (r2.ok) {
+          const fresh = await r2.json();
+          setSelectedCliplist(fresh);
+          const idx = (fresh.items as Array<{ id: number }>).findIndex((i) => i.id === created.id);
+          setSlideInsertIdx(idx >= 0 ? idx : -1);
+        }
       }
       await loadCliplists();
     } catch {}
+  }
+
+  async function addBulkSlides(cliplistId: number) {
+    const slides = parseBulkSlides(bulkText);
+    if (slides.length === 0) return;
+    const items = selectedCliplist?.id === cliplistId ? selectedCliplist.items : [];
+    let afterPos: number | null =
+      slideInsertIdx >= 0 && slideInsertIdx < items.length && items[slideInsertIdx]
+        ? items[slideInsertIdx].position
+        : null;
+    let added = 0;
+    for (const s of slides) {
+      const body: Record<string, unknown> = {
+        type: "slide",
+        title: s.title,
+        detail: s.detail,
+        endTimestamp: s.endTimestamp,
+      };
+      if (afterPos !== null) { body.position = afterPos + 1; afterPos = afterPos + 1; }
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) added++;
+    }
+    setBulkText("");
+    setBulkStatus(`${added} ${t("cliplist.slidesAdded")}`);
+    setTimeout(() => setBulkStatus(""), 4000);
+    if (selectedCliplist?.id === cliplistId) {
+      const r2 = await fetch(`/api/cliplists/${cliplistId}`);
+      if (r2.ok) setSelectedCliplist(await r2.json());
+    }
+    await loadCliplists();
+  }
+
+  async function duplicateSlideItem(cliplistId: number, item: SelectedCliplistItem) {
+    await fetch(`/api/cliplists/${cliplistId}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "slide",
+        title: item.title,
+        detail: item.detail,
+        endTimestamp: item.endTimestamp,
+        color: item.color ?? null,
+        imageUrl: item.imageUrl ?? null,
+        position: item.position + 1,
+      }),
+    });
+    if (selectedCliplist?.id === cliplistId) {
+      const res = await fetch(`/api/cliplists/${cliplistId}`);
+      if (res.ok) setSelectedCliplist(await res.json());
+    }
+    await loadCliplists();
   }
 
   async function removeClipItem(cliplistId: number, itemId: number) {
@@ -986,7 +1093,9 @@ export default function Home() {
           itemId,
           title: editSlideTitle.trim(),
           detail: editSlideDetail.trim() || null,
-          endTimestamp: editSlideDuration,
+          endTimestamp: editSlideHold ? null : editSlideDuration,
+          color: editSlideColor || null,
+          imageUrl: editSlideImage.trim() || null,
         }),
       });
       setEditingSlideId(null);
@@ -2301,7 +2410,7 @@ export default function Home() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => { setShowSlideForm(!showSlideForm); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
+                        onClick={() => { setShowSlideForm(!showSlideForm); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); setSlideInsertIdx(-1); setBulkMode(false); setBulkText(""); setBulkStatus(""); }}
                         className="text-xs text-muted hover:text-accent transition-colors"
                         title={t("cliplist.addSlideBetween")}
                       >
@@ -2358,52 +2467,144 @@ export default function Home() {
 
                   {/* Inline slide form */}
                   {showSlideForm && (
-                    <div className="border-b border-border bg-surface-hover/20 px-4 py-3">
-                      <form
-                        onSubmit={(e) => { e.preventDefault(); addSlide(selectedCliplist.id); }}
-                        className="flex items-center gap-2"
-                      >
-                        <input
-                          autoFocus
-                          type="text"
-                          value={slideTitle}
-                          onChange={(e) => setSlideTitle(e.target.value)}
-                          placeholder={t("cliplist.slideTitle")}
-                          className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                        />
-                        <input
-                          type="text"
-                          value={slideDetail}
-                          onChange={(e) => setSlideDetail(e.target.value)}
-                          placeholder={t("cliplist.slideSubtitle")}
-                          className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                        />
-                        <div className="flex items-center gap-1 shrink-0">
-                          <input
-                            type="number"
-                            min={1}
-                            max={120}
-                            value={slideDuration}
-                            onChange={(e) => setSlideDuration(Math.max(1, Number(e.target.value)))}
-                            className="w-14 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                          <span className="text-[10px] text-muted">sec</span>
-                        </div>
-                        <button
-                          type="submit"
-                          disabled={!slideTitle.trim()}
-                          className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+                    <div className="border-b border-border bg-surface-hover/20 px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={slideInsertIdx}
+                          onChange={(e) => setSlideInsertIdx(Number(e.target.value))}
+                          className="rounded-lg border border-border bg-background px-2 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none max-w-[40%] shrink-0"
+                          title={t("cliplist.insertAt")}
                         >
-                          {t("cliplist.addSlide")}
-                        </button>
+                          <option value={-1}>{t("cliplist.insertEnd")}</option>
+                          {selectedCliplist.items.map((it, i) => (
+                            <option key={it.id} value={i}>
+                              {(it.type === "slide" ? t("cliplist.slideBadge") : formatTs(it.timestamp)) + " · " + (it.title.length > 24 ? it.title.slice(0, 24) + "…" : it.title)}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-[9px] text-muted/50 shrink-0">{t("cliplist.insertAfterHint")}</span>
+                        <div className="flex-1" />
                         <button
                           type="button"
-                          onClick={() => { setShowSlideForm(false); setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setEditingSlideId(null); }}
-                          className="text-[10px] text-muted hover:text-foreground transition-colors"
+                          onClick={() => { setBulkMode(!bulkMode); setBulkStatus(""); }}
+                          className={`text-[10px] px-2 py-1 rounded-md border transition-colors ${bulkMode ? "border-accent text-accent bg-accent/10" : "border-border text-muted hover:text-foreground"}`}
                         >
-                          {t("cliplist.cancelSlide")}
+                          {t("cliplist.bulkAdd")}
                         </button>
-                      </form>
+                      </div>
+
+                      {bulkMode ? (
+                        <>
+                          <textarea
+                            autoFocus
+                            value={bulkText}
+                            onChange={(e) => setBulkText(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); addBulkSlides(selectedCliplist.id); } }}
+                            rows={5}
+                            placeholder={t("cliplist.bulkPlaceholder")}
+                            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs font-mono focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none resize-y"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={!parseBulkSlides(bulkText).length}
+                              onClick={() => addBulkSlides(selectedCliplist.id)}
+                              className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
+                            >
+                              {t("cliplist.bulkImport")}
+                            </button>
+                            <span className="text-[10px] text-muted">{parseBulkSlides(bulkText).length} {t("cliplist.slidesDetected")}</span>
+                            {bulkStatus && <span className="text-[10px] text-accent">{bulkStatus}</span>}
+                          </div>
+                        </>
+                      ) : (
+                        <form
+                          onSubmit={(e) => { e.preventDefault(); addSlide(selectedCliplist.id); }}
+                          className="space-y-2"
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              autoFocus
+                              type="text"
+                              value={slideTitle}
+                              onChange={(e) => setSlideTitle(e.target.value)}
+                              placeholder={t("cliplist.slideTitle")}
+                              className="flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                            />
+                            <input
+                              type="text"
+                              value={slideDetail}
+                              onChange={(e) => setSlideDetail(e.target.value)}
+                              placeholder={t("cliplist.slideSubtitle")}
+                              className="hidden sm:block flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                            />
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                            <div className="flex items-center gap-1">
+                              {[5, 10, 15, 30, 60].map((d) => (
+                                <button
+                                  key={d}
+                                  type="button"
+                                  onClick={() => { setSlideDuration(d); setSlideHold(false); }}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${!slideHold && slideDuration === d ? "bg-accent text-white" : "text-muted hover:text-foreground border border-border"}`}
+                                >
+                                  {d}s
+                                </button>
+                              ))}
+                              {!slideHold && (
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={3600}
+                                  value={slideDuration}
+                                  onChange={(e) => setSlideDuration(Math.max(1, Number(e.target.value)))}
+                                  className="w-14 rounded-lg border border-border bg-background px-2 py-1 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
+                              )}
+                              <label className="flex items-center gap-1 ml-1 cursor-pointer">
+                                <input type="checkbox" checked={slideHold} onChange={(e) => setSlideHold(e.target.checked)} className="accent-accent h-3 w-3" />
+                                <span className="text-[10px] text-muted">{t("cliplist.holdSlide")}</span>
+                              </label>
+                            </div>
+                            <div className="flex items-center gap-1" title={t("cliplist.theme")}>
+                              {SLIDE_COLORS.map((c) => (
+                                <button
+                                  key={c || "none"}
+                                  type="button"
+                                  onClick={() => setSlideColor(c)}
+                                  className={`w-4 h-4 rounded-full border transition-all ${slideColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-surface scale-110" : "border-border/60"} ${c ? "" : "bg-gradient-to-br from-white/10 to-transparent checkerboard"}`}
+                                  style={c ? { backgroundColor: c } : undefined}
+                                />
+                              ))}
+                            </div>
+                            <input
+                              type="url"
+                              value={slideImage}
+                              onChange={(e) => setSlideImage(e.target.value)}
+                              placeholder={t("cliplist.imageUrl")}
+                              className="flex-1 min-w-[140px] rounded-lg border border-border bg-background px-2 py-1 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                            />
+                            <button
+                              type="submit"
+                              disabled={!slideTitle.trim()}
+                              className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all shrink-0"
+                            >
+                              {t("cliplist.addSlide")}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowSlideForm(false);
+                                setSlideTitle(""); setSlideDetail(""); setSlideDuration(5); setSlideHold(false);
+                                setSlideColor(""); setSlideImage(""); setSlideInsertIdx(-1); setBulkMode(false); setBulkText("");
+                              }}
+                              className="text-[10px] text-muted hover:text-foreground transition-colors shrink-0"
+                            >
+                              {t("cliplist.cancelSlide")}
+                            </button>
+                          </div>
+                        </form>
+                      )}
                     </div>
                   )}
 
@@ -2440,47 +2641,86 @@ export default function Home() {
                               /* ── Slide edit form ── */
                               <form
                                 onSubmit={(e) => { e.preventDefault(); updateSlideItem(selectedCliplist.id, item.id); }}
-                                className="flex items-center gap-2 w-full"
+                                className="w-full space-y-2 py-1"
                               >
-                                <input
-                                  autoFocus
-                                  type="text"
-                                  value={editSlideTitle}
-                                  onChange={(e) => setEditSlideTitle(e.target.value)}
-                                  className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                                />
-                                <input
-                                  type="text"
-                                  value={editSlideDetail}
-                                  onChange={(e) => setEditSlideDetail(e.target.value)}
-                                  placeholder={t("cliplist.editSubtitle")}
-                                  className="hidden sm:block flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
-                                />
-                                <div className="flex items-center gap-1 shrink-0">
+                                <div className="flex items-center gap-2">
                                   <input
-                                    type="number"
-                                    min={1}
-                                    max={120}
-                                    value={editSlideDuration}
-                                    onChange={(e) => setEditSlideDuration(Math.max(1, Number(e.target.value)))}
-                                    className="w-14 rounded-lg border border-border bg-background px-2 py-1.5 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                    autoFocus
+                                    type="text"
+                                    value={editSlideTitle}
+                                    onChange={(e) => setEditSlideTitle(e.target.value)}
+                                    className="flex-1 min-w-0 rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                                   />
-                                  <span className="text-[10px] text-muted">sec</span>
+                                  <button
+                                    type="submit"
+                                    disabled={!editSlideTitle.trim()}
+                                    className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all shrink-0"
+                                  >
+                                    {t("cliplist.saveSlide")}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingSlideId(null)}
+                                    className="text-[10px] text-muted hover:text-foreground transition-colors shrink-0"
+                                  >
+                                    {t("cliplist.cancelEdit")}
+                                  </button>
                                 </div>
-                                <button
-                                  type="submit"
-                                  disabled={!editSlideTitle.trim()}
-                                  className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all"
-                                >
-                                  {t("cliplist.saveSlide")}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingSlideId(null)}
-                                  className="text-[10px] text-muted hover:text-foreground transition-colors"
-                                >
-                                  {t("cliplist.cancelEdit")}
-                                </button>
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                  <input
+                                    type="text"
+                                    value={editSlideDetail}
+                                    onChange={(e) => setEditSlideDetail(e.target.value)}
+                                    placeholder={t("cliplist.editSubtitle")}
+                                    className="flex-1 min-w-[140px] rounded-lg border border-border bg-background px-3 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                  />
+                                  {!editSlideHold && (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      {[5, 10, 15, 30, 60].map((d) => (
+                                        <button
+                                          key={d}
+                                          type="button"
+                                          onClick={() => setEditSlideDuration(d)}
+                                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors ${editSlideDuration === d ? "bg-accent text-white" : "text-muted hover:text-foreground border border-border"}`}
+                                        >
+                                          {d}s
+                                        </button>
+                                      ))}
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={3600}
+                                        value={editSlideDuration}
+                                        onChange={(e) => setEditSlideDuration(Math.max(1, Number(e.target.value)))}
+                                        className="w-14 rounded-lg border border-border bg-background px-2 py-1 text-xs text-center focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                      />
+                                    </div>
+                                  )}
+                                  <label className="flex items-center gap-1 cursor-pointer shrink-0">
+                                    <input type="checkbox" checked={editSlideHold} onChange={(e) => setEditSlideHold(e.target.checked)} className="accent-accent h-3 w-3" />
+                                    <span className="text-[10px] text-muted">{t("cliplist.holdSlide")}</span>
+                                  </label>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                                  <div className="flex items-center gap-1" title={t("cliplist.theme")}>
+                                    {SLIDE_COLORS.map((c) => (
+                                      <button
+                                        key={c || "none"}
+                                        type="button"
+                                        onClick={() => setEditSlideColor(c)}
+                                        className={`w-4 h-4 rounded-full border transition-all ${editSlideColor === c ? "ring-2 ring-accent ring-offset-1 ring-offset-surface scale-110" : "border-border/60"} ${c ? "" : "bg-gradient-to-br from-white/10 to-transparent"}`}
+                                        style={c ? { backgroundColor: c } : undefined}
+                                      />
+                                    ))}
+                                  </div>
+                                  <input
+                                    type="url"
+                                    value={editSlideImage}
+                                    onChange={(e) => setEditSlideImage(e.target.value)}
+                                    placeholder={t("cliplist.imageUrl")}
+                                    className="flex-1 min-w-[140px] rounded-lg border border-border bg-background px-2 py-1 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                                  />
+                                </div>
                               </form>
                             ) : (
                             /* ── Slide card ── */
@@ -2494,8 +2734,16 @@ export default function Home() {
                                 <div className="min-w-0 flex-1">
                                   <div className="flex items-center gap-1.5 mb-0.5">
                                     <span className="text-[9px] uppercase font-medium text-purple-400 bg-purple-500/10 px-1 py-0.5 rounded">{t("cliplist.slideBadge")}</span>
-                                    {item.endTimestamp && (
+                                    {item.endTimestamp == null ? (
+                                      <span className="text-[9px] font-mono text-accent/70">{t("cliplist.holdBadge")}</span>
+                                    ) : (
                                       <span className="text-[9px] font-mono text-muted/50">{item.endTimestamp}s</span>
+                                    )}
+                                    {item.color && (
+                                      <span className="w-2.5 h-2.5 rounded-full border border-border/60 inline-block" style={{ backgroundColor: item.color }} title={item.color} />
+                                    )}
+                                    {item.imageUrl && (
+                                      <svg className="w-3 h-3 text-muted/50" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
                                     )}
                                   </div>
                                   <p className="text-xs font-medium truncate">{item.title}</p>
@@ -2504,9 +2752,16 @@ export default function Home() {
                                   )}
                                 </div>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0">
+                                <div className="flex items-center gap-1 shrink-0">
                                 <button
-                                  onClick={() => { setEditingSlideId(item.id); setEditSlideTitle(item.title); setEditSlideDetail(item.detail ?? ""); setEditSlideDuration(item.endTimestamp ?? 5); }}
+                                  onClick={() => duplicateSlideItem(selectedCliplist.id, item)}
+                                  className="p-1 rounded text-muted/40 hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover/item:opacity-100"
+                                  title={t("cliplist.duplicate")}
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
+                                </button>
+                                <button
+                                  onClick={() => { setEditingSlideId(item.id); setEditSlideTitle(item.title); setEditSlideDetail(item.detail ?? ""); setEditSlideDuration(item.endTimestamp ?? 5); setEditSlideHold(item.endTimestamp == null); setEditSlideColor(item.color ?? ""); setEditSlideImage(item.imageUrl ?? ""); }}
                                   className="p-1 rounded text-muted/40 hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover/item:opacity-100"
                                   title={t("cliplist.editSlide")}
                                 >

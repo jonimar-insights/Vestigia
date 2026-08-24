@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, real, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, real, varchar, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
@@ -105,6 +105,8 @@ export const clipItems = pgTable("clip_items", {
   title: text("title").notNull(),
   detail: text("detail"),
   tags: text("tags"), // JSON array of strings
+  color: varchar("color", { length: 32 }),
+  imageUrl: text("image_url"),
   position: integer("position").notNull().default(0),
   createdAt: text("created_at")
     .notNull()

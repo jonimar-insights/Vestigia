@@ -70,6 +70,9 @@ export interface ClipItem {
   title: string;
   detail: string | null;
   tags: string[];
+  color?: string | null;
+  imageUrl?: string | null;
+  position: number;
   createdAt: string;
   videoTitle: string | null;
   videoThumbnail: string | null;
@@ -181,7 +184,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     const cur = itemsRef.current[currentIdx];
     if (cur?.type === "slide") {
       clearTimeInterval();
-      const ms = (cur.endTimestamp ?? 5) * 1000;
+      // Hold mode: endTimestamp null = wait for manual advance (Next/arrows).
+      if (cur.endTimestamp == null) {
+        slideDeadlineRef.current = null;
+        setSlideRemainingSec(null);
+        return;
+      }
+      const ms = cur.endTimestamp * 1000;
       slideDeadlineRef.current = { start: Date.now(), ms };
       setSlideRemainingSec(ms / 1000);
       timeIntervalRef.current = setInterval(() => {
@@ -549,8 +558,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     : null;
   const remainingSec = items.reduce((acc, it, i) => {
     if (i < currentIdx) return acc;
-    if (it.type === "slide") return acc + (it.endTimestamp ?? 5);
-    const end = i === currentIdx ? clipEnd : (it.endTimestamp ?? it.timestamp + 30);
+    if (it.type === "slide") return acc + (it.endTimestamp ?? 5);    const end = i === currentIdx ? clipEnd : (it.endTimestamp ?? it.timestamp + 30);
     const start = i === currentIdx ? Math.min(currentTime, end) : it.timestamp;
     return acc + Math.max(0, end - start);
   }, 0);
@@ -623,13 +631,26 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               ) : null
             )}
             {isSlide && (
-              <div className="absolute inset-0 flex items-end justify-center px-12 pt-10 pb-14 bg-black">
-                <div className="text-center max-w-2xl w-full">
-                  <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
-                    <svg className="w-8 h-8 text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1l2.5-1.5A1 1 0 0121 7v10a1 1 0 01-1.5.86L17 16v1a2 2 0 01-2 2z" />
-                    </svg>
-                  </div>
+              <div
+                className="absolute inset-0 flex items-end justify-center px-12 pt-10 pb-14 bg-black"
+                style={item?.color ? { backgroundColor: item.color } : undefined}
+              >
+                <div className="text-center max-w-2xl w-full max-h-full flex flex-col items-center">
+                  {item?.imageUrl && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={item.imageUrl}
+                      alt=""
+                      className="mb-5 max-h-[45%] max-w-full object-contain rounded-lg shadow-lg"
+                    />
+                  )}
+                  {!item?.imageUrl && (
+                    <div className="w-16 h-16 mx-auto mb-6 shrink-0 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
+                      <svg className="w-8 h-8 text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1l2.5-1.5A1 1 0 0121 7v10a1 1 0 01-1.5.86L17 16v1a2 2 0 01-2 2z" />
+                      </svg>
+                    </div>
+                  )}
                   <h2 className="text-2xl font-bold text-white mb-3">{item.title}</h2>
                   {item.detail && (
                     <div
@@ -639,7 +660,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   )}
                   <div className="mt-8 flex items-center justify-center gap-2 text-white/30 text-xs">
                     <div className="w-1.5 h-1.5 rounded-full bg-purple-400/50 animate-pulse" />
-                    Auto-advancing in {Math.ceil(slideRemainingSec ?? 0)}s
+                    {slideRemainingSec === null
+                      ? <>Holding — press <span className="text-white/50 font-medium">Next</span> or → to continue</>
+                      : <>Auto-advancing in {Math.ceil(slideRemainingSec)}s</>}
                   </div>
                 </div>
               </div>
@@ -797,7 +820,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                       <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-white/40">{i + 1}</span>
                     )}
                     <span className="absolute bottom-0 right-0 bg-black/75 text-[8px] font-mono px-0.5 rounded-tl text-white/80">
-                      {it.type === "slide" ? (it.endTimestamp ?? 5) + "s" : formatTs(it.timestamp)}
+                      {it.type === "slide" ? (it.endTimestamp == null ? "hold" : it.endTimestamp + "s") : formatTs(it.timestamp)}
                     </span>
                   </span>
                   <span className="min-w-0">
