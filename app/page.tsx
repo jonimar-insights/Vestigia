@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
@@ -196,6 +196,19 @@ export default function Home() {
   const [selectedVideoIds, setSelectedVideoIds] = useState<Set<number>>(new Set());
   const [bulkFolderDropdown, setBulkFolderDropdown] = useState(false);
   const [bulkDeleteProgress, setBulkDeleteProgress] = useState<{ done: number; total: number } | null>(null);
+
+  // ── Undoable deletes: hide immediately, commit the server DELETE after a
+  // short delay unless the user hits Undo. Nothing is sent before the timeout,
+  // so Undo is a pure client-side cancel. ──
+  const UNDO_MS = 8000;
+  interface PendingDelete { label: string; commit: () => Promise<void>; revert: () => void; }
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const pendingRef = useRef<PendingDelete | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingVideoIds, setPendingVideoIds] = useState<number[]>([]);
+  const [pendingFolderIds, setPendingFolderIds] = useState<number[]>([]);
+  const [pendingCliplistIds, setPendingCliplistIds] = useState<number[]>([]);
+  const [pendingItemIds, setPendingItemIds] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   // ── Share dialog state ──
@@ -432,10 +445,52 @@ export default function Home() {
     }
   }
 
+  function flushPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingVideoIds([]); setPendingFolderIds([]); setPendingCliplistIds([]); setPendingItemIds([]);
+    void p?.commit();
+  }
+
+  function undoPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingVideoIds([]); setPendingFolderIds([]); setPendingCliplistIds([]); setPendingItemIds([]);
+    p?.revert();
+  }
+
+  function enqueueDelete(label: string, commit: () => Promise<void>, revert: () => void, hide: { videos?: number[]; folders?: number[]; cliplists?: number[]; items?: number[] } = {}) {
+    // A new delete supersedes a pending one: commit the old immediately.
+    if (pendingRef.current) flushPendingDelete();
+    pendingRef.current = { label, commit, revert };
+    setPendingDelete({ label, commit, revert });
+    if (hide.videos) setPendingVideoIds(hide.videos);
+    if (hide.folders) setPendingFolderIds(hide.folders);
+    if (hide.cliplists) setPendingCliplistIds(hide.cliplists);
+    if (hide.items) setPendingItemIds(hide.items);
+    pendingTimerRef.current = setTimeout(() => { flushPendingDelete(); }, UNDO_MS);
+  }
+
+  // Commit an in-flight undoable delete when leaving the page.
+  useEffect(() => () => { if (pendingRef.current) void pendingRef.current.commit(); }, []);
+
   async function handleDelete(id: number) {
-    if (!confirm("Delete this video and all its annotations?")) return;
-    await fetch(`/api/videos/${id}`, { method: "DELETE" });
-    await loadVideos();
+    const doDelete = async () => {
+      await fetch(`/api/videos/${id}`, { method: "DELETE" });
+      await loadVideos();
+      if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
+    };
+    const video = currentVideoList.find((v) => v.id === id);
+    enqueueDelete(
+      video?.title ? video.title.slice(0, 40) : `#${id}`,
+      doDelete,
+      () => {},
+      { videos: [id] },
+    );
   }
 
   // ── Local file upload (self-hosted video, full annotation support) ──
@@ -572,10 +627,17 @@ export default function Home() {
   }
 
   async function deleteFolder(folderId: number) {
-    if (!confirm("Delete this folder? Videos will not be deleted.")) return;
-    await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+    const folder = folderList.find((f) => f.id === folderId);
     if (selectedFolderId === folderId) setSelectedFolderId(null);
-    await loadFolders();
+    enqueueDelete(
+      folder?.name ?? `#${folderId}`,
+      async () => {
+        await fetch(`/api/folders/${folderId}`, { method: "DELETE" });
+        await loadFolders();
+      },
+      () => {},
+      { folders: [folderId] },
+    );
   }
 
   // ── Share dialog ──
@@ -711,16 +773,18 @@ export default function Home() {
   async function bulkDeleteSelected() {
     const ids = Array.from(selectedVideoIds);
     if (!ids.length) return;
-    if (!confirm(`Delete ${ids.length} video${ids.length !== 1 ? "s" : ""} and all their data?`)) return;
-    setBulkDeleteProgress({ done: 0, total: ids.length });
-    for (let i = 0; i < ids.length; i++) {
-      await fetch(`/api/videos/${ids[i]}`, { method: "DELETE" });
-      setBulkDeleteProgress({ done: i + 1, total: ids.length });
-    }
-    setBulkDeleteProgress(null);
+    const doDelete = async () => {
+      setBulkDeleteProgress({ done: 0, total: ids.length });
+      for (let i = 0; i < ids.length; i++) {
+        await fetch(`/api/videos/${ids[i]}`, { method: "DELETE" });
+        setBulkDeleteProgress({ done: i + 1, total: ids.length });
+      }
+      setBulkDeleteProgress(null);
+      await loadVideos();
+      if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
+    };
     setSelectedVideoIds(new Set());
-    await loadVideos();
-    if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
+    enqueueDelete(`${ids.length} ${t("undo.videos")}`, doDelete, () => {}, { videos: ids });
   }
 
   function toggleVideoSelection(videoId: number) {
@@ -763,7 +827,10 @@ export default function Home() {
     setTranslatedLang(null);
   }
 
-  const currentVideoList = selectedFolderId !== null ? folderVideos : videos;
+  const visibleVideos = useMemo(() => videos.filter((v) => !pendingVideoIds.includes(v.id)), [videos, pendingVideoIds]);
+  const visibleFolderVideos = useMemo(() => folderVideos.filter((v) => !pendingVideoIds.includes(v.id)), [folderVideos, pendingVideoIds]);
+  const visibleCliplists = useMemo(() => cliplists.filter((c) => !pendingCliplistIds.includes(c.id)), [cliplists, pendingCliplistIds]);
+  const currentVideoList = selectedFolderId !== null ? visibleFolderVideos : visibleVideos;
   const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
   async function fetchPlaylist(playlistUrl: string) {
@@ -957,10 +1024,17 @@ export default function Home() {
   }
 
   async function deleteCliplist(id: number) {
-    if (!confirm("Delete this cliplist and all its items?")) return;
-    await fetch(`/api/cliplists/${id}`, { method: "DELETE" });
+    const cl = cliplists.find((c) => c.id === id);
     if (selectedCliplist?.id === id) setSelectedCliplist(null);
-    await loadCliplists();
+    enqueueDelete(
+      cl?.name ?? `#${id}`,
+      async () => {
+        await fetch(`/api/cliplists/${id}`, { method: "DELETE" });
+        await loadCliplists();
+      },
+      () => {},
+      { cliplists: [id] },
+    );
   }
 
   async function renameCliplist(id: number, newName: string) {
@@ -1074,18 +1148,25 @@ export default function Home() {
   }
 
   async function removeClipItem(cliplistId: number, itemId: number) {
-    await fetch(`/api/cliplists/${cliplistId}/items`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId }),
-    });
-    if (selectedCliplist?.id === cliplistId) {
-      setSelectedCliplist((prev) => {
-        if (!prev) return prev;
-        return { ...prev, items: prev.items.filter((i) => i.id !== itemId) };
-      });
-    }
-    await loadCliplists();
+    enqueueDelete(
+      selectedCliplist?.items.find((i) => i.id === itemId)?.title?.slice(0, 40) ?? `#${itemId}`,
+      async () => {
+        await fetch(`/api/cliplists/${cliplistId}/items`, {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ itemId }),
+        });
+        if (selectedCliplist?.id === cliplistId) {
+          setSelectedCliplist((prev) => {
+            if (!prev) return prev;
+            return { ...prev, items: prev.items.filter((i) => i.id !== itemId) };
+          });
+        }
+        await loadCliplists();
+      },
+      () => {},
+      { items: [itemId] },
+    );
   }
 
   async function updateSlideItem(cliplistId: number, itemId: number) {
@@ -1255,7 +1336,7 @@ export default function Home() {
               </button>
 
               {/* Folder list */}
-              {folderList.map((folder) => (
+              {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
                 <div key={folder.id} className="group">
                   {editingFolderId === folder.id ? (
                     <form
@@ -1779,7 +1860,7 @@ export default function Home() {
                   </div>
                   {viewMode === "grid" ? (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {folderVideos.map((video) => (
+                    {visibleFolderVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -1839,7 +1920,7 @@ export default function Home() {
                 </div>
                   ) : (
                   <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
-                    {folderVideos.map((video) => (
+                    {visibleFolderVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -1956,7 +2037,7 @@ export default function Home() {
                 </div>
                 {viewMode === "grid" ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {videos.map((video) => (
+                {visibleVideos.map((video) => (
                   <Link
                     key={video.id}
                     href={`/video/${video.id}`}
@@ -2010,7 +2091,7 @@ export default function Home() {
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
                                 <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
-                                {folderList.map((folder) => (
+                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
                                   <button
                                     key={folder.id}
                                     onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
@@ -2039,7 +2120,7 @@ export default function Home() {
                 </div>
                 ) : (
                 <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
-                  {videos.map((video) => (
+                  {visibleVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -2090,7 +2171,7 @@ export default function Home() {
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
                                 <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
-                                {folderList.map((folder) => (
+                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
                                   <button
                                     key={folder.id}
                                     onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
@@ -2148,7 +2229,7 @@ export default function Home() {
                   {bulkFolderDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
                       <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.select")}</div>
-                      {folderList.map((folder) => (
+                      {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
                         <button
                           key={folder.id}
                           onClick={() => bulkAddToFolder(folder.id)}
@@ -2269,10 +2350,10 @@ export default function Home() {
                           <div className="px-3 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wider">
                             {t("search.addToCliplist")}
                           </div>
-                          {cliplists.length === 0 ? (
+                          {visibleCliplists.length === 0 ? (
                             <div className="px-3 py-2 text-[10px] text-muted">{t("search.noCliplists")}</div>
                           ) : (
-                            cliplists.map((cl) => (
+                            visibleCliplists.map((cl) => (
                               <button
                                 key={cl.id}
                                 onClick={(e) => {
@@ -2481,7 +2562,7 @@ export default function Home() {
                           title={t("cliplist.insertAt")}
                         >
                           <option value={-1}>{t("cliplist.insertEnd")}</option>
-                          {selectedCliplist.items.map((it, i) => (
+                          {selectedCliplist.items.filter((it) => !pendingItemIds.includes(it.id)).map((it, i) => (
                             <option key={it.id} value={i}>
                               {(it.type === "slide" ? t("cliplist.slideBadge") : formatTs(it.timestamp)) + " · " + (it.title.length > 24 ? it.title.slice(0, 24) + "…" : it.title)}
                             </option>
@@ -2619,7 +2700,7 @@ export default function Home() {
                     <div className="px-4 py-8 text-center text-xs text-muted">{t("cliplist.noItems")}</div>
                   ) : (
                     <div className="divide-y divide-border/50 max-h-[60vh] overflow-y-auto">
-                      {selectedCliplist.items.map((item) => (
+                      {selectedCliplist.items.filter((item) => !pendingItemIds.includes(item.id)).map((item) => (
                         <div key={item.id}
                           draggable={dragArmedId === item.id}
                           onDragStart={(e) => { setDragItemId(item.id); e.dataTransfer.effectAllowed = "move"; }}
@@ -2904,7 +2985,7 @@ export default function Home() {
             ) : (
               /* ── Cliplist grid ── */
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {cliplists.map((cl) => (
+                {visibleCliplists.map((cl) => (
                   editingCliplistId === cl.id ? (
                     <div key={cl.id} className="rounded-xl border border-accent bg-surface p-4">
                       <form
@@ -3337,6 +3418,28 @@ export default function Home() {
       {/* ── Video Playlist overlay ── */}
       {slideshowItems && (
         <VideoPlaylistPlayer items={slideshowItems} onClose={() => setSlideshowItems(null)} />
+      )}
+
+      {/* ── Undo toast ── */}
+      {pendingDelete && (
+        <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-xl">
+          <span className="text-xs text-foreground truncate max-w-[240px]">
+            <span className="text-muted">{t("undo.prefix")}</span> — {pendingDelete.label}
+          </span>
+          <button
+            onClick={undoPendingDelete}
+            className="text-xs font-medium text-accent hover:text-accent-hover transition-colors shrink-0"
+          >
+            {t("undo.button")}
+          </button>
+          <button
+            onClick={flushPendingDelete}
+            className="p-1 rounded text-muted/50 hover:text-foreground transition-colors shrink-0"
+            title={t("undo.dismiss")}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
       )}
       </div>
     </div>

@@ -151,6 +151,14 @@ export default function VideoPage() {
   const [filterLabel, setFilterLabel] = useState<string | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // ── Undoable annotation deletes: nothing is sent until the timer expires. ──
+  const UNDO_MS = 8000;
+  interface PendingDelete { label: string; commit: () => Promise<void>; revert: () => void; }
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const pendingRef = useRef<PendingDelete | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingAnnotationIds, setPendingAnnotationIds] = useState<number[]>([]);
   const [bulkLabel, setBulkLabel] = useState("");
   const [summaryMoments, setSummaryMoments] = useState<Array<{ timestamp: number; endTimestamp?: number; title: string; summary: string; importance: string }>>([]);
   const [summaryLoading, setSummaryLoading] = useState(false);
@@ -206,8 +214,8 @@ export default function VideoPage() {
     let list = video.annotations;
     if (filterLabel) list = list.filter(a => a.label === filterLabel);
     if (filterTag) list = list.filter(a => a.tags.includes(filterTag));
-    return list;
-  }, [video, filterLabel, filterTag]);
+    return list.filter(a => !pendingAnnotationIds.includes(a.id));
+  }, [video, filterLabel, filterTag, pendingAnnotationIds]);
 
   const labelCounts = useMemo(() => {
     if (!video) return {};
@@ -681,12 +689,47 @@ export default function VideoPage() {
     setEditingId(null); await loadVideo();
   }
 
+  function flushPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingAnnotationIds([]);
+    void p?.commit();
+  }
+
+  function undoPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingAnnotationIds([]);
+    p?.revert();
+  }
+
+  function enqueueDelete(label: string, commit: () => Promise<void>, revert: () => void, ids: number[]) {
+    if (pendingRef.current) flushPendingDelete();
+    pendingRef.current = { label, commit, revert };
+    setPendingDelete({ label, commit, revert });
+    setPendingAnnotationIds(ids);
+    pendingTimerRef.current = setTimeout(() => { flushPendingDelete(); }, UNDO_MS);
+  }
+
+  useEffect(() => () => { if (pendingRef.current) void pendingRef.current.commit(); }, []);
+
   async function handleDelete(id: number) {
-    if (!confirm("Delete this annotation?")) return;
-    await fetch(`/api/videos/${videoId}/annotations`, {
-      method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
-    });
-    await loadVideo();
+    const ann = video?.annotations.find(a => a.id === id);
+    enqueueDelete(
+      ann?.label ?? `#${id}`,
+      async () => {
+        await fetch(`/api/videos/${videoId}/annotations`, {
+          method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
+        });
+        await loadVideo();
+      },
+      () => {},
+      [id],
+    );
   }
 
   function toggleNoteExpand(id: number) {
@@ -704,14 +747,21 @@ export default function VideoPage() {
   }
 
   async function bulkDelete() {
-    if (!confirm(`Delete ${selectedIds.size} annotation(s)?`)) return;
-    for (const id of selectedIds) {
-      await fetch(`/api/videos/${videoId}/annotations`, {
-        method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
-      });
-    }
+    const ids = Array.from(selectedIds);
+    if (!ids.length) return;
+    const first = video?.annotations.find(a => a.id === ids[0]);
+    const label = ids.length === 1 ? (first?.label ?? `#${ids[0]}`) : `${ids.length} ${t("undo.annotations")}`;
+    const doDelete = async () => {
+      for (const id of ids) {
+        await fetch(`/api/videos/${videoId}/annotations`, {
+          method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotationId: id }),
+        });
+      }
+      setSelectedIds(new Set());
+      await loadVideo();
+    };
     setSelectedIds(new Set());
-    await loadVideo();
+    enqueueDelete(label, doDelete, () => {}, ids);
   }
 
   async function bulkRelabel() {
@@ -1880,6 +1930,28 @@ export default function VideoPage() {
         .scrollbar-thin::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 4px; }
         .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted)); }
       `}</style>
+
+      {/* ── Undo toast ── */}
+      {pendingDelete && (
+        <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-xl">
+          <span className="text-xs text-foreground truncate max-w-[240px]">
+            <span className="text-muted">{t("undo.prefix")}</span> — {pendingDelete.label}
+          </span>
+          <button
+            onClick={undoPendingDelete}
+            className="text-xs font-medium text-accent hover:text-accent-hover transition-colors shrink-0"
+          >
+            {t("undo.button")}
+          </button>
+          <button
+            onClick={flushPendingDelete}
+            className="p-1 rounded text-muted/50 hover:text-foreground transition-colors shrink-0"
+            title={t("undo.dismiss")}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
     </div>
   );
 }
