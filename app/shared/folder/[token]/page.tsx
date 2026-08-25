@@ -146,6 +146,43 @@ export default function SharedFolderPage({
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const timeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Undoable deletes (delayed commit)
+  const UNDO_MS = 8000;
+  interface PendingDelete { label: string; commit: () => Promise<void>; revert: () => void; }
+  const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
+  const [pendingAnnotationIds, setPendingAnnotationIds] = useState<number[]>([]);
+  const pendingRef = useRef<PendingDelete | null>(null);
+  const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function flushPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingAnnotationIds([]);
+    void p?.commit();
+  }
+
+  function undoPendingDelete() {
+    if (pendingTimerRef.current) { clearTimeout(pendingTimerRef.current); pendingTimerRef.current = null; }
+    const p = pendingRef.current;
+    pendingRef.current = null;
+    setPendingDelete(null);
+    setPendingAnnotationIds([]);
+    p?.revert();
+  }
+
+  function enqueueDelete(label: string, commit: () => Promise<void>, revert: () => void, hideIds: number[] = []) {
+    if (pendingRef.current) flushPendingDelete();
+    pendingRef.current = { label, commit, revert };
+    setPendingDelete({ label, commit, revert });
+    if (hideIds.length > 0) setPendingAnnotationIds(hideIds);
+    pendingTimerRef.current = setTimeout(() => { flushPendingDelete(); }, UNDO_MS);
+  }
+
+  // Commit an in-flight undoable delete when leaving the page.
+  useEffect(() => () => { if (pendingRef.current) void pendingRef.current.commit(); }, []);
+
   useEffect(() => {
     async function init() {
       const p = await params;
@@ -375,9 +412,13 @@ export default function SharedFolderPage({
     return () => clearInterval(poll);
   }, [selectedVideo, token]);
 
+  const liveAnnotations = useMemo(
+    () => annotations.filter((a) => !pendingAnnotationIds.includes(a.id)),
+    [annotations, pendingAnnotationIds]
+  );
   const visibleAnnotations = useMemo(
-    () => (filterTag ? annotations.filter((a) => a.tags.includes(filterTag)) : annotations),
-    [annotations, filterTag]
+    () => (filterTag ? liveAnnotations.filter((a) => a.tags.includes(filterTag)) : liveAnnotations),
+    [liveAnnotations, filterTag]
   );
 
   function selectVideo(video: VideoData) {
@@ -612,18 +653,27 @@ export default function SharedFolderPage({
     }
   }
 
-  async function handleDeleteAnnotation(annotationId: number) {
+  function handleDeleteAnnotation(annotationId: number) {
     if (!token || !verifiedEmail) return;
-    try {
-      const res = await fetch(`/api/shared/folder/${token}/annotations`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ annotationId, email: verifiedEmail }),
-      });
-      if (res.ok && selectedVideo) {
-        await loadAnnotations(selectedVideo.id);
-      }
-    } catch {}
+    const snapshot = annotations.find((a) => a.id === annotationId);
+    const label = snapshot?.label && snapshot.label !== "Note" ? snapshot.label.slice(0, 40) : `#${annotationId}`;
+    enqueueDelete(
+      label,
+      async () => {
+        try {
+          const res = await fetch(`/api/shared/folder/${token}/annotations`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ annotationId, email: verifiedEmail }),
+          });
+          if (res.ok && selectedVideo) {
+            await loadAnnotations(selectedVideo.id);
+          }
+        } catch {}
+      },
+      () => {},
+      [annotationId],
+    );
   }
 
   function startEditAnnotation(a: SharedAnnotation) {
@@ -1068,7 +1118,7 @@ export default function SharedFolderPage({
                 <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-2 flex items-center gap-1.5">
                   Annotations
                   <span className="text-[10px] text-muted/50 font-normal">
-                    {filterTag ? `${visibleAnnotations.length} / ${annotations.length}` : annotations.length}
+                    {filterTag ? `${visibleAnnotations.length} / ${liveAnnotations.length}` : liveAnnotations.length}
                   </span>
                   {filterTag && (
                     <button
@@ -1357,6 +1407,28 @@ export default function SharedFolderPage({
           </>
         )}
       </main>
+
+      {/* ── Undo toast ── */}
+      {pendingDelete && (
+        <div className="fixed bottom-4 right-4 z-[60] flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-xl">
+          <span className="text-xs text-foreground truncate max-w-[240px]">
+            <span className="text-muted">Deleted</span> — {pendingDelete.label}
+          </span>
+          <button
+            onClick={undoPendingDelete}
+            className="text-xs font-medium text-accent hover:text-accent-hover transition-colors shrink-0"
+          >
+            Undo
+          </button>
+          <button
+            onClick={flushPendingDelete}
+            className="p-1 rounded text-muted/50 hover:text-foreground transition-colors shrink-0"
+            title="Delete now"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
 
       <style jsx global>{`
         .scrollbar-thin::-webkit-scrollbar { width: 4px; }

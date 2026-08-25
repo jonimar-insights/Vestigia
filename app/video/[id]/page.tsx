@@ -933,13 +933,23 @@ export default function VideoPage() {
     }
   }
 
-  async function deleteSummary() {
-    if (!confirm("Delete saved summary?")) return;
-    try {
-      await fetch(`/api/videos/${videoId}/summarize`, { method: "DELETE" });
-      setSummaryMoments([]);
-      setShowSummary(false);
-    } catch {}
+  function deleteSummary() {
+    const moments = summaryMoments;
+    setSummaryMoments([]);
+    setShowSummary(false);
+    enqueueDelete(
+      t("undo.summary"),
+      async () => {
+        try {
+          await fetch(`/api/videos/${videoId}/summarize`, { method: "DELETE" });
+        } catch {}
+      },
+      () => {
+        setSummaryMoments(moments);
+        setShowSummary(true);
+      },
+      [],
+    );
   }
 
   async function translateAll() {

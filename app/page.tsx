@@ -708,20 +708,33 @@ export default function Home() {
     setAddingShare(false);
   }
 
-  async function handleRemoveSavedEmail(email: string) {
-    try {
-      await fetch(`/api/users/saved-emails?email=${encodeURIComponent(email)}`, { method: "DELETE" });
-      setSavedEmails((prev) => prev.filter((e) => e !== email));
-    } catch {}
+  function handleRemoveSavedEmail(email: string) {
+    setSavedEmails((prev) => prev.filter((e) => e !== email));
+    enqueueDelete(
+      t("undo.savedEmail"),
+      async () => {
+        try {
+          await fetch(`/api/users/saved-emails?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+        } catch {}
+      },
+      () => setSavedEmails((prev) => (prev.includes(email) ? prev : [...prev, email])),
+    );
   }
 
-  async function handleRemoveShare(email: string) {
+  function handleRemoveShare(email: string) {
     if (!shareDialogFolderId) return;
-    try {
-      await fetch(`/api/folders/${shareDialogFolderId}/shares?email=${encodeURIComponent(email)}`, { method: "DELETE" });
-      await loadShareList(shareDialogFolderId);
-      await loadFolders();
-    } catch {}
+    const folderId = shareDialogFolderId;
+    enqueueDelete(
+      `${t("undo.invite")} ${email}`,
+      async () => {
+        try {
+          await fetch(`/api/folders/${folderId}/shares?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+          await loadShareList(folderId);
+          await loadFolders();
+        } catch {}
+      },
+      () => {},
+    );
   }
 
   async function handleCopyShareLink() {
@@ -744,16 +757,24 @@ export default function Home() {
     setFolderDropdown({ videoId: -1, open: false });
   }
 
-  async function removeVideoFromFolder(folderId: number, videoId: number) {
-    await fetch(`/api/folders/${folderId}/videos`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ videoId }),
-    });
-    await loadFolders();
-    await loadVideos();
-    if (selectedFolderId === folderId) await loadFolderVideos(folderId);
-    setFolderDropdown({ videoId: -1, open: false });
+  function removeVideoFromFolder(folderId: number, videoId: number) {
+    enqueueDelete(
+      t("undo.removedFromFolder"),
+      async () => {
+        try {
+          await fetch(`/api/folders/${folderId}/videos`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId }),
+          });
+        } catch {}
+        await loadFolders();
+        await loadVideos();
+        if (selectedFolderId === folderId) await loadFolderVideos(folderId);
+        setFolderDropdown({ videoId: -1, open: false });
+      },
+      () => {},
+    );
   }
 
   async function bulkAddToFolder(folderId: number) {
@@ -1649,11 +1670,17 @@ export default function Home() {
                             )}
                           </button>
                           <button
-                            onClick={async () => {
-                              try {
-                                await fetch(`/api/folders/${folder.id}/share`, { method: "DELETE" });
-                                await loadFolders();
-                              } catch {}
+                            onClick={() => {
+                              enqueueDelete(
+                                t("undo.shareLink"),
+                                async () => {
+                                  try {
+                                    await fetch(`/api/folders/${folder.id}/share`, { method: "DELETE" });
+                                    await loadFolders();
+                                  } catch {}
+                                },
+                                () => {},
+                              );
                             }}
                             className="p-0.5 rounded text-muted hover:text-danger transition-colors"
                             title="Unshare"
