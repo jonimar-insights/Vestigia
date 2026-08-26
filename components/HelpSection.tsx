@@ -34,7 +34,7 @@ const SECTIONS: HelpSection[] = [
     id: "annotate",
     titleKey: "help.annotate",
     introKey: "help.annotateIntro",
-    items: ["help.annotate1", "help.annotate2", "help.annotate3", "help.annotate4", "help.annotate5", "help.annotate6"],
+    items: ["help.annotate1", "help.annotate2", "help.annotate3", "help.annotate4", "help.annotate6"],
   },
   {
     id: "shortcuts",
