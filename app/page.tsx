@@ -219,8 +219,6 @@ export default function Home() {
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   // ── Video grid enhancements ──
-  const [gridFilter, setGridFilter] = useState("");
-  const [gridSort, setGridSort] = useState<"newest" | "oldest" | "az" | "za" | "annotated" | "updated">("newest");
   const [allVideos, setAllVideos] = useState<Video[]>([]);
   const [_allVideosLoading, setAllVideosLoading] = useState(false);
   const [showAllVideos, setShowAllVideos] = useState(false);
@@ -380,12 +378,12 @@ export default function Home() {
   const loadAllVideos = useCallback(async () => {
     setAllVideosLoading(true);
     try {
-      const res = await fetch(`/api/videos/all?sort=${gridSort}`);
+      const res = await fetch(`/api/videos/all?sort=newest`);
       if (res.ok) setAllVideos(await res.json());
     } finally {
       setAllVideosLoading(false);
     }
-  }, [gridSort]);
+  }, []);
 
   const loadGlobalTags = useCallback(async () => {
     setGlobalTagsLoading(true);
@@ -941,32 +939,10 @@ export default function Home() {
   const currentVideoList = selectedFolderId !== null ? visibleFolderVideos : visibleVideos;
   const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
-  // ── Grid filter + sort (enhancement #1, #2, #6, #10) ──
+  // ── Grid: source selection only (no client-side filter/sort) ──
   const gridVideos = useMemo(() => {
-    const source = showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
-    const q = gridFilter.trim().toLowerCase();
-    let list = q ? source.filter((v) => {
-      const titleMatch = (v.title ?? "").toLowerCase().includes(q);
-      const textMatch = (v as Video).searchText?.toLowerCase().includes(q) ?? false;
-      return titleMatch || textMatch;
-    }) : source;
-    switch (gridSort) {
-      case "newest": list = [...list].sort((a, b) => b.id - a.id); break;
-      case "oldest": list = [...list].sort((a, b) => a.id - b.id); break;
-      case "az": list = [...list].sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "")); break;
-      case "za": list = [...list].sort((a, b) => (b.title ?? "").localeCompare(a.title ?? "")); break;
-      case "annotated": list = [...list].sort((a, b) => (b.annotationCount ?? 0) - (a.annotationCount ?? 0)); break;
-      case "updated": list = [...list].sort((a, b) => {
-        const at = (a as Video & { latestAnnotationAt?: string }).latestAnnotationAt;
-        const bt = (b as Video & { latestAnnotationAt?: string }).latestAnnotationAt;
-        if (at && bt) return bt.localeCompare(at);
-        if (at) return -1;
-        if (bt) return 1;
-        return b.id - a.id;
-      }); break;
-    }
-    return list;
-  }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos, gridFilter, gridSort]);
+    return showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
+  }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos]);
 
   async function fetchPlaylist(playlistUrl: string) {
     setPlaylistLoading(true);
@@ -1858,28 +1834,6 @@ export default function Home() {
                   })()}
                 </div>
               </div>
-            {/* Grid filter + sort */}
-            <div className="mt-4 space-y-2">
-              <input
-                type="text"
-                value={gridFilter}
-                onChange={(e) => setGridFilter(e.target.value)}
-                placeholder={t("grid.searchPlaceholder")}
-                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs placeholder:text-muted focus:border-accent focus:outline-none"
-              />
-              <select
-                value={gridSort}
-                onChange={(e) => setGridSort(e.target.value as typeof gridSort)}
-                className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-xs"
-              >
-                <option value="newest">{t("grid.sortNewest")}</option>
-                <option value="oldest">{t("grid.sortOldest")}</option>
-                <option value="az">{t("grid.sortAZ")}</option>
-                <option value="za">{t("grid.sortZA")}</option>
-                <option value="annotated">{t("grid.sortAnnotated")}</option>
-                <option value="updated">{t("grid.sortUpdated")}</option>
-              </select>
-            </div>
             </div>
           </div>
         </aside>
