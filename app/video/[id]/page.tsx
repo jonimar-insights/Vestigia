@@ -150,7 +150,9 @@ export default function VideoPage() {
   const [hoveredMarker, setHoveredMarker] = useState<number | null>(null);
   const [scrubberDragging, setScrubberDragging] = useState(false);
   const [scrubberPos, setScrubberPos] = useState<number | null>(null);
-
+  const [filterLabel, setFilterLabel] = useState<string | null>(null);
+  const [filterTag, setFilterTag] = useState<string | null>(null);
+  const [annotationSearch, setAnnotationSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // ── Undoable annotation deletes: nothing is sent until the timer expires. ──
@@ -205,12 +207,50 @@ export default function VideoPage() {
   const timeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Derived
+  const uniqueLabels = useMemo(() => {
+    if (!video) return [];
+    return Array.from(new Set(video.annotations.map(a => a.label)));
+  }, [video]);
+
   const displayedAnnotations = useMemo(() => {
     if (!video) return [];
-    return video.annotations.filter(a => !pendingAnnotationIds.includes(a.id));
-  }, [video, pendingAnnotationIds]);
+    let list = video.annotations;
+    if (filterLabel) list = list.filter(a => a.label === filterLabel);
+    if (filterTag) list = list.filter(a => a.tags.includes(filterTag));
+    if (annotationSearch.trim()) {
+      const q = annotationSearch.trim().toLowerCase();
+      list = list.filter(a =>
+        a.label.toLowerCase().includes(q) ||
+        (a.note ?? "").toLowerCase().includes(q) ||
+        a.tags.some(t => t.toLowerCase().includes(q))
+      );
+    }
+    return list.filter(a => !pendingAnnotationIds.includes(a.id));
+  }, [video, filterLabel, filterTag, annotationSearch, pendingAnnotationIds]);
 
-  const feedTitle = video ? `${video.annotations.length} ${t("video.annotations")}` : "";
+  const labelCounts = useMemo(() => {
+    if (!video) return {};
+    const counts: Record<string, number> = {};
+    for (const a of video.annotations) { counts[a.label] = (counts[a.label] || 0) + 1; }
+    return counts;
+  }, [video]);
+
+  const uniqueTags = useMemo(() => {
+    if (!video) return [];
+    return Array.from(new Set(video.annotations.flatMap(a => a.tags))).sort((a, b) => a.localeCompare(b));
+  }, [video]);
+
+  const tagCounts = useMemo(() => {
+    if (!video) return {};
+    const counts: Record<string, number> = {};
+    for (const a of video.annotations) for (const tg of a.tags) { counts[tg] = (counts[tg] || 0) + 1; }
+    return counts;
+  }, [video]);
+
+  const hasAnnotationFilter = !!filterLabel || !!filterTag || !!annotationSearch.trim();
+  const feedTitle = !video ? "" : hasAnnotationFilter
+    ? `${[filterLabel, filterTag ? `#${filterTag}` : null, annotationSearch.trim() ? `"${annotationSearch.trim()}"` : null].filter(Boolean).join(" · ")} (${displayedAnnotations.length})`
+    : `${video.annotations.length} ${t("video.annotations")}`;
 
   // ── Social embeds (TikTok/Instagram/X/Facebook/Vimeo) ──
   const social = video && video.platform && video.platform !== "youtube"
@@ -1149,7 +1189,7 @@ export default function VideoPage() {
             <div className="min-w-0">
               <h1 className="text-sm font-semibold truncate">{video.title ?? "Untitled video"}</h1>
               <p className="text-[10px] text-muted truncate">
-                {video.annotations.length} annotations &middot; {new Set(video.annotations.map(a => a.label)).size} categories
+                {video.annotations.length} annotations &middot; {uniqueLabels.length} categories
               </p>
             </div>
           </div>
@@ -1683,6 +1723,69 @@ export default function VideoPage() {
               </div>
             )}
 
+            {/* Filter chips */}
+            {uniqueLabels.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3 shrink-0">
+                <button onClick={() => setFilterLabel(null)}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium transition-all ${
+                    filterLabel === null
+                      ? "bg-accent text-white shadow-sm"
+                      : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+                  }`}>
+                  {t("feed.all")}
+                  <span className="opacity-60">{video.annotations.length}</span>
+                </button>
+                {uniqueLabels.map(l => {
+                  const colors = getLabelColor(l);
+                  const active = filterLabel === l;
+                  return (
+                    <button key={l} onClick={() => setFilterLabel(active ? null : l)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium transition-all ${
+                        active
+                          ? `${colors.badge} ${colors.badgeText} ring-1 ${colors.ring} shadow-sm`
+                          : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+                      }`}>
+                      <span>{getEmoji(l)}</span>{l}
+                      <span className="opacity-50">{labelCounts[l]}</span>
+                    </button>
+                        );
+                      })}
+                    </div>
+            )}
+
+            {/* Tag filter chips */}
+            {uniqueTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-3 shrink-0">
+                {uniqueTags.map(tag => {
+                  const active = filterTag === tag;
+                  return (
+                    <button key={tag} onClick={() => setFilterTag(active ? null : tag)}
+                      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium font-mono transition-all ${
+                        active
+                          ? "bg-accent text-white shadow-sm"
+                          : "bg-surface border border-border text-muted hover:text-foreground hover:border-accent/30"
+                      }`}>
+                      #{tag}
+                      <span className="opacity-50">{tagCounts[tag]}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Annotation text search */}
+            {video && video.annotations.length > 0 && (
+              <div className="px-1 pb-2 shrink-0">
+                <input
+                  type="text"
+                  value={annotationSearch}
+                  onChange={(e) => setAnnotationSearch(e.target.value)}
+                  placeholder={t("search.videoSearchPlaceholder")}
+                  className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-background focus:border-accent focus:outline-none"
+                />
+              </div>
+            )}
+
             {/* Feed header */}
             <div className="flex items-center justify-between mb-3 shrink-0">
               <div className="flex items-center gap-2">
@@ -1753,15 +1856,17 @@ export default function VideoPage() {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                       </svg>
                     </div>
-                    <p className="text-sm font-medium text-muted mb-1">{t("annotation.noAnnotationsYet")}</p>
+                    <p className="text-sm font-medium text-muted mb-1">{hasAnnotationFilter ? t("annotation.noMatching") : t("annotation.noAnnotationsYet")}</p>
                     <p className="text-xs text-muted/60 mb-4">
-                      {t("annotation.press")} <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>
-                      {t("annotation.toCreateFirst")}
+                      {hasAnnotationFilter ? t("annotation.tryDifferentFilter") : t("annotation.press")} {!hasAnnotationFilter && <kbd className="inline-block bg-surface-hover border border-border rounded px-1.5 py-0.5 font-mono text-[10px] mx-0.5">A</kbd>}
+                      {!hasAnnotationFilter ? t("annotation.toCreateFirst") : ""}
                     </p>
-                    <button onClick={() => setShowForm(true)}
-                      className="text-xs text-accent hover:text-accent-hover font-medium transition-colors">
-                      {t("annotation.createFirstAction")}
-                    </button>
+                    {!hasAnnotationFilter && (
+                      <button onClick={() => setShowForm(true)}
+                        className="text-xs text-accent hover:text-accent-hover font-medium transition-colors">
+                        {t("annotation.createFirstAction")}
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div className="relative">
@@ -1923,10 +2028,11 @@ export default function VideoPage() {
                                   {ann.tags.length > 0 && (
                                     <div className="flex flex-wrap gap-0.5" onClick={e => e.stopPropagation()}>
                                       {ann.tags.map(tag => (
-                                        <span key={tag}
-                                          className="text-[9px] font-mono text-muted/50">
+                                        <button key={tag} onClick={() => setFilterTag(filterTag === tag ? null : tag)}
+                                          title={t("annotation.filterByTag")}
+                                          className={`text-[9px] font-mono transition-colors ${filterTag === tag ? "text-accent" : "text-muted/50 hover:text-accent"}`}>
                                           #{tag}
-                                        </span>
+                                        </button>
                                       ))}
                                     </div>
                                   )}

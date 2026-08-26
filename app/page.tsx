@@ -33,6 +33,20 @@ interface PlaylistVideo {
   position: number;
 }
 
+interface SearchResult {
+  type: "annotation" | "scene" | "key_moment";
+  videoId: number;
+  videoTitle: string | null;
+  videoThumbnail: string | null;
+  videoYear: number | null;
+  folderName: string | null;
+  timestamp: number;
+  endTimestamp: number | null;
+  title: string;
+  detail: string | null;
+  tags?: string[];
+}
+
 interface Cliplist {
   id: number;
   name: string;
@@ -48,10 +62,27 @@ interface CliplistWithItems extends Cliplist {
 
 type SelectedCliplistItem = CliplistWithItems["items"][number];
 
-type Tab = "import" | "cliplists" | "settings" | "help";
+type Tab = "import" | "search" | "cliplists" | "settings" | "help";
 
 function isPlaylistUrl(u: string) {
   return /[?&]list=/.test(u);
+}
+
+function highlight(text: string, query: string) {
+  if (!query) return text;
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+  return (
+    <>{
+      parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark key={i} className="bg-yellow-200 dark:bg-yellow-600">{part}</mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )
+    }</>
+  );
 }
 
 // Dark slide themes that read well with white text in the playlist player
@@ -92,6 +123,10 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [fetching, setFetching] = useState(true);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
   const [playlistVideos, setPlaylistVideos] = useState<PlaylistVideo[]>([]);
   const [playlistSelected, setPlaylistSelected] = useState<Set<string>>(new Set());
@@ -188,6 +223,26 @@ export default function Home() {
   const [_allVideosLoading, setAllVideosLoading] = useState(false);
   const [showAllVideos, setShowAllVideos] = useState(false);
 
+  // ── Search enhancements ──
+  const [searchTypeFilter, setSearchTypeFilter] = useState<string | null>(null);
+  const [searchFolderFilter, setSearchFolderFilter] = useState<number | null>(null);
+  const [searchOffset, setSearchOffset] = useState(0);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
+  const SEARCH_LIMIT = 50;
+
+  // ── Tag browser ──
+  const [showTagBrowser, setShowTagBrowser] = useState(false);
+  const [globalTags, setGlobalTags] = useState<Array<{ tag: string; count: number }>>([]);
+  const [globalTagsLoading, setGlobalTagsLoading] = useState(false);
+
+  // ── Cmd+K global search ──
+  const [showCmdK, setShowCmdK] = useState(false);
+  const cmdKInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Pinned searches ──
+  const [pinnedSearches, setPinnedSearches] = useState<string[]>([]);
+
   // ── Cliplist bulk selection ──
   const [cliplistSelectedIds, setCliplistSelectedIds] = useState<Set<number>>(new Set()); // eslint-disable-line @typescript-eslint/no-unused-vars
 
@@ -208,9 +263,20 @@ export default function Home() {
   const [translating, setTranslating] = useState(false);
   const [translatedLang, setTranslatedLang] = useState<"pt" | "en" | null>(null);
 
+  // "Add to cliplist" dropdown per search result
+  const [addToDropdown, setAddToDropdown] = useState<{ index: number; open: boolean }>({ index: -1, open: false });
+  const addToRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+
   // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
+      const openIdx = addToDropdown.index;
+      if (openIdx >= 0) {
+        const ref = addToRefs.current.get(openIdx);
+        if (ref && !ref.contains(e.target as Node)) {
+          setAddToDropdown({ index: -1, open: false });
+        }
+      }
       // Close folder dropdown on outside click
       if (folderDropdown.open) {
         const target = e.target as HTMLElement;
@@ -235,7 +301,7 @@ export default function Home() {
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [folderDropdown.open, bulkFolderDropdown, playlistFolderDropdownOpen]);
+  }, [addToDropdown.index, folderDropdown.open, bulkFolderDropdown, playlistFolderDropdownOpen]);
 
   const loadVideos = useCallback(async () => {
     try {
@@ -316,6 +382,16 @@ export default function Home() {
       if (res.ok) setAllVideos(await res.json());
     } finally {
       setAllVideosLoading(false);
+    }
+  }, []);
+
+  const loadGlobalTags = useCallback(async () => {
+    setGlobalTagsLoading(true);
+    try {
+      const res = await fetch("/api/tags");
+      if (res.ok) { const data = await res.json(); setGlobalTags(data.tags ?? []); }
+    } finally {
+      setGlobalTagsLoading(false);
     }
   }, []);
 
@@ -461,6 +537,31 @@ export default function Home() {
   useEffect(() => {
     if (showAllVideos) loadAllVideos(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [showAllVideos, loadAllVideos]);
+
+  // Load global tags when tag browser opens
+  useEffect(() => {
+    if (showTagBrowser && globalTags.length === 0) loadGlobalTags(); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [showTagBrowser, globalTags.length, loadGlobalTags]);
+
+  // Load pinned searches from settings on mount
+  useEffect(() => {
+    fetch("/api/settings").then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.pinnedSearches) setPinnedSearches(data.pinnedSearches);
+    }).catch(() => {});
+  }, []);
+
+  // Cmd+K shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowCmdK(true);
+      }
+      if (e.key === "Escape") setShowCmdK(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   async function handleDelete(id: number) {
     const doDelete = async () => {
@@ -956,6 +1057,8 @@ export default function Home() {
     }
   }
 
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout>>(null);
+
   // ── Undo/redo history support ──
   const openListIdRef = useRef<number | null>(null);
   useEffect(() => { openListIdRef.current = selectedCliplist?.id ?? null; }, [selectedCliplist]);
@@ -966,6 +1069,33 @@ export default function Home() {
       if (res.ok) setSelectedCliplist(await res.json());
     }
   }
+  function handleSearch(q: string) {
+    setSearchQuery(q);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    if (q.trim().length < 2) {
+      setSearchResults([]);
+      setSearchTotal(0);
+      return;
+    }
+    searchTimerRef.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const params = new URLSearchParams({ q: q.trim(), limit: String(SEARCH_LIMIT), offset: "0" });
+        if (searchTypeFilter) params.set("type", searchTypeFilter);
+        if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+        const res = await fetch(`/api/search?${params}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data.results);
+          setSearchTotal(data.total ?? data.results.length);
+          setSearchOffset(data.results.length);
+        }
+      } finally {
+        setSearching(false);
+      }
+    }, 300);
+  }
+
   // ── Cliplist actions ──
   async function handleCreateCliplist(e: React.FormEvent) {
     e.preventDefault();
@@ -986,6 +1116,43 @@ export default function Home() {
     } finally {
       setCreatingCliplist(false);
     }
+  }
+
+  async function addToCliplist(cliplistId: number, result: SearchResult) {
+    try {
+      const body = {
+        type: result.type,
+        videoId: result.videoId,
+        timestamp: result.timestamp,
+        endTimestamp: result.endTimestamp,
+        title: result.title,
+        detail: result.detail,
+        tags: result.tags,
+      };
+      const res = await fetch(`/api/cliplists/${cliplistId}/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const itemIdRef = { current: (await res.json()).id as number };
+        pushHistory({
+          label: `${t("history.addClip")} — ${(result.title ?? "").slice(0, 30)}`,
+          undo: async () => {
+            await fetch(`/api/cliplists/${cliplistId}/items`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId: itemIdRef.current }) });
+            await refreshAfterItemChange(cliplistId);
+          },
+          redo: async () => {
+            const r = await fetch(`/api/cliplists/${cliplistId}/items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+            if (r.ok) itemIdRef.current = (await r.json()).id;
+            await refreshAfterItemChange(cliplistId);
+          },
+        });
+      }
+      setAddToDropdown({ index: -1, open: false });
+      // Refresh cliplists if on that tab
+      if (tab === "cliplists") loadCliplists();
+    } catch {}
   }
 
   async function openCliplist(id: number) {
@@ -1380,15 +1547,51 @@ export default function Home() {
               >
                 {t("app.signOut")}
               </button>
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+
+            {/* Load more + total */}
+            {searchResults.length > 0 && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <p className="text-[10px] text-muted">{searchTotal} {t("search.results")}</p>
+                {searchOffset < searchTotal && (
+                  <button
+                    onClick={async () => {
+                      setSearchLoadingMore(true);
+                      try {
+                        const params = new URLSearchParams({ q: searchQuery.trim(), limit: String(SEARCH_LIMIT), offset: String(searchOffset) });
+                        if (searchTypeFilter) params.set("type", searchTypeFilter);
+                        if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+                        const res = await fetch(`/api/search?${params}`);
+                        if (res.ok) {
+                          const data = await res.json();
+                          setSearchResults(prev => [...prev, ...data.results]);
+                          setSearchOffset(prev => prev + data.results.length);
+                          setSearchTotal(data.total ?? searchTotal);
+                        }
+                      } finally {
+                        setSearchLoadingMore(false);
+                      }
+                    }}
+                    disabled={searchLoadingMore}
+                    className="px-4 py-1.5 rounded-lg border border-border bg-surface text-xs text-muted hover:text-foreground hover:border-accent/50 transition-colors"
+                  >
+                    {searchLoadingMore ? t("app.loading") : t("search.loadMore")}
+                  </button>
+                )}
+                {searchOffset >= searchTotal && (
+                  <p className="text-[10px] text-muted">{t("search.noMore")}</p>
+                )}
+              </div>
+            )}
+          </div>
       </header>
 
       <div className="mx-auto w-full px-6 pt-6">
         <nav className="flex gap-1 border-b border-border">
           {([
             { key: "import", label: t("tab.import"), icon: "+" },
+            { key: "search", label: t("tab.search"), icon: "\u2315" },
             { key: "cliplists", label: t("tab.cliplists"), icon: "\ud83d\udccb" },
             { key: "settings", label: t("tab.settings"), icon: "\u2699\ufe0f" },
             { key: "help", label: t("tab.help"), icon: "?" },
@@ -1440,6 +1643,16 @@ export default function Home() {
                   <span>{t("sidebar.allVideos")}</span>
                   <span className="text-[10px] text-muted/60">{showAllVideos ? allVideos.length : videos.length}</span>
                 </div>
+              </button>
+
+              <button
+                onClick={() => setShowTagBrowser(true)}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors hover:bg-surface-hover text-muted hover:text-foreground w-full text-left"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                <span>{t("sidebar.tags")}</span>
               </button>
 
               {/* Folder list */}
@@ -2370,6 +2583,206 @@ export default function Home() {
                   Deselect all
                 </button>
               </>
+            )}
+          </div>
+        )}
+
+        {/* ── SEARCH TAB ── */}
+        {tab === "search" && (
+          <div>
+            <div className="relative mb-6">
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => handleSearch(e.target.value)}
+                placeholder={t("search.placeholder")}
+                autoFocus
+                className="w-full rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              {searching && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                </div>
+              )}
+              {searchQuery && !pinnedSearches.includes(searchQuery) && (
+                <button
+                  onClick={() => { const next = [...pinnedSearches, searchQuery]; setPinnedSearches(next); fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiKeys: {}, pinnedSearches: next }) }); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-accent transition-colors"
+                  title={t("search.pinSearch")}
+                >
+                  📌
+                </button>
+              )}
+            </div>
+
+            {!searchQuery && pinnedSearches.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] text-muted uppercase tracking-wider mb-2">{t("search.pinnedSearches")}</p>
+                <div className="flex flex-wrap gap-2">
+                  {pinnedSearches.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => handleSearch(q)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:border-accent hover:bg-accent/10 transition-colors"
+                    >
+                      <span>{q}</span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); const next = pinnedSearches.filter((s) => s !== q); setPinnedSearches(next); fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiKeys: {}, pinnedSearches: next }) }); }}
+                        className="text-muted hover:text-danger cursor-pointer"
+                      >
+                        ×
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Type filter chips + folder dropdown */}
+            {searchQuery.trim().length >= 2 && (
+              <div className="flex items-center gap-2 mb-4 flex-wrap">
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                  {[
+                    { key: null, label: t("search.allTypes") },
+                    { key: "annotation", label: t("search.annotations") },
+                    { key: "scene", label: t("search.scenes") },
+                    { key: "key_moment", label: t("search.keyMoments") },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key ?? "all"}
+                      onClick={() => { setSearchTypeFilter(key); handleSearch(searchQuery); }}
+                      className={`px-2 py-1 text-[10px] rounded-md transition-colors ${searchTypeFilter === key ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  value={searchFolderFilter ?? ""}
+                  onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setSearchFolderFilter(v); handleSearch(searchQuery); }}
+                  className="px-2 py-1 text-[10px] rounded-lg border border-border bg-surface"
+                >
+                  <option value="">{t("search.allFolders")}</option>
+                  {folderList.map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
+              <p className="text-sm text-muted text-center py-8">{t("search.noResults")}</p>
+            )}
+
+            {searchResults.length > 0 && (
+              <div className="space-y-2">
+                {searchResults.map((r, i) => (
+                  <div key={i} className="group relative flex items-center gap-4 p-3 rounded-lg border border-border bg-surface hover:border-accent/50 transition-colors">
+                    <Link
+                      href={`/video/${r.videoId}#t=${Math.floor(r.timestamp)}`}
+                      className="flex items-center gap-4 flex-1 min-w-0"
+                    >
+                      {r.videoThumbnail && (
+                        <div className="relative shrink-0 w-28 h-16">
+                          <Image src={r.videoThumbnail} alt="" fill className="object-cover rounded" />
+                          <span className="absolute bottom-1 right-1 text-[10px] bg-black/75 text-white px-1 py-0.5 rounded">
+                            {formatTs(r.timestamp)}
+                          </span>
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] uppercase font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded">
+                            {r.type.replace("_", " ")}
+                          </span>
+                          <span className="text-sm font-medium truncate">{highlight(r.title, searchQuery)}</span>
+                        </div>
+                        {r.detail && (
+                          <p className="text-xs text-muted mt-0.5 line-clamp-1">{highlight(r.detail, searchQuery)}</p>
+                        )}
+                        {r.tags && r.tags.length > 0 && (
+                          <div className="flex gap-1 mt-1 flex-wrap">
+                            {r.tags.slice(0, 4).map((tag) => (
+                              <span key={tag} className="text-[10px] bg-surface-hover rounded px-1.5 py-0.5">
+                                {tag}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted shrink-0 truncate max-w-[160px]">
+                        {r.videoTitle}
+                        {r.videoYear != null && <span className="ml-1 text-[10px] text-muted/60">({r.videoYear})</span>}
+                      </p>
+                      {r.folderName && (
+                        <p className="text-[10px] text-accent/60 shrink-0">
+                          {t("search.inFolder").replace("{folder}", r.folderName)}
+                        </p>
+                      )}
+                    </Link>
+
+                    {/* Add to cliplist button */}
+                    <div ref={(el) => { if (el) addToRefs.current.set(i, el); else addToRefs.current.delete(i); }} className="relative shrink-0">
+                      <button
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          // Load cliplists if not loaded
+                          if (cliplists.length === 0) {
+                            fetch("/api/cliplists").then((res) => res.ok && res.json()).then((data) => setCliplists(data));
+                          }
+                          setAddToDropdown({ index: i, open: addToDropdown.index === i ? !addToDropdown.open : true });
+                        }}
+                        className="p-1.5 rounded text-muted hover:text-accent hover:bg-accent/10 transition-all opacity-0 group-hover:opacity-100"
+                        title="Add to cliplist"
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                        </svg>
+                      </button>
+
+                      {addToDropdown.open && addToDropdown.index === i && (
+                        <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface shadow-xl z-50 py-1 max-h-60 overflow-y-auto">
+                          <div className="px-3 py-1.5 text-[10px] font-semibold text-muted uppercase tracking-wider">
+                            {t("search.addToCliplist")}
+                          </div>
+                          {visibleCliplists.length === 0 ? (
+                            <div className="px-3 py-2 text-[10px] text-muted">{t("search.noCliplists")}</div>
+                          ) : (
+                            visibleCliplists.map((cl) => (
+                              <button
+                                key={cl.id}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  addToCliplist(cl.id, r);
+                                }}
+                                className="w-full text-left px-3 py-1.5 text-xs hover:bg-surface-hover transition-colors flex items-center justify-between"
+                              >
+                                <span className="truncate">{cl.name}</span>
+                                <span className="text-[9px] text-muted shrink-0 ml-2">{cl.itemCount}</span>
+                              </button>
+                            ))
+                          )}
+                          <div className="border-t border-border/50 mt-1 pt-1">
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setShowCreateCliplist(true);
+                                setAddToDropdown({ index: -1, open: false });
+                              }}
+                              className="w-full text-left px-3 py-1.5 text-xs text-accent hover:bg-accent/10 transition-colors"
+                            >
+                              {t("search.newCliplist")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         )}
@@ -3405,6 +3818,62 @@ export default function Home() {
 
       {/* ── Undo/redo history panel ── */}
       <HistoryPanel />
+
+      {/* ── Tag browser modal ── */}
+      {showTagBrowser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowTagBrowser(false)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-surface shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold">{t("sidebar.tags")}</h3>
+              <button onClick={() => setShowTagBrowser(false)} className="text-muted hover:text-foreground transition-colors p-1 rounded">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            {globalTagsLoading ? (
+              <p className="text-xs text-muted text-center py-8">{t("app.loading")}</p>
+            ) : globalTags.length === 0 ? (
+              <p className="text-xs text-muted text-center py-8">No tags found</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {globalTags.map(({ tag, count }) => (
+                  <button
+                    key={tag}
+                    onClick={() => { setSearchQuery(`#${tag}`); handleSearch(`#${tag}`); setTab("search"); setShowTagBrowser(false); }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-border hover:border-accent hover:bg-accent/10 transition-colors flex items-center gap-1.5"
+                  >
+                    <span>#{tag}</span>
+                    <span className="text-[10px] text-muted">({count})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cmd+K global search overlay ── */}
+      {showCmdK && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] bg-black/30 backdrop-blur-sm" onClick={() => setShowCmdK(false)}>
+          <div className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={cmdKInputRef}
+              type="text"
+              placeholder="Search everything..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setShowCmdK(false);
+                if (e.key === "Enter") {
+                  const val = (e.target as HTMLInputElement).value;
+                  if (val.trim()) { handleSearch(val); setTab("search"); }
+                  setShowCmdK(false);
+                }
+              }}
+              className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <p className="text-[10px] text-muted mt-2">Press Enter to search · Esc to close</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Undo toast ── */}
       {pendingDelete && (
