@@ -45,12 +45,18 @@ export async function GET(request: NextRequest) {
   );
   const folderIdParam = request.nextUrl.searchParams.get("folderId");
   const folderId = folderIdParam ? parseInt(folderIdParam, 10) : null;
+  const yearParam = request.nextUrl.searchParams.get("year");
+  const yearFilter = yearParam ? parseInt(yearParam, 10) : null;
 
   // Get user's video IDs
   const userVideoIds = await db
     .select({ id: videos.id })
     .from(videos)
-    .where(eq(videos.userId, session.user.id as string));
+    .where(
+      yearFilter
+        ? and(eq(videos.userId, session.user.id as string), eq(videos.year, yearFilter))
+        : eq(videos.userId, session.user.id as string),
+    );
   let userVideoIdArr = userVideoIds.map((v) => v.id);
 
   if (userVideoIdArr.length === 0) {

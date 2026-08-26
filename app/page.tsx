@@ -227,6 +227,7 @@ export default function Home() {
   // ── Search enhancements ──
   const [searchTypeFilter, setSearchTypeFilter] = useState<string | null>(null);
   const [searchFolderFilter, setSearchFolderFilter] = useState<number | null>(null);
+  const [searchYearFilter, setSearchYearFilter] = useState<number | null>(null);
   const [searchOffset, setSearchOffset] = useState(0);
   const [searchTotal, setSearchTotal] = useState(0);
   const [searchLoadingMore, setSearchLoadingMore] = useState(false);
@@ -945,6 +946,13 @@ export default function Home() {
     return showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
   }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos]);
 
+  const uniqueYears = useMemo(() => {
+    const source = showAllVideos ? allVideos : videos;
+    const years = new Set<number>();
+    for (const v of source) { if (v.year != null) years.add(v.year); }
+    return Array.from(years).sort((a, b) => b - a);
+  }, [allVideos, videos, showAllVideos]);
+
   async function fetchPlaylist(playlistUrl: string) {
     setPlaylistLoading(true);
     setPlaylistError(null);
@@ -1070,7 +1078,7 @@ export default function Home() {
       if (res.ok) setSelectedCliplist(await res.json());
     }
   }
-  function handleSearch(q: string) {
+  function handleSearch(q: string, overrides?: { type?: string | null; folder?: number | null; year?: number | null }) {
     setSearchQuery(q);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (q.trim().length < 2) {
@@ -1078,12 +1086,16 @@ export default function Home() {
       setSearchTotal(0);
       return;
     }
+    const type = overrides?.type ?? searchTypeFilter;
+    const folder = overrides?.folder ?? searchFolderFilter;
+    const year = overrides?.year ?? searchYearFilter;
     searchTimerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
         const params = new URLSearchParams({ q: q.trim(), limit: String(SEARCH_LIMIT), offset: "0" });
-        if (searchTypeFilter) params.set("type", searchTypeFilter);
-        if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+        if (type) params.set("type", type);
+        if (folder) params.set("folderId", String(folder));
+        if (year) params.set("year", String(year));
         const res = await fetch(`/api/search?${params}`);
         if (res.ok) {
           const data = await res.json();
@@ -1563,6 +1575,7 @@ export default function Home() {
                         const params = new URLSearchParams({ q: searchQuery.trim(), limit: String(SEARCH_LIMIT), offset: String(searchOffset) });
                         if (searchTypeFilter) params.set("type", searchTypeFilter);
                         if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+                        if (searchYearFilter) params.set("year", String(searchYearFilter));
                         const res = await fetch(`/api/search?${params}`);
                         if (res.ok) {
                           const data = await res.json();
@@ -2651,7 +2664,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Type filter chips + folder dropdown */}
+            {/* Type filter chips + folder + year dropdowns */}
             {searchQuery.trim().length >= 2 && (
               <div className="flex items-center gap-2 mb-4 flex-wrap">
                 <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
@@ -2663,7 +2676,7 @@ export default function Home() {
                   ].map(({ key, label }) => (
                     <button
                       key={key ?? "all"}
-                      onClick={() => { setSearchTypeFilter(key); handleSearch(searchQuery); }}
+                      onClick={() => { setSearchTypeFilter(key); handleSearch(searchQuery, { type: key }); }}
                       className={`px-2 py-1 text-[10px] rounded-md transition-colors ${searchTypeFilter === key ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
                     >
                       {label}
@@ -2672,7 +2685,7 @@ export default function Home() {
                 </div>
                 <select
                   value={searchFolderFilter ?? ""}
-                  onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setSearchFolderFilter(v); handleSearch(searchQuery); }}
+                  onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setSearchFolderFilter(v); handleSearch(searchQuery, { folder: v }); }}
                   className="px-2 py-1 text-[10px] rounded-lg border border-border bg-surface"
                 >
                   <option value="">{t("search.allFolders")}</option>
@@ -2680,6 +2693,18 @@ export default function Home() {
                     <option key={f.id} value={f.id}>{f.name}</option>
                   ))}
                 </select>
+                {uniqueYears.length > 0 && (
+                  <select
+                    value={searchYearFilter ?? ""}
+                    onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setSearchYearFilter(v); handleSearch(searchQuery, { year: v }); }}
+                    className="px-2 py-1 text-[10px] rounded-lg border border-border bg-surface"
+                  >
+                    <option value="">{t("search.allYears")}</option>
+                    {uniqueYears.map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                )}
               </div>
             )}
 
