@@ -123,6 +123,15 @@ export async function PATCH(
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
+  const body = await request.json();
+  const updates: Record<string, unknown> = {};
+  if (body.year !== undefined) updates.year = body.year === null ? null : Number(body.year) || null;
+  if (body.title !== undefined) updates.title = body.title || null;
+
+  if (Object.keys(updates).length > 0) {
+    await db.update(videos).set(updates).where(eq(videos.id, videoId));
+  }
+
   const updated = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
   return NextResponse.json(updated[0]);
 }

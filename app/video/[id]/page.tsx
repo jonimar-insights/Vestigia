@@ -49,6 +49,7 @@ interface VideoData {
   platform?: string;
   title: string | null;
   thumbnailUrl: string | null;
+  year: number | null;
   folderId: number | null;
   annotations: Annotation[];
 }
@@ -119,6 +120,8 @@ export default function VideoPage() {
 
   const [video, setVideo] = useState<VideoData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editingYear, setEditingYear] = useState(false);
+  const [yearInput, setYearInput] = useState("");
 
   // Player state
   const playerRef = useRef<YTPlayer | null>(null);
@@ -565,6 +568,24 @@ export default function VideoPage() {
   // All setState calls inside loadVideo run after `await`, so there is no
   // synchronous cascading render — the rule can't see through the callback.
   useEffect(() => { loadVideo(); }, [loadVideo]); // eslint-disable-line react-hooks/set-state-in-effect
+
+  async function saveYear() {
+    const y = yearInput.trim();
+    const yearVal = y ? parseInt(y) : null;
+    if (y && (isNaN(yearVal!) || yearVal! < 0 || yearVal! > 9999)) return;
+    setEditingYear(false);
+    try {
+      const res = await fetch(`/api/videos/${videoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ year: yearVal }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setVideo(prev => prev ? { ...prev, year: updated.year } : prev);
+      }
+    } catch {}
+  }
 
   // Load saved summaries on mount
   useEffect(() => {
@@ -1146,9 +1167,32 @@ export default function VideoPage() {
             })()}
             <div className="min-w-0">
               <h1 className="text-sm font-semibold truncate">{video.title ?? "Untitled video"}</h1>
-              <p className="text-[10px] text-muted truncate">
-                {video.annotations.length} annotations
-              </p>
+              <div className="flex items-center gap-2 mt-0.5">
+                {editingYear ? (
+                  <input
+                    type="number"
+                    value={yearInput}
+                    onChange={e => setYearInput(e.target.value)}
+                    onBlur={saveYear}
+                    onKeyDown={e => { if (e.key === "Enter") saveYear(); if (e.key === "Escape") setEditingYear(false); }}
+                    autoFocus
+                    min={0} max={9999}
+                    placeholder="YYYY"
+                    className="w-16 text-[10px] px-1.5 py-0.5 border border-border rounded bg-background focus:border-accent focus:outline-none"
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setYearInput(video.year?.toString() ?? ""); setEditingYear(true); }}
+                    className="text-[10px] text-muted hover:text-foreground transition-colors"
+                    title={t("video.year")}
+                  >
+                    {video.year != null ? video.year : `+ ${t("video.year")}`}
+                  </button>
+                )}
+                <p className="text-[10px] text-muted truncate">
+                  {video.annotations.length} annotations
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">

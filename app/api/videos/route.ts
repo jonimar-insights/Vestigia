@@ -53,12 +53,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const body = await request.json();
-  const { url, title, thumbnailUrl, extractKeyMoments, durationSeconds } = body as {
+  const { url, title, thumbnailUrl, extractKeyMoments, durationSeconds, year } = body as {
     url: string;
     title?: string;
     thumbnailUrl?: string;
     extractKeyMoments?: boolean;
     durationSeconds?: number | null;
+    year?: number | null;
   };
 
   const result = await createVideo({
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
     thumbnailUrl,
     extractKeyMoments,
     durationSeconds,
+    year,
     userId: session?.user?.id as string | null,
     userName: session?.user?.name,
   });

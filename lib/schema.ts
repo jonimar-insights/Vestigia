@@ -27,6 +27,7 @@ export const videos = pgTable("videos", {
     .$defaultFn(() => new Date().toISOString()),
   createdBy: text("created_by").notNull().default("anonymous"),
   userId: text("user_id"),
+  year: integer("year"),
 });
 
 export const transcripts = pgTable("transcripts", {

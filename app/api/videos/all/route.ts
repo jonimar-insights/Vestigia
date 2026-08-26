@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
       createdAt: videos.createdAt,
       createdBy: videos.createdBy,
       userId: videos.userId,
+      year: videos.year,
       folderName: folderNameSubquery.folderName,
     })
     .from(videos)
