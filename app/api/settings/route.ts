@@ -8,6 +8,7 @@ import { encryptApiKey, decryptApiKey } from "@/lib/crypto";
 interface UserSettingsData {
   aiKeys: Record<string, string>;
   preferredProvider?: string | null;
+  pinnedSearches?: string[];
 }
 
 function maskApiKey(key: string): string {
@@ -21,7 +22,7 @@ function maskSettings(settings: UserSettingsData): UserSettingsData {
   for (const [provider, key] of Object.entries(settings.aiKeys)) {
     masked[provider] = maskApiKey(key);
   }
-  return { ...settings, aiKeys: masked };
+  return { ...settings, aiKeys: masked, pinnedSearches: settings.pinnedSearches };
 }
 
 function encryptSettings(settings: UserSettingsData): UserSettingsData {
@@ -46,11 +47,11 @@ export async function GET() {
     .limit(1);
 
   if (!rows[0]) {
-    return NextResponse.json({ aiKeys: {}, preferredProvider: null });
+    return NextResponse.json({ aiKeys: {}, preferredProvider: null, pinnedSearches: [] });
   }
 
   const parsed = JSON.parse(rows[0].settings) as UserSettingsData;
-  return NextResponse.json(maskSettings(parsed));
+  return NextResponse.json({ ...maskSettings(parsed), pinnedSearches: parsed.pinnedSearches ?? [] });
 }
 
 export async function PUT(request: NextRequest) {
@@ -60,11 +61,12 @@ export async function PUT(request: NextRequest) {
   }
 
   const body = await request.json();
-  const { aiKeys, preferredProvider } = body as UserSettingsData;
+  const { aiKeys, preferredProvider, pinnedSearches } = body as UserSettingsData;
 
   const settings: UserSettingsData = {
     aiKeys: aiKeys ?? {},
     preferredProvider: preferredProvider ?? undefined,
+    pinnedSearches: pinnedSearches ?? [],
   };
 
   // Encrypt keys before storing
@@ -106,5 +108,5 @@ export async function DELETE() {
   const db = getDb();
   await db.delete(userSettings).where(eq(userSettings.userId, session.user.id));
 
-  return NextResponse.json({ aiKeys: {}, preferredProvider: null });
+  return NextResponse.json({ aiKeys: {}, preferredProvider: null, pinnedSearches: [] });
 }

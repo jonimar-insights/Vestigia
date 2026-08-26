@@ -152,6 +152,7 @@ export default function VideoPage() {
   const [scrubberPos, setScrubberPos] = useState<number | null>(null);
   const [filterLabel, setFilterLabel] = useState<string | null>(null);
   const [filterTag, setFilterTag] = useState<string | null>(null);
+  const [annotationSearch, setAnnotationSearch] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // ── Undoable annotation deletes: nothing is sent until the timer expires. ──
@@ -216,8 +217,16 @@ export default function VideoPage() {
     let list = video.annotations;
     if (filterLabel) list = list.filter(a => a.label === filterLabel);
     if (filterTag) list = list.filter(a => a.tags.includes(filterTag));
+    if (annotationSearch.trim()) {
+      const q = annotationSearch.trim().toLowerCase();
+      list = list.filter(a =>
+        a.label.toLowerCase().includes(q) ||
+        (a.note ?? "").toLowerCase().includes(q) ||
+        a.tags.some(t => t.toLowerCase().includes(q))
+      );
+    }
     return list.filter(a => !pendingAnnotationIds.includes(a.id));
-  }, [video, filterLabel, filterTag, pendingAnnotationIds]);
+  }, [video, filterLabel, filterTag, annotationSearch, pendingAnnotationIds]);
 
   const labelCounts = useMemo(() => {
     if (!video) return {};
@@ -238,9 +247,9 @@ export default function VideoPage() {
     return counts;
   }, [video]);
 
-  const hasAnnotationFilter = !!filterLabel || !!filterTag;
+  const hasAnnotationFilter = !!filterLabel || !!filterTag || !!annotationSearch.trim();
   const feedTitle = !video ? "" : hasAnnotationFilter
-    ? `${[filterLabel, filterTag ? `#${filterTag}` : null].filter(Boolean).join(" · ")} (${displayedAnnotations.length})`
+    ? `${[filterLabel, filterTag ? `#${filterTag}` : null, annotationSearch.trim() ? `"${annotationSearch.trim()}"` : null].filter(Boolean).join(" · ")} (${displayedAnnotations.length})`
     : `${video.annotations.length} ${t("video.annotations")}`;
 
   // ── Social embeds (TikTok/Instagram/X/Facebook/Vimeo) ──
@@ -1759,6 +1768,19 @@ export default function VideoPage() {
                     </button>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Annotation text search */}
+            {video && video.annotations.length > 0 && (
+              <div className="px-1 pb-2 shrink-0">
+                <input
+                  type="text"
+                  value={annotationSearch}
+                  onChange={(e) => setAnnotationSearch(e.target.value)}
+                  placeholder={t("search.videoSearchPlaceholder")}
+                  className="w-full px-3 py-1.5 text-xs border border-border rounded-lg bg-background focus:border-accent focus:outline-none"
+                />
               </div>
             )}
 

@@ -21,6 +21,9 @@ interface Video {
   sceneCount?: number;
   momentCount?: number;
   hasTranscript?: boolean;
+  searchText?: string;
+  folderName?: string | null;
+  latestAnnotationAt?: string;
 }
 
 interface PlaylistVideo {
@@ -35,6 +38,7 @@ interface SearchResult {
   videoId: number;
   videoTitle: string | null;
   videoThumbnail: string | null;
+  folderName: string | null;
   timestamp: number;
   endTimestamp: number | null;
   title: string;
@@ -213,6 +217,36 @@ export default function Home() {
   const [pendingItemIds, setPendingItemIds] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
+  // ── Video grid enhancements ──
+  const [gridFilter, setGridFilter] = useState("");
+  const [gridSort, setGridSort] = useState<"newest" | "oldest" | "az" | "za" | "annotated" | "updated">("newest");
+  const [allVideos, setAllVideos] = useState<Video[]>([]);
+  const [_allVideosLoading, setAllVideosLoading] = useState(false);
+  const [showAllVideos, setShowAllVideos] = useState(false);
+
+  // ── Search enhancements ──
+  const [searchTypeFilter, setSearchTypeFilter] = useState<string | null>(null);
+  const [searchFolderFilter, setSearchFolderFilter] = useState<number | null>(null);
+  const [searchOffset, setSearchOffset] = useState(0);
+  const [searchTotal, setSearchTotal] = useState(0);
+  const [searchLoadingMore, setSearchLoadingMore] = useState(false);
+  const SEARCH_LIMIT = 50;
+
+  // ── Tag browser ──
+  const [showTagBrowser, setShowTagBrowser] = useState(false);
+  const [globalTags, setGlobalTags] = useState<Array<{ tag: string; count: number }>>([]);
+  const [globalTagsLoading, setGlobalTagsLoading] = useState(false);
+
+  // ── Cmd+K global search ──
+  const [showCmdK, setShowCmdK] = useState(false);
+  const cmdKInputRef = useRef<HTMLInputElement>(null);
+
+  // ── Pinned searches ──
+  const [pinnedSearches, setPinnedSearches] = useState<string[]>([]);
+
+  // ── Cliplist bulk selection ──
+  const [cliplistSelectedIds, setCliplistSelectedIds] = useState<Set<number>>(new Set()); // eslint-disable-line @typescript-eslint/no-unused-vars
+
   // ── Share dialog state ──
   const [shareDialogFolderId, setShareDialogFolderId] = useState<number | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -339,6 +373,26 @@ export default function Home() {
       if (res.ok) setCliplists(await res.json());
     } finally {
       setCliplistsLoading(false);
+    }
+  }, []);
+
+  const loadAllVideos = useCallback(async () => {
+    setAllVideosLoading(true);
+    try {
+      const res = await fetch(`/api/videos/all?sort=${gridSort}`);
+      if (res.ok) setAllVideos(await res.json());
+    } finally {
+      setAllVideosLoading(false);
+    }
+  }, [gridSort]);
+
+  const loadGlobalTags = useCallback(async () => {
+    setGlobalTagsLoading(true);
+    try {
+      const res = await fetch("/api/tags");
+      if (res.ok) { const data = await res.json(); setGlobalTags(data.tags ?? []); }
+    } finally {
+      setGlobalTagsLoading(false);
     }
   }, []);
 
@@ -479,6 +533,36 @@ export default function Home() {
 
   // Commit an in-flight undoable delete when leaving the page.
   useEffect(() => () => { if (pendingRef.current) void pendingRef.current.commit(); }, []);
+
+  // Load all videos when toggling "All Videos" mode
+  useEffect(() => {
+    if (showAllVideos) loadAllVideos(); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [showAllVideos, loadAllVideos]);
+
+  // Load global tags when tag browser opens
+  useEffect(() => {
+    if (showTagBrowser && globalTags.length === 0) loadGlobalTags(); // eslint-disable-line react-hooks/set-state-in-effect
+  }, [showTagBrowser, globalTags.length, loadGlobalTags]);
+
+  // Load pinned searches from settings on mount
+  useEffect(() => {
+    fetch("/api/settings").then(r => r.ok ? r.json() : null).then(data => {
+      if (data?.pinnedSearches) setPinnedSearches(data.pinnedSearches);
+    }).catch(() => {});
+  }, []);
+
+  // Cmd+K shortcut
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
+        e.preventDefault();
+        setShowCmdK(true);
+      }
+      if (e.key === "Escape") setShowCmdK(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   async function handleDelete(id: number) {
     const doDelete = async () => {
@@ -856,6 +940,33 @@ export default function Home() {
   const currentVideoList = selectedFolderId !== null ? visibleFolderVideos : visibleVideos;
   const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
+  // ── Grid filter + sort (enhancement #1, #2, #6, #10) ──
+  const gridVideos = useMemo(() => {
+    const source = showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
+    const q = gridFilter.trim().toLowerCase();
+    let list = q ? source.filter((v) => {
+      const titleMatch = (v.title ?? "").toLowerCase().includes(q);
+      const textMatch = (v as Video).searchText?.toLowerCase().includes(q) ?? false;
+      return titleMatch || textMatch;
+    }) : source;
+    switch (gridSort) {
+      case "newest": list = [...list].sort((a, b) => b.id - a.id); break;
+      case "oldest": list = [...list].sort((a, b) => a.id - b.id); break;
+      case "az": list = [...list].sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "")); break;
+      case "za": list = [...list].sort((a, b) => (b.title ?? "").localeCompare(a.title ?? "")); break;
+      case "annotated": list = [...list].sort((a, b) => (b.annotationCount ?? 0) - (a.annotationCount ?? 0)); break;
+      case "updated": list = [...list].sort((a, b) => {
+        const at = (a as Video & { latestAnnotationAt?: string }).latestAnnotationAt;
+        const bt = (b as Video & { latestAnnotationAt?: string }).latestAnnotationAt;
+        if (at && bt) return bt.localeCompare(at);
+        if (at) return -1;
+        if (bt) return 1;
+        return b.id - a.id;
+      }); break;
+    }
+    return list;
+  }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos, gridFilter, gridSort]);
+
   async function fetchPlaylist(playlistUrl: string) {
     setPlaylistLoading(true);
     setPlaylistError(null);
@@ -986,15 +1097,21 @@ export default function Home() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
     if (q.trim().length < 2) {
       setSearchResults([]);
+      setSearchTotal(0);
       return;
     }
     searchTimerRef.current = setTimeout(async () => {
       setSearching(true);
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q.trim())}`);
+        const params = new URLSearchParams({ q: q.trim(), limit: String(SEARCH_LIMIT), offset: "0" });
+        if (searchTypeFilter) params.set("type", searchTypeFilter);
+        if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+        const res = await fetch(`/api/search?${params}`);
         if (res.ok) {
           const data = await res.json();
           setSearchResults(data.results);
+          setSearchTotal(data.total ?? data.results.length);
+          setSearchOffset(data.results.length);
         }
       } finally {
         setSearching(false);
@@ -1453,9 +1570,44 @@ export default function Home() {
               >
                 {t("app.signOut")}
               </button>
-            </div>
-          )}
-        </div>
+              </div>
+            )}
+
+            {/* Load more + total */}
+            {searchResults.length > 0 && (
+              <div className="mt-3 flex flex-col items-center gap-2">
+                <p className="text-[10px] text-muted">{searchTotal} {t("search.results")}</p>
+                {searchOffset < searchTotal && (
+                  <button
+                    onClick={async () => {
+                      setSearchLoadingMore(true);
+                      try {
+                        const params = new URLSearchParams({ q: searchQuery.trim(), limit: String(SEARCH_LIMIT), offset: String(searchOffset) });
+                        if (searchTypeFilter) params.set("type", searchTypeFilter);
+                        if (searchFolderFilter) params.set("folderId", String(searchFolderFilter));
+                        const res = await fetch(`/api/search?${params}`);
+                        if (res.ok) {
+                          const data = await res.json();
+                          setSearchResults(prev => [...prev, ...data.results]);
+                          setSearchOffset(prev => prev + data.results.length);
+                          setSearchTotal(data.total ?? searchTotal);
+                        }
+                      } finally {
+                        setSearchLoadingMore(false);
+                      }
+                    }}
+                    disabled={searchLoadingMore}
+                    className="px-4 py-1.5 rounded-lg border border-border bg-surface text-xs text-muted hover:text-foreground hover:border-accent/50 transition-colors"
+                  >
+                    {searchLoadingMore ? t("app.loading") : t("search.loadMore")}
+                  </button>
+                )}
+                {searchOffset >= searchTotal && (
+                  <p className="text-[10px] text-muted">{t("search.noMore")}</p>
+                )}
+              </div>
+            )}
+          </div>
       </header>
 
       <div className="mx-auto w-full px-6 pt-6">
@@ -1503,17 +1655,27 @@ export default function Home() {
             <div className="space-y-0.5">
               {/* All Videos */}
               <button
-                onClick={() => setSelectedFolderId(null)}
+                onClick={() => { setShowAllVideos(!showAllVideos); setSelectedFolderId(null); }}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                  selectedFolderId === null
+                  showAllVideos
                     ? "bg-accent/10 text-accent font-medium"
                     : "text-muted hover:text-foreground hover:bg-surface"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span>{t("sidebar.allVideos")}</span>
-                  <span className="text-[10px] text-muted/60">{videos.length}</span>
+                  <span className="text-[10px] text-muted/60">{showAllVideos ? allVideos.length : videos.length}</span>
                 </div>
+              </button>
+
+              <button
+                onClick={() => setShowTagBrowser(true)}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm transition-colors hover:bg-surface-hover text-muted hover:text-foreground w-full text-left"
+              >
+                <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                </svg>
+                <span>{t("sidebar.tags")}</span>
               </button>
 
               {/* Folder list */}
@@ -1534,7 +1696,7 @@ export default function Home() {
                     </form>
                   ) : (
                     <button
-                      onClick={() => setSelectedFolderId(folder.id)}
+                      onClick={() => { setSelectedFolderId(folder.id); setShowAllVideos(false); }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                         selectedFolderId === folder.id
                           ? "bg-accent/10 text-accent font-medium"
@@ -1695,6 +1857,28 @@ export default function Home() {
                   })()}
                 </div>
               </div>
+            {/* Grid filter + sort */}
+            <div className="mt-4 space-y-2">
+              <input
+                type="text"
+                value={gridFilter}
+                onChange={(e) => setGridFilter(e.target.value)}
+                placeholder={t("grid.searchPlaceholder")}
+                className="w-full rounded-lg border border-border bg-surface px-3 py-1.5 text-xs placeholder:text-muted focus:border-accent focus:outline-none"
+              />
+              <select
+                value={gridSort}
+                onChange={(e) => setGridSort(e.target.value as typeof gridSort)}
+                className="w-full rounded-lg border border-border bg-surface px-2 py-1.5 text-xs"
+              >
+                <option value="newest">{t("grid.sortNewest")}</option>
+                <option value="oldest">{t("grid.sortOldest")}</option>
+                <option value="az">{t("grid.sortAZ")}</option>
+                <option value="za">{t("grid.sortZA")}</option>
+                <option value="annotated">{t("grid.sortAnnotated")}</option>
+                <option value="updated">{t("grid.sortUpdated")}</option>
+              </select>
+            </div>
             </div>
           </div>
         </aside>
@@ -2047,7 +2231,7 @@ export default function Home() {
                   </div>
                   {viewMode === "grid" ? (
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {visibleFolderVideos.map((video) => (
+                    {gridVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -2107,7 +2291,7 @@ export default function Home() {
                 </div>
                   ) : (
                   <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
-                    {visibleFolderVideos.map((video) => (
+                    {gridVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -2224,7 +2408,7 @@ export default function Home() {
                 </div>
                 {viewMode === "grid" ? (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {visibleVideos.map((video) => (
+                {gridVideos.map((video) => (
                   <Link
                     key={video.id}
                     href={`/video/${video.id}`}
@@ -2307,7 +2491,7 @@ export default function Home() {
                 </div>
                 ) : (
                 <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
-                  {visibleVideos.map((video) => (
+                  {gridVideos.map((video) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
@@ -2465,7 +2649,71 @@ export default function Home() {
                   <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
                 </div>
               )}
+              {searchQuery && !pinnedSearches.includes(searchQuery) && (
+                <button
+                  onClick={() => { const next = [...pinnedSearches, searchQuery]; setPinnedSearches(next); fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiKeys: {}, pinnedSearches: next }) }); }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted hover:text-accent transition-colors"
+                  title={t("search.pinSearch")}
+                >
+                  📌
+                </button>
+              )}
             </div>
+
+            {!searchQuery && pinnedSearches.length > 0 && (
+              <div className="mb-4">
+                <p className="text-[10px] text-muted uppercase tracking-wider mb-2">{t("search.pinnedSearches")}</p>
+                <div className="flex flex-wrap gap-2">
+                  {pinnedSearches.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => handleSearch(q)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:border-accent hover:bg-accent/10 transition-colors"
+                    >
+                      <span>{q}</span>
+                      <span
+                        onClick={(e) => { e.stopPropagation(); const next = pinnedSearches.filter((s) => s !== q); setPinnedSearches(next); fetch("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ aiKeys: {}, pinnedSearches: next }) }); }}
+                        className="text-muted hover:text-danger cursor-pointer"
+                      >
+                        ×
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Type filter chips + folder dropdown */}
+            {searchQuery.trim().length >= 2 && (
+              <div className="flex items-center gap-2 mb-4 flex-wrap">
+                <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
+                  {[
+                    { key: null, label: t("search.allTypes") },
+                    { key: "annotation", label: t("search.annotations") },
+                    { key: "scene", label: t("search.scenes") },
+                    { key: "key_moment", label: t("search.keyMoments") },
+                  ].map(({ key, label }) => (
+                    <button
+                      key={key ?? "all"}
+                      onClick={() => { setSearchTypeFilter(key); handleSearch(searchQuery); }}
+                      className={`px-2 py-1 text-[10px] rounded-md transition-colors ${searchTypeFilter === key ? "bg-accent text-white" : "text-muted hover:text-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <select
+                  value={searchFolderFilter ?? ""}
+                  onChange={(e) => { const v = e.target.value ? Number(e.target.value) : null; setSearchFolderFilter(v); handleSearch(searchQuery); }}
+                  className="px-2 py-1 text-[10px] rounded-lg border border-border bg-surface"
+                >
+                  <option value="">{t("search.allFolders")}</option>
+                  {folderList.map(f => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {searchQuery.length >= 2 && !searching && searchResults.length === 0 && (
               <p className="text-sm text-muted text-center py-8">{t("search.noResults")}</p>
@@ -2510,6 +2758,11 @@ export default function Home() {
                       <p className="text-xs text-muted shrink-0 truncate max-w-[160px]">
                         {r.videoTitle}
                       </p>
+                      {r.folderName && (
+                        <p className="text-[10px] text-accent/60 shrink-0">
+                          {t("search.inFolder").replace("{folder}", r.folderName)}
+                        </p>
+                      )}
                     </Link>
 
                     {/* Add to cliplist button */}
@@ -3609,6 +3862,62 @@ export default function Home() {
 
       {/* ── Undo/redo history panel ── */}
       <HistoryPanel />
+
+      {/* ── Tag browser modal ── */}
+      {showTagBrowser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowTagBrowser(false)}>
+          <div className="w-full max-w-md rounded-xl border border-border bg-surface shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-semibold">{t("sidebar.tags")}</h3>
+              <button onClick={() => setShowTagBrowser(false)} className="text-muted hover:text-foreground transition-colors p-1 rounded">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+            {globalTagsLoading ? (
+              <p className="text-xs text-muted text-center py-8">{t("app.loading")}</p>
+            ) : globalTags.length === 0 ? (
+              <p className="text-xs text-muted text-center py-8">No tags found</p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {globalTags.map(({ tag, count }) => (
+                  <button
+                    key={tag}
+                    onClick={() => { setSearchQuery(`#${tag}`); handleSearch(`#${tag}`); setTab("search"); setShowTagBrowser(false); }}
+                    className="px-3 py-1.5 text-xs rounded-lg border border-border hover:border-accent hover:bg-accent/10 transition-colors flex items-center gap-1.5"
+                  >
+                    <span>#{tag}</span>
+                    <span className="text-[10px] text-muted">({count})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Cmd+K global search overlay ── */}
+      {showCmdK && (
+        <div className="fixed inset-0 z-50 flex items-start justify-center pt-[20vh] bg-black/30 backdrop-blur-sm" onClick={() => setShowCmdK(false)}>
+          <div className="w-full max-w-lg rounded-xl border border-border bg-surface shadow-2xl p-4" onClick={(e) => e.stopPropagation()}>
+            <input
+              ref={cmdKInputRef}
+              type="text"
+              placeholder="Search everything..."
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setShowCmdK(false);
+                if (e.key === "Enter") {
+                  const val = (e.target as HTMLInputElement).value;
+                  if (val.trim()) { handleSearch(val); setTab("search"); }
+                  setShowCmdK(false);
+                }
+              }}
+              className="w-full rounded-lg border border-border bg-background px-4 py-3 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+            />
+            <p className="text-[10px] text-muted mt-2">Press Enter to search · Esc to close</p>
+          </div>
+        </div>
+      )}
 
       {/* ── Undo toast ── */}
       {pendingDelete && (

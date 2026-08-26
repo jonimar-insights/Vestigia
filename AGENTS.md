@@ -62,6 +62,26 @@ This version has breaking changes — APIs, conventions, and file structure may 
   - NOTE: `GET /api/videos` returns only UNFILED videos (excluded: ids present in the user's `folder_videos`) — the home "All Videos" count ≠ total owned videos.
 
 ### Active
+- **Search/dashboard enhancements (implemented, tsc+eslint clean, browser-verified on localhost, NOT yet committed):** All 15 enhancements:
+  1. **Title filter on video grid** — text input filters visible videos by title and annotation content (client-side, instant)
+  2. **Sort dropdown** — Newest/Oldest/A→Z/Z→A/Most annotated/Recently updated
+  3. **"All Videos" sidebar toggle** — shows ALL user videos (including foldered) with `GET /api/videos/all`
+  4. **Search type filter chips** — Annotations/Scenes/Key moments + All types
+  5. **Cmd+K global search overlay** — opens a search modal (works in real browsers; Meta key doesn't fire in headless Chrome)
+  6. **Recently updated sort** — by `latestAnnotationAt` timestamp
+  7. **Folder filter dropdown in search tab** — server-side, narrows search to videos in a specific folder
+  8. **Search pagination** — "Load more" button with offset/limit params, shows total count
+  9. **Tag browser** — sidebar "Tags" button opens a modal with all user tags + counts; clicking a tag searches for it (fixes tag search to strip leading `#` from query)
+  10. **Search integrated into grid** — `gridVideos` memo composes title/content filter + sort + all-videos source
+  11. **Cliplist bulk select (partial)** — `cliplistSelectedIds` state declared (UI not yet wired)
+  12. **Search result context** — shows "in {folder}" below video title when result is in a folder
+  13. **Saved/pinned searches** — Pin button (📌) in search input saves to `user_settings`; pinned chips shown when search is empty, click to search, × to unpin
+  14. **Virtualized list** — `react-window` installed (not yet wired to grid, pending >40 videos threshold)
+  15. **Video-page mini-search** — `annotationSearch` state filters annotations by label/note/tags in video page
+  - New API routes: `GET /api/videos/all` (all user videos with folderName, sort param), `GET /api/tags` (aggregated tag counts), enhanced `GET /api/search` (type/folderId/limit/offset params, N+1 fixed, returns `total`, tag search strips `#` prefix)
+  - EN+PT translation keys for all new UI strings including `search.results`, `search.noMore`, `grid.sortAnnotated`, `grid.sortUpdated`
+  - `npx tsc --noEmit` 0 errors, `npx eslint .` 0 errors 0 warnings
+  - NOT yet committed/deployed
 - **Self-hosted video uploads (implemented, deployed, E2E-verified on prod):** "Upload video file" in the Import tab → direct browser-to-Blob upload (`@vercel/blob/client` `upload()` + `POST /api/upload` `handleUpload`, auth-gated, video/*+jpeg/png only) → `createVideo` classifies any `*.public.blob.vercel-storage.com` URL as `platform:"upload"` (`youtubeId = upload:<pathname>`, idempotent). Client probes duration + captures a JPEG frame (~10% in) and uploads it as thumbnail before POST /api/videos. Video page + shared page gained `playerKind/sharedKind === "html5"`: native `<video data-html5-player>` wrapped by `lib/html5-adapter.ts` (SyncPlayerInterface) → FULL annotation UX (scrubber, ±10s, space/arrows, annotate-from-current-time) like YouTube. Verified on prod: real ffmpeg-generated mp4 uploaded via the SDK flow, native player readyState 4/duration wired (0:00/0:06), Forward-10s seeks UI, Annotate prefills from position. Test artifacts cleaned up (video row + blob deleted).
   - Blob store `vestigia-uploads` (store_HTNlwpgAhdGlQRqW, iad1, public access) connected to project for production/preview/development; `BLOB_READ_WRITE_TOKEN` added to all envs and pulled into `.env.local`.
   - Node-script quirk: the Blob client SDK fetches its token via undici's own `fetch` — global-fetch cookie patching does NOT work; pass `headers: { cookie }` to `upload()` instead.
