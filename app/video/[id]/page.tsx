@@ -10,6 +10,7 @@ import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { Html5Adapter } from "@/lib/html5-adapter";
 import HistoryPanel from "@/components/HistoryPanel";
 import { pushHistory } from "@/lib/history";
+import GuidedTour, { isTourCompleted, completeTour, type TourStep } from "@/components/GuidedTour";
 
 // YouTube IFrame API types
 interface YTPlayer {
@@ -122,6 +123,13 @@ export default function VideoPage() {
   const [loading, setLoading] = useState(true);
   const [editingYear, setEditingYear] = useState(false);
   const [yearInput, setYearInput] = useState("");
+
+  const [showTour, setShowTour] = useState(() => !isTourCompleted("vestigia-video-tour"));
+  const VIDEO_TOUR_STEPS: TourStep[] = [
+    { target: '[data-tour="player"]', title: t("tour.videoPlayer"), description: t("tour.videoPlayerDesc"), placement: "bottom" },
+    { target: '[data-tour="annotate-btn"]', title: t("tour.annotateBtn"), description: t("tour.annotateBtnDesc"), placement: "top" },
+    { target: '[data-tour="timeline"]', title: t("tour.timeline"), description: t("tour.timelineDesc"), placement: "top" },
+  ];
 
   // Player state
   const playerRef = useRef<YTPlayer | null>(null);
@@ -1234,7 +1242,7 @@ export default function VideoPage() {
           {/* ═══ LEFT: Video + Timeline ═══ */}
           <div style={{ width: `${panelRatio}%` }} className="flex flex-col gap-4 min-w-0">
             {/* Video Player */}
-            <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
+            <div data-tour="player" className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
               {playerKind === "html5" && video ? (
                 <video
                   key={video.id}
@@ -1350,6 +1358,7 @@ export default function VideoPage() {
               <div className="flex items-center gap-3">
                 <span className="text-[10px] font-mono text-muted shrink-0 tabular-nums">0:00</span>
                 <div ref={scrubberRef}
+                  data-tour="timeline"
                   className="flex-1 h-8 rounded-full bg-border/60 relative cursor-pointer group"
                   onMouseDown={e => { setScrubberDragging(true); handleScrubberInteraction(e.clientX); }}>
                   {/* Progress fill */}
@@ -1486,6 +1495,7 @@ export default function VideoPage() {
               </div>
             ) : (
               <button onClick={() => setShowForm(true)}
+                data-tour="annotate-btn"
                 className="w-full rounded-xl border border-dashed border-border hover:border-accent/40 bg-surface hover:bg-accent/5 py-3 mb-4 flex items-center justify-center gap-2 transition-all group">
                 <svg className="w-4 h-4 text-muted group-hover:text-accent transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                 <span className="text-xs font-medium text-muted group-hover:text-foreground transition-colors">{t("annotation.new")}</span>
@@ -2018,6 +2028,14 @@ export default function VideoPage() {
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
+      )}
+
+      {showTour && (
+        <GuidedTour
+          steps={VIDEO_TOUR_STEPS}
+          storageKey="vestigia-video-tour"
+          onComplete={() => { completeTour("vestigia-video-tour"); setShowTour(false); }}
+        />
       )}
     </div>
   );

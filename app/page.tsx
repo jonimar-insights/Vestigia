@@ -9,6 +9,7 @@ import HistoryPanel from "@/components/HistoryPanel";
 import { pushHistory } from "@/lib/history";
 import { useLanguage } from "@/components/LanguageProvider";
 import HelpSection from "@/components/HelpSection";
+import GuidedTour, { isTourCompleted, completeTour, type TourStep } from "@/components/GuidedTour";
 
 interface Video {
   id: number;
@@ -124,6 +125,15 @@ export default function Home() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [fetching, setFetching] = useState(true);
+
+  const [showTour, setShowTour] = useState(() => !isTourCompleted("vestigia-dashboard-tour"));
+  const DASHBOARD_TOUR_STEPS: TourStep[] = [
+    { target: '[data-tour="import-tab"]', title: t("tour.step1Title"), description: t("tour.step1Desc"), placement: "bottom" },
+    { target: '[data-tour="import-input"]', title: t("tour.step2Title"), description: t("tour.step2Desc"), placement: "bottom" },
+    { target: '[data-tour="sidebar-folders"]', title: t("tour.step3Title"), description: t("tour.step3Desc"), placement: "right" },
+    { target: '[data-tour="video-grid"]', title: t("tour.step4Title"), description: t("tour.step4Desc"), placement: "top" },
+    { target: '[data-tour="search-tab"]', title: t("tour.step5Title"), description: t("tour.step5Desc"), placement: "bottom" },
+  ];
 
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
@@ -1609,18 +1619,19 @@ export default function Home() {
             { key: "cliplists", label: t("tab.cliplists"), icon: "\ud83d\udccb" },
             { key: "settings", label: t("tab.settings"), icon: "\u2699\ufe0f" },
             { key: "help", label: t("tab.help"), icon: "?" },
-          ] as const).map((t) => (
+          ] as const).map((tabItem) => (
             <button
-              key={t.key}
-              onClick={() => switchToTab(t.key)}
+              key={tabItem.key}
+              data-tour={tabItem.key === "import" ? "import-tab" : tabItem.key === "search" ? "search-tab" : undefined}
+              onClick={() => switchToTab(tabItem.key)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                tab === t.key
+                tab === tabItem.key
                   ? "border-accent text-accent"
                   : "border-transparent text-muted hover:text-foreground"
               }`}
             >
-              <span className="mr-1.5">{t.icon}</span>
-              {t.label}
+              <span className="mr-1.5">{tabItem.icon}</span>
+              {tabItem.label}
             </button>
           ))}
         </nav>
@@ -1628,7 +1639,7 @@ export default function Home() {
 
       <div className="mx-auto w-full px-6 py-6 flex-1 flex gap-6">
         {/* ── SIDEBAR: Folders ── */}
-        <aside className="w-52 shrink-0">
+        <aside data-tour="sidebar-folders" className="w-52 shrink-0">
           <div className="sticky top-6">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-xs font-semibold text-muted uppercase tracking-wider">{t("sidebar.folders")}</h2>
@@ -1864,6 +1875,7 @@ export default function Home() {
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder={t("import.urlPlaceholder")}
+                  data-tour="import-input"
                   className="flex-1 rounded-lg border border-border bg-surface px-4 py-2.5 text-sm placeholder:text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
                   disabled={loading || playlistLoading}
                 />
@@ -2199,7 +2211,7 @@ export default function Home() {
                     </div>
                   </div>
                   {viewMode === "grid" ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div data-tour="video-grid" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {gridVideos.map((video) => (
                     <Link
                       key={video.id}
@@ -2382,7 +2394,7 @@ export default function Home() {
                   </div>
                 </div>
                 {viewMode === "grid" ? (
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                <div data-tour="video-grid" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {gridVideos.map((video) => (
                   <Link
                     key={video.id}
@@ -3703,7 +3715,20 @@ export default function Home() {
         )}
         {/* ── HELP TAB ── */}
         {tab === "help" && (
-          <HelpSection />
+          <div>
+            <div className="mb-4">
+              <button
+                onClick={() => setShowTour(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-accent/30 bg-accent/10 px-4 py-2.5 text-sm font-medium text-accent hover:bg-accent/20 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                {t("tour.startButton")}
+              </button>
+            </div>
+            <HelpSection />
+          </div>
         )}
       </main>
       </div>
@@ -3933,6 +3958,13 @@ export default function Home() {
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
+      )}
+      {showTour && (
+        <GuidedTour
+          steps={DASHBOARD_TOUR_STEPS}
+          storageKey="vestigia-dashboard-tour"
+          onComplete={() => { completeTour("vestigia-dashboard-tour"); setShowTour(false); }}
+        />
       )}
       </div>
     </div>
