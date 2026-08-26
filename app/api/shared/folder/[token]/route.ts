@@ -53,6 +53,7 @@ export async function GET(
       thumbnailUrl: videos.thumbnailUrl,
       durationSeconds: videos.durationSeconds,
       platform: videos.platform,
+      year: videos.year,
     })
     .from(videos)
     .where(inArray(videos.id, videoIds));

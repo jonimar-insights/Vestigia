@@ -97,3 +97,40 @@ export async function DELETE(
 
   return NextResponse.json({ success: true });
 }
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const session = await auth();
+  if (!session?.user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const db = getDb();
+  const { id } = await params;
+  const videoId = parseInt(id);
+
+  if (isNaN(videoId)) {
+    return NextResponse.json({ error: "Invalid video ID" }, { status: 400 });
+  }
+
+  const videoRows = await db
+    .select()
+    .from(videos)
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .limit(1);
+  if (!videoRows[0]) {
+    return NextResponse.json({ error: "Video not found" }, { status: 404 });
+  }
+
+  const body = await request.json();
+  const { year } = body as { year?: number | null };
+
+  if (year !== undefined) {
+    const val = typeof year === "number" && Number.isFinite(year) ? year : null;
+    await db.update(videos).set({ year: val }).where(eq(videos.id, videoId));
+  }
+
+  const updated = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
+  return NextResponse.json(updated[0]);
+}

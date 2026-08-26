@@ -13,6 +13,7 @@ export interface ImportVideoOptions {
   thumbnailUrl?: string;
   extractKeyMoments?: boolean;
   durationSeconds?: number | null;
+  year?: number | null;
   userId: string | null;
   userName?: string | null;
 }
@@ -38,6 +39,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     thumbnailUrl: clientThumbnail,
     extractKeyMoments = false,
     durationSeconds: clientDuration,
+    year: clientYear,
     userId,
     userName,
   } = opts;
@@ -77,6 +79,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
           durationSeconds: typeof clientDuration === "number" && Number.isFinite(clientDuration)
             ? Math.round(clientDuration)
             : null,
+          year: typeof clientYear === "number" && Number.isFinite(clientYear) ? clientYear : null,
           createdBy: userName ?? "anonymous",
           userId: userId ?? null,
         })
@@ -163,6 +166,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
         title,
         thumbnailUrl,
         durationSeconds,
+        year: typeof clientYear === "number" && Number.isFinite(clientYear) ? clientYear : null,
         createdBy: userName ?? "anonymous",
         userId: userId ?? null,
       })

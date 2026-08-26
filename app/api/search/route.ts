@@ -142,6 +142,7 @@ export async function GET(request: NextRequest) {
     videoId: number;
     videoTitle: string | null;
     videoThumbnail: string | null;
+    videoYear: number | null;
     folderName: string | null;
     timestamp: number;
     endTimestamp: number | null;
@@ -151,11 +152,12 @@ export async function GET(request: NextRequest) {
   }[] = [];
 
   for (const a of matchedAnnotations) {
-    results.push({
+      results.push({
       type: "annotation",
       videoId: a.videoId,
       videoTitle: null,
       videoThumbnail: null,
+      videoYear: null,
       folderName: null,
       timestamp: a.timestamp,
       endTimestamp: a.endTimestamp ?? null,
@@ -171,6 +173,7 @@ export async function GET(request: NextRequest) {
       videoId: s.videoId,
       videoTitle: null,
       videoThumbnail: null,
+      videoYear: null,
       folderName: null,
       timestamp: s.timestamp,
       endTimestamp: null,
@@ -185,6 +188,7 @@ export async function GET(request: NextRequest) {
       videoId: m.videoId,
       videoTitle: null,
       videoThumbnail: null,
+      videoYear: null,
       folderName: null,
       timestamp: m.timestamp,
       endTimestamp: null,
@@ -199,15 +203,15 @@ export async function GET(request: NextRequest) {
   const allVideoIds = [...new Set(results.map((r) => r.videoId))];
   const videoMap = new Map<
     number,
-    { id: number; title: string | null; thumbnailUrl: string | null }
+    { id: number; title: string | null; thumbnailUrl: string | null; year: number | null }
   >();
   if (allVideoIds.length > 0) {
     const vRows = await db
-      .select({ id: videos.id, title: videos.title, thumbnailUrl: videos.thumbnailUrl })
+      .select({ id: videos.id, title: videos.title, thumbnailUrl: videos.thumbnailUrl, year: videos.year })
       .from(videos)
       .where(inArray(videos.id, allVideoIds));
     for (const v of vRows) {
-      videoMap.set(v.id, { id: v.id, title: v.title, thumbnailUrl: v.thumbnailUrl });
+      videoMap.set(v.id, { id: v.id, title: v.title, thumbnailUrl: v.thumbnailUrl, year: v.year });
     }
   }
 
@@ -228,6 +232,7 @@ export async function GET(request: NextRequest) {
     if (v) {
       r.videoTitle = v.title;
       r.videoThumbnail = v.thumbnailUrl;
+      r.videoYear = v.year;
     }
     r.folderName = folderMap.get(r.videoId) ?? null;
   }
