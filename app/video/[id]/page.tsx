@@ -49,7 +49,6 @@ interface VideoData {
   platform?: string;
   title: string | null;
   thumbnailUrl: string | null;
-  year: number | null;
   folderId: number | null;
   annotations: Annotation[];
 }
@@ -144,8 +143,6 @@ export default function VideoPage() {
   const [editNote, setEditNote] = useState("");
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
-  const [editingYear, setEditingYear] = useState(false);
-  const [yearInput, setYearInput] = useState("");
 
   // UI state
   const [feedCollapsed, setFeedCollapsed] = useState(false);
@@ -777,34 +774,6 @@ export default function VideoPage() {
 
   useEffect(() => () => { if (pendingRef.current) void pendingRef.current.commit(); }, []);
 
-  async function handleYearSave() {
-    const parsed = yearInput.trim() === "" ? null : parseInt(yearInput, 10);
-    if (yearInput.trim() !== "" && (parsed === null || isNaN(parsed) || parsed < 1900 || parsed > 2100)) return;
-    setEditingYear(false);
-    if (parsed === (video?.year ?? null)) return;
-    const oldYear = video?.year ?? null;
-    const res = await fetch(`/api/videos/${videoId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ year: parsed }),
-    });
-    if (res.ok) {
-      const updated = await res.json();
-      setVideo(v => v ? { ...v, year: updated.year } : v);
-      pushHistory({
-        label: `Set year → ${parsed ?? "none"}`,
-        undo: async () => {
-          await fetch(`/api/videos/${videoId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ year: oldYear }) });
-          setVideo(v => v ? { ...v, year: oldYear } : v);
-        },
-        redo: async () => {
-          await fetch(`/api/videos/${videoId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ year: parsed }) });
-          setVideo(v => v ? { ...v, year: parsed } : v);
-        },
-      });
-    }
-  }
-
   async function handleDelete(id: number) {
     const ann = video?.annotations.find(a => a.id === id);
     enqueueDelete(
@@ -1220,44 +1189,6 @@ export default function VideoPage() {
             <div className="min-w-0">
               <h1 className="text-sm font-semibold truncate">{video.title ?? "Untitled video"}</h1>
               <p className="text-[10px] text-muted truncate">
-                {video.year != null ? (
-                  editingYear ? (
-                    <span className="inline-flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={1900}
-                        max={2100}
-                        value={yearInput}
-                        onChange={(e) => setYearInput(e.target.value)}
-                        onBlur={handleYearSave}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleYearSave(); if (e.key === "Escape") setEditingYear(false); }}
-                        className="w-16 text-[10px] bg-surface border border-border rounded px-1 py-0"
-                        autoFocus
-                      />
-                    </span>
-                  ) : (
-                    <button onClick={() => { setEditingYear(true); setYearInput(String(video.year)); }} className="hover:text-foreground transition-colors">{video.year}</button>
-                  )
-                ) : (
-                  editingYear ? (
-                    <span className="inline-flex items-center gap-1">
-                      <input
-                        type="number"
-                        min={1900}
-                        max={2100}
-                        value={yearInput}
-                        onChange={(e) => setYearInput(e.target.value)}
-                        onBlur={handleYearSave}
-                        onKeyDown={(e) => { if (e.key === "Enter") handleYearSave(); if (e.key === "Escape") setEditingYear(false); }}
-                        placeholder="year"
-                        className="w-16 text-[10px] bg-surface border border-border rounded px-1 py-0"
-                        autoFocus
-                      />
-                    </span>
-                  ) : (
-                    <button onClick={() => { setEditingYear(true); setYearInput(""); }} className="hover:text-foreground transition-colors italic opacity-50 hover:opacity-100">+ year</button>
-                  )
-                )}{video.year != null && !editingYear && " · "}
                 {video.annotations.length} annotations &middot; {uniqueLabels.length} categories
               </p>
             </div>

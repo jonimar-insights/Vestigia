@@ -32,7 +32,6 @@ export async function GET(request: NextRequest) {
       title: videos.title,
       thumbnailUrl: videos.thumbnailUrl,
       durationSeconds: videos.durationSeconds,
-      year: videos.year,
       createdAt: videos.createdAt,
       createdBy: videos.createdBy,
       userId: videos.userId,

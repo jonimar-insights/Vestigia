@@ -123,14 +123,6 @@ export async function PATCH(
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
-  const body = await request.json();
-  const { year } = body as { year?: number | null };
-
-  if (year !== undefined) {
-    const val = typeof year === "number" && Number.isFinite(year) ? year : null;
-    await db.update(videos).set({ year: val }).where(eq(videos.id, videoId));
-  }
-
   const updated = await db.select().from(videos).where(eq(videos.id, videoId)).limit(1);
   return NextResponse.json(updated[0]);
 }

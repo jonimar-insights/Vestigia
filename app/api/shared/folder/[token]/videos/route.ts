@@ -14,14 +14,13 @@ export async function POST(
 
   const { token } = await params;
   const body = await request.json();
-  const { email, name, url, title, thumbnailUrl, extractKeyMoments, year } = body as {
+  const { email, name, url, title, thumbnailUrl, extractKeyMoments } = body as {
     email?: string;
     name?: string;
     url?: string;
     title?: string;
     thumbnailUrl?: string;
     extractKeyMoments?: boolean;
-    year?: number | null;
   };
 
   if (!email) {
@@ -63,7 +62,6 @@ export async function POST(
     title,
     thumbnailUrl,
     extractKeyMoments,
-    year,
     userId: folder.userId ?? null,
     userName: name?.trim() || shareRows[0].email.split("@")[0],
   });

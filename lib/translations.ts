@@ -65,7 +65,6 @@ export const dict = {
     "video.bulkDeleting": "Deleting {done}/{total}",
     "video.thumbnailView": "Thumbnail view",
     "video.detailListView": "Detail list view",
-    "video.year": "Year",
 
     "translate": "Translate",
 
@@ -437,7 +436,6 @@ export const dict = {
     "video.bulkDeleting": "A eliminar {done}/{total}",
     "video.thumbnailView": "Vista em miniaturas",
     "video.detailListView": "Vista em lista",
-    "video.year": "Ano",
 
     "translate": "Traduzir",
 

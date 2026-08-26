@@ -22,7 +22,6 @@ export const videos = pgTable("videos", {
   title: text("title"),
   thumbnailUrl: text("thumbnail_url"),
   durationSeconds: integer("duration_seconds"),
-  year: integer("year"),
   createdAt: text("created_at")
     .notNull()
     .$defaultFn(() => new Date().toISOString()),
