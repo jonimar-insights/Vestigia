@@ -951,8 +951,7 @@ export default function Home() {
     let list = q ? source.filter((v) => {
       const titleMatch = (v.title ?? "").toLowerCase().includes(q);
       const textMatch = (v as Video).searchText?.toLowerCase().includes(q) ?? false;
-      const yearMatch = (v as Video).year != null && String((v as Video).year).includes(q);
-      return titleMatch || textMatch || yearMatch;
+      return titleMatch || textMatch;
     }) : source;
     switch (gridSort) {
       case "newest": list = [...list].sort((a, b) => b.id - a.id); break;
