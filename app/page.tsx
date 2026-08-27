@@ -619,38 +619,6 @@ export default function Home() {
     }
   }
 
-  // Copy mode: pick a file from Google Drive, download + store it in app storage.
-  async function openDrivePicker() {
-    setDriveError(null);
-    try {
-      const { loadTokenClient, loadPicker } = await import("@/lib/drive-picker");
-      const token = await loadTokenClient();
-      const result = await loadPicker(token);
-      if (!result?.fileId) return;
-      setDriveImporting(true);
-      setDriveError(null);
-      const res = await fetch("/api/drive/import", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileId: result.fileId,
-          accessToken: token,
-          name: result.name,
-          mimeType: result.mimeType,
-        }),
-      });
-      const data = await res.json().catch(() => ({} as { error?: string }));
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to copy Drive video");
-      }
-      await loadVideos();
-    } catch (err) {
-      setDriveError(err instanceof Error ? err.message : "Drive copy failed");
-    } finally {
-      setDriveImporting(false);
-    }
-  }
-
   // ── Folder management ──
   async function createFolder() {
     if (!newFolderName.trim()) return;
@@ -1872,25 +1840,14 @@ export default function Home() {
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
                     {t("drive.importLink")}
                   </button>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => void openDrivePicker()}
-                    disabled={driveImporting || loading || playlistLoading}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-accent hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 9.5A3.5 3.5 0 015.5 3a3.5 3.5 0 010 6.5zm0 8l-2 3.5h14l-2-3.5m-10 0V14a3 3 0 013-3h4a3 3 0 013 3v3.5m-10 0H6.5m10 0H19a2.5 2.5 0 002.5-2.5V13" /></svg>
-                    {t("drive.picker")}
-                  </button>
                   {driveImporting && (
-                    <span className="text-xs text-muted flex items-center gap-1.5">
+                    <span className="text-xs text-muted flex items-center gap-1.5 shrink-0">
                       <span className="h-3 w-3 animate-spin rounded-full border border-muted/30 border-t-accent inline-block" />
                       {t("upload.uploading")}
                     </span>
                   )}
                 </div>
-                <p className="text-[10px] text-muted">{t("drive.hint")}</p>
+                <p className="text-[10px] text-muted">{t("drive.hintLink")}</p>
                 {driveError && <p className="text-xs text-danger">{driveError}</p>}
               </div>
               {error && <p className="mt-2 text-sm text-danger">{error}</p>}

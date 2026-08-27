@@ -46,8 +46,7 @@ export const dict = {
     "upload.uploading": "Uploading…",
     "drive.linkPlaceholder": "Paste a Google Drive public share link…",
     "drive.importLink": "Import link",
-    "drive.picker": "Choose from Google Drive",
-    "drive.hint": "Link = stream from your Drive (file must be shareable). Picker = copy the file into your storage for full annotation support.",
+    "drive.hintLink": "The file must be shared with \"anyone with the link can view\".",
 
     "video.import": "Import",
     "video.importing": "Importing...",
@@ -425,8 +424,7 @@ export const dict = {
     "upload.uploading": "A carregar…",
     "drive.linkPlaceholder": "Cole um link público de partilha do Google Drive…",
     "drive.importLink": "Importar link",
-    "drive.picker": "Escolher do Google Drive",
-    "drive.hint": "Link = transmitir do seu Drive (o ficheiro tem de ser partilhável). Seletor = copiar o ficheiro para o seu armazenamento para suporte completo de anotações.",
+    "drive.hintLink": "O ficheiro tem de estar partilhado com \"qualquer pessoa com o link pode ver\".",
 
     "video.import": "Importar",
     "video.importing": "A importar...",
