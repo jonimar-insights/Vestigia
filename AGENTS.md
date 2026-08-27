@@ -13,6 +13,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - `POST/DELETE /api/folders/[id]/share` — share token generation/revocation
 - `GET /api/shared/folder/[token]` + `GET|POST /api/shared/folder/[token]/annotations` — public endpoints
 - `app/shared/folder/[token]/page.tsx` — public shared folder dashboard
+- **Onboarding tours cover import→annotate→present (commit 190a8d2, committed):** dashboard tour adds a "Cliplist presentations" step (`[data-tour="cliplists-tab"]` on the Cliplists tab); video tour adds an "Add to cliplist" step (`[data-tour="add-to-cliplist"]` on the key-moment add-to-cliplist button); EN+PT `tour.step6*` / `tour.addToCliplist*` keys. FIXED latent bug in `components/GuidedTour.tsx`: the video tour auto-completed silently on mount because its targets (player/annotate/timeline) mount ASYNCHRONOUSLY after data loads — the skip-missing `effectiveIndex` treated them as absent and fired `onComplete()` immediately (flag set to "done", tour never displayed). Now GuidedTour re-polls the DOM for ~3s (`domTick` state + 400ms interval) so late-mounting targets are picked up, and auto-completes only after a 600ms grace timeout.
 - Share button (share icon + clipboard copy + "Copied!") added to folder sidebar in `app/page.tsx`
 - Auto-generated `shareToken` on folder creation in `app/api/folders/route.ts`
 - EN/PT translation keys `share.*` and `shared.*` added to `lib/translations.ts`
