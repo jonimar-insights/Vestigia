@@ -3,24 +3,34 @@ import { NextRequest } from "next/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const DRIVE_DOWNLOAD = "https://drive.usercontent.google.com/download";
+
+function isHtml(res: Response): boolean {
+  const ct = res.headers.get("content-type") ?? "";
+  return /text\/html/i.test(ct);
+}
+
 /**
- * Same-origin streaming proxy for Google Drive videos.
- *
- * Google's direct-download endpoint sets `Cross-Origin-Resource-Policy: same-site`,
- * which makes browsers BLOCK the cross-origin fetch inside a <video> element
- * (MEDIA_ERR_SRC_NOT_SUPPORTED / format error). Serving the bytes from our own
- * origin bypasses that, so we relay Range requests here and stream the response.
- *
- * The target file must be publicly shared ("anyone with the link can view").
+ * Google serves an HTML "virus scan" confirmation page for files over ~25MB
+ * (well, for files that exceed its scan threshold) instead of the raw bytes.
+ * The page embeds a hidden `confirm` token that must be echoed back via a
+ * `confirm` query param to get the actual media. Extract it from the form.
  */
+function extractConfirmToken(html: string): string | null {
+  // <input type="hidden" name="confirm" value="t" />  (token is usually like "t", "AxqQ...")
+  const re = /name=["']confirm["'][^>]*value=["']([A-Za-z0-9_-]+)["']/i;
+  const m = html.match(re);
+  if (m?.[1]) return m[1];
+  const m2 = html.match(/confirm=["']?([A-Za-z0-9_-]+)/i);
+  return m2?.[1] ?? null;
+}
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ): Promise<Response> {
   const { id } = await context.params;
-  const target = `https://drive.usercontent.google.com/download?id=${encodeURIComponent(
-    id,
-  )}&export=download`;
+  let target = `${DRIVE_DOWNLOAD}?id=${encodeURIComponent(id)}&export=download`;
 
   const upstreamHeaders: Record<string, string> = {};
   const range = request.headers.get("range");
@@ -38,6 +48,41 @@ export async function GET(
     console.error("[drive/stream] upstream fetch failed:", e);
     return new Response("Upstream error", { status: 502 });
   }
+
+  // Google returns an HTML virus-scan page for larger files. Detect it, grab the
+  // confirm token, and re-request with that token (still honoring Range).
+  if (upstream.ok && (upstream.status === 200 || upstream.status === 206) && isHtml(upstream)) {
+    const html = await upstream.text();
+    const confirm = extractConfirmToken(html);
+    if (!confirm) {
+      // Fall back to the HTML itself so the caller sees something rather than hang.
+      return new Response(html, {
+        status: 200,
+        headers: { "content-type": "text/html; charset=utf-8" },
+      });
+    }
+    target = `${DRIVE_DOWNLOAD}?id=${encodeURIComponent(id)}&export=download&confirm=${encodeURIComponent(
+      confirm,
+    )}`;
+    try {
+      const retryHeaders: Record<string, string> = { Accept: "*/*" };
+      if (range) retryHeaders["Range"] = range;
+      const retry = await fetch(target, {
+        headers: retryHeaders,
+        redirect: "follow",
+        cache: "no-store",
+      });
+      if (retry.ok || retry.status === 206) {
+        upstream = retry;
+      } else {
+        return new Response("Upstream error", { status: retry.status });
+      }
+    } catch (e) {
+      console.error("[drive/stream] confirm retry failed:", e);
+      return new Response("Upstream error", { status: 502 });
+    }
+  }
+
   if (!upstream.ok && upstream.status !== 206) {
     return new Response("Upstream error", { status: upstream.status });
   }

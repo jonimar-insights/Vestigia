@@ -114,14 +114,17 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       return { video: driveExisting[0], existing: true };
     }
     try {
+      const driveThumbnail =
+        clientThumbnail ??
+        `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w1000-h1000`;
       const [video] = await db
         .insert(videos)
         .values({
           youtubeUrl: drivePlayableUrl(fileId),
           youtubeId: storageId,
           platform: "drive",
-          title: clientTitle ?? null,
-          thumbnailUrl: clientThumbnail ?? null,
+          title: clientTitle ?? "Google Drive video",
+          thumbnailUrl: driveThumbnail,
           durationSeconds:
             typeof clientDuration === "number" && Number.isFinite(clientDuration)
               ? Math.round(clientDuration)

@@ -1383,6 +1383,16 @@ export default function SharedFolderPage({
                   <div className="aspect-video w-full overflow-hidden bg-muted relative">
                     {v.thumbnailUrl ? (
                       <Image src={v.thumbnailUrl} alt={v.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" />
+                    ) : v.platform === "drive" ? (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <svg className="w-10 h-10 text-muted/40" viewBox="0 0 87.3 78" fill="currentColor" aria-hidden="true">
+                          <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3L31.5 19.6 9.6 54.6a7.02 7.02 0 0 0-3 12.25z" />
+                          <path d="M43.65 25.5 36.3 8.85a6.94 6.94 0 0 0-5.9-4.9 6.82 6.82 0 0 0-4.05.85.45.45 0 0 0-.1.5L4.5 55.55c-.4.7-.65 1.45-.75 2.25l.05.35-3.5 6.05L2.9 67.8h.4l34.1-35.7a6.97 6.97 0 0 0 6.25-6.6z" />
+                          <path d="M54.65 18.6H45.9a7.02 7.02 0 0 1-5.05 6.95l-8.7 3.6-8.3 3.45-5.25 2.15 10.75-24.3-2.85-5.5-3.6 2.6 2.8 5.45-6.95 15.1 43.9-18.2a6.75 6.75 0 0 0-5.7-3.3h-.2l.3-.05c0-.1 0-.1-.05-.15h-.05l-.05.05z" />
+                          <path d="M44.9 78h30.55a6.8 6.8 0 0 0 6.9-6.1c.05-.3.05-.6.05-.9 0-1.35-.4-2.65-1.1-3.75l-17-29.45a6.9 6.9 0 0 0-11.9 0l-8.7 15.05-4.35 7.55-7.5 13a7.06 7.06 0 0 0 5.9 10.6z" />
+                          <path d="M57.88 6.68a7.06 7.06 0 0 1 5.4-1.6 6.95 6.95 0 0 1 4.5 2.6l5.75 9.4-4.45-7.75-14.1 24.4 10.6 18.35v-.05l12.05-20.85a6.9 6.9 0 0 0-.55-7.55 6.85 6.85 0 0 0-5.35-2.75l-14.15-.2z" />
+                        </svg>
+                      </div>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
                         <svg className="w-10 h-10 text-muted/20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
