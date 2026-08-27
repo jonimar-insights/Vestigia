@@ -22,7 +22,7 @@ const SECTIONS: HelpSection[] = [
     id: "import",
     titleKey: "help.import",
     introKey: "help.importIntro",
-    items: ["help.import1", "help.import2", "help.import3"],
+    items: ["help.import1", "help.import2", "help.import3", "help.import4", "help.import5"],
   },
   {
     id: "folders",
@@ -76,7 +76,7 @@ const SECTIONS: HelpSection[] = [
     id: "faq",
     titleKey: "help.faq",
     introKey: "help.faqIntro",
-    items: ["help.faq1", "help.faq2", "help.faq3", "help.faq4"],
+    items: ["help.faq1", "help.faq2", "help.faq3", "help.faq4", "help.faq5"],
   },
 ];
 
