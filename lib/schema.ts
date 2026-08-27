@@ -28,6 +28,7 @@ export const videos = pgTable("videos", {
   createdBy: text("created_by").notNull().default("anonymous"),
   userId: text("user_id"),
   year: integer("year"),
+  channel: text("channel"),
 });
 
 export const transcripts = pgTable("transcripts", {

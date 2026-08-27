@@ -127,6 +127,7 @@ export async function PATCH(
   const updates: Record<string, unknown> = {};
   if (body.year !== undefined) updates.year = body.year === null ? null : Number(body.year) || null;
   if (body.title !== undefined) updates.title = body.title || null;
+  if (body.channel !== undefined) updates.channel = body.channel === null ? null : String(body.channel).trim() || null;
 
   if (Object.keys(updates).length > 0) {
     await db.update(videos).set(updates).where(eq(videos.id, videoId));

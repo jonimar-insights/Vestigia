@@ -51,6 +51,7 @@ interface VideoData {
   title: string | null;
   thumbnailUrl: string | null;
   year: number | null;
+  channel: string | null;
   folderId: number | null;
   annotations: Annotation[];
 }
@@ -123,6 +124,8 @@ export default function VideoPage() {
   const [loading, setLoading] = useState(true);
   const [editingYear, setEditingYear] = useState(false);
   const [yearInput, setYearInput] = useState("");
+  const [editingChannel, setEditingChannel] = useState(false);
+  const [channelInput, setChannelInput] = useState("");
 
   const [showTour, setShowTour] = useState(() => !isTourCompleted("vestigia-video-tour"));
   const VIDEO_TOUR_STEPS: TourStep[] = [
@@ -591,6 +594,22 @@ export default function VideoPage() {
       if (res.ok) {
         const updated = await res.json();
         setVideo(prev => prev ? { ...prev, year: updated.year } : prev);
+      }
+    } catch {}
+  }
+
+  async function saveChannel() {
+    const ch = channelInput.trim();
+    setEditingChannel(false);
+    try {
+      const res = await fetch(`/api/videos/${videoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channel: ch || null }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setVideo(prev => prev ? { ...prev, channel: updated.channel } : prev);
       }
     } catch {}
   }
@@ -1195,6 +1214,26 @@ export default function VideoPage() {
                     title={t("video.year")}
                   >
                     {video.year != null ? video.year : `+ ${t("video.year")}`}
+                  </button>
+                )}
+                {editingChannel ? (
+                  <input
+                    type="text"
+                    value={channelInput}
+                    onChange={e => setChannelInput(e.target.value)}
+                    onBlur={saveChannel}
+                    onKeyDown={e => { if (e.key === "Enter") saveChannel(); if (e.key === "Escape") setEditingChannel(false); }}
+                    autoFocus
+                    placeholder={t("video.channel")}
+                    className="w-40 text-[10px] px-1.5 py-0.5 border border-border rounded bg-background focus:border-accent focus:outline-none"
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setChannelInput(video.channel ?? ""); setEditingChannel(true); }}
+                    className="text-[10px] text-muted hover:text-foreground transition-colors flex items-center gap-1"
+                    title={t("video.channel")}
+                  >
+                    {video.channel ? video.channel : `+ ${t("video.channel")}`}
                   </button>
                 )}
                 <p className="text-[10px] text-muted truncate">

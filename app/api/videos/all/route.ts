@@ -36,6 +36,7 @@ export async function GET(request: NextRequest) {
       createdBy: videos.createdBy,
       userId: videos.userId,
       year: videos.year,
+      channel: videos.channel,
       folderName: folderNameSubquery.folderName,
     })
     .from(videos)

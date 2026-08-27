@@ -14,7 +14,7 @@ export async function POST(
 
   const { token } = await params;
   const body = await request.json();
-  const { email, name, url, title, thumbnailUrl, extractKeyMoments, year } = body as {
+  const { email, name, url, title, thumbnailUrl, extractKeyMoments, year, channel } = body as {
     email?: string;
     name?: string;
     url?: string;
@@ -22,6 +22,7 @@ export async function POST(
     thumbnailUrl?: string;
     extractKeyMoments?: boolean;
     year?: number | null;
+    channel?: string | null;
   };
 
   if (!email) {
@@ -64,6 +65,7 @@ export async function POST(
     thumbnailUrl,
     extractKeyMoments,
     year,
+    channel,
     userId: folder.userId ?? null,
     userName: name?.trim() || shareRows[0].email.split("@")[0],
   });

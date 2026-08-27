@@ -14,6 +14,7 @@ export interface ImportVideoOptions {
   extractKeyMoments?: boolean;
   durationSeconds?: number | null;
   year?: number | null;
+  channel?: string | null;
   userId: string | null;
   userName?: string | null;
 }
@@ -40,6 +41,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     extractKeyMoments = false,
     durationSeconds: clientDuration,
     year: clientYear,
+    channel: clientChannel,
     userId,
     userName,
   } = opts;
@@ -80,6 +82,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
             ? Math.round(clientDuration)
             : null,
           year: typeof clientYear === "number" ? clientYear : null,
+          channel: clientChannel ?? null,
           createdBy: userName ?? "anonymous",
           userId: userId ?? null,
         })
@@ -121,6 +124,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
   let title: string | null = clientTitle ?? null;
   let thumbnailUrl: string | null = clientThumbnail ?? null;
   let durationSeconds: number | null = null;
+  let channel: string | null = clientChannel ?? null;
 
   try {
     const controller = new AbortController();
@@ -133,9 +137,13 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
         title?: string;
         thumbnail_url?: string;
         duration?: number;
+        author_name?: string;
       };
       title = title ?? oembedData.title ?? null;
       thumbnailUrl = thumbnailUrl ?? oembedData.thumbnail_url ?? null;
+      if (!clientChannel && oembedData.author_name) {
+        channel = oembedData.author_name;
+      }
       if (oembedData.duration && typeof oembedData.duration === "number") {
         durationSeconds = oembedData.duration;
       }
@@ -167,6 +175,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
         thumbnailUrl,
         durationSeconds,
         year: typeof clientYear === "number" ? clientYear : null,
+        channel,
         createdBy: userName ?? "anonymous",
         userId: userId ?? null,
       })

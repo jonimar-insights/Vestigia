@@ -54,6 +54,7 @@ export async function GET(
       durationSeconds: videos.durationSeconds,
       platform: videos.platform,
       year: videos.year,
+      channel: videos.channel,
     })
     .from(videos)
     .where(inArray(videos.id, videoIds));

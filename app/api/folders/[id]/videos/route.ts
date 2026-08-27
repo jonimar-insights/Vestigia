@@ -18,13 +18,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const db = getDb();
   const body = await request.json();
-  const { videoId, url, title, thumbnailUrl, extractKeyMoments, year } = body as {
+  const { videoId, url, title, thumbnailUrl, extractKeyMoments, year, channel } = body as {
     videoId?: number;
     url?: string;
     title?: string;
     thumbnailUrl?: string;
     extractKeyMoments?: boolean;
     year?: number | null;
+    channel?: string | null;
   };
 
   if (!videoId && !url) {
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       thumbnailUrl,
       extractKeyMoments,
       year,
+      channel,
       userId: session?.user?.id as string | null,
       userName: session?.user?.name,
     });

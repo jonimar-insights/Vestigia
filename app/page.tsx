@@ -19,6 +19,7 @@ interface Video {
   thumbnailUrl: string | null;
   createdAt: string;
   year?: number | null;
+  channel?: string | null;
   annotationCount?: number;
   sceneCount?: number;
   momentCount?: number;
@@ -41,6 +42,7 @@ interface SearchResult {
   videoTitle: string | null;
   videoThumbnail: string | null;
   videoYear: number | null;
+  videoChannel: string | null;
   folderName: string | null;
   timestamp: number;
   endTimestamp: number | null;
@@ -2244,6 +2246,9 @@ export default function Home() {
                             {video.year != null && (
                               <span className="shrink-0 text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded">{video.year}</span>
                             )}
+                            {video.channel != null && (
+                              <span className="shrink-0 max-w-[120px] truncate text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded" title={video.channel}>{video.channel}</span>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-0.5">
@@ -2311,6 +2316,9 @@ export default function Home() {
                           )}
                           {video.year != null && (
                             <span className="text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded">{video.year}</span>
+                          )}
+                          {video.channel != null && (
+                            <span className="max-w-[140px] truncate text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded" title={video.channel}>{video.channel}</span>
                           )}
                         </div>
                       </div>
@@ -2517,6 +2525,9 @@ export default function Home() {
                           )}
                           {video.year != null && (
                             <span className="text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded">{video.year}</span>
+                          )}
+                          {video.channel != null && (
+                            <span className="max-w-[140px] truncate text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded" title={video.channel}>{video.channel}</span>
                           )}
                         </div>
                       </div>
@@ -2763,6 +2774,7 @@ export default function Home() {
                       <p className="text-xs text-muted shrink-0 truncate max-w-[160px]">
                         {r.videoTitle}
                         {r.videoYear != null && <span className="ml-1 text-[10px] text-muted/60">({r.videoYear})</span>}
+                        {r.videoChannel != null && <span className="ml-1 text-[10px] text-muted/50">- {r.videoChannel}</span>}
                       </p>
                       {r.folderName && (
                         <p className="text-[10px] text-accent/60 shrink-0">
