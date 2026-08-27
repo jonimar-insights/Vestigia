@@ -8,6 +8,7 @@ const handler = auth((req) => {
   const isPublic =
     nextUrl.pathname.startsWith("/shared/") ||
     nextUrl.pathname.startsWith("/api/shared/") ||
+    nextUrl.pathname.startsWith("/api/drive/") ||
     nextUrl.pathname === "/signin" ||
     nextUrl.pathname === "/privacy" ||
     nextUrl.pathname === "/terms" ||

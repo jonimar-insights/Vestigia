@@ -36,11 +36,14 @@ export function extractDriveFileId(url: string): string | null {
 }
 
 /**
- * A direct-download URL that a plain <video> element can stream for PUBLIC files
- * ("anyone with the link can view").
+ * A playable src served through our same-origin streaming proxy.
+ * Google's direct-download URL sets `Cross-Origin-Resource-Policy: same-site`,
+ * so browsers refuse to load it inside a <video> element cross-origin; relaying
+ * via /api/drive/stream/<id> (Range-aware) fixes playback. The relative path
+ * works on both localhost and the deployed origin. File must be publicly shared.
  */
 export function drivePlayableUrl(fileId: string): string {
-  return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download`;
+  return `/api/drive/stream/${encodeURIComponent(fileId)}`;
 }
 
 /** Standard view URL for the browser (open in Drive). */
