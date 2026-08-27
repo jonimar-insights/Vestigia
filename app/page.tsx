@@ -37,7 +37,7 @@ interface PlaylistVideo {
 }
 
 interface SearchResult {
-  type: "annotation" | "scene" | "key_moment";
+  type: "annotation" | "scene" | "key_moment" | "video";
   videoId: number;
   videoTitle: string | null;
   videoThumbnail: string | null;
@@ -2696,6 +2696,7 @@ export default function Home() {
                     { key: "annotation", label: t("search.annotations") },
                     { key: "scene", label: t("search.scenes") },
                     { key: "key_moment", label: t("search.keyMoments") },
+                    { key: "video", label: t("search.videos") },
                   ].map(({ key, label }) => (
                     <button
                       key={key ?? "all"}

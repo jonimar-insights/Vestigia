@@ -31,7 +31,8 @@ export async function GET(request: NextRequest) {
   const typeFilter =
     typeParam === "annotation" ||
     typeParam === "scene" ||
-    typeParam === "key_moment"
+    typeParam === "key_moment" ||
+    typeParam === "video"
       ? typeParam
       : null;
 
@@ -143,6 +144,23 @@ export async function GET(request: NextRequest) {
             ),
           );
 
+  // Videos matching by title, channel, or year
+  const matchedVideos =
+    typeFilter && typeFilter !== "video"
+      ? []
+      : await db
+          .select({ id: videos.id, title: videos.title, channel: videos.channel, year: videos.year })
+          .from(videos)
+          .where(
+            and(
+              or(
+                ilike(videos.title, pattern),
+                ilike(videos.channel, pattern),
+              ),
+              inArray(videos.id, userVideoIdArr),
+            ),
+          );
+
   const results: {
     type: string;
     videoId: number;
@@ -204,6 +222,22 @@ export async function GET(request: NextRequest) {
       endTimestamp: null,
       title: m.title,
       detail: m.detail,
+    });
+  }
+
+  for (const v of matchedVideos) {
+    results.push({
+      type: "video",
+      videoId: v.id,
+      videoTitle: v.title,
+      videoThumbnail: null,
+      videoYear: v.year,
+      videoChannel: v.channel,
+      folderName: null,
+      timestamp: 0,
+      endTimestamp: null,
+      title: v.title ?? "Video",
+      detail: v.channel,
     });
   }
 
