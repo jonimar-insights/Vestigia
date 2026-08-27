@@ -29,20 +29,46 @@ export default function GuidedTour({ steps, storageKey: _storageKey, onComplete 
   const tooltipRef = useRef<HTMLDivElement>(null);
   const skippedRef = useRef(false);
 
-  // Skip steps whose target doesn't exist
+  // Some pages mount their tour targets asynchronously (e.g. the video page's
+  // player/annotate/timeline appear only after data loads). Re-check the DOM on
+  // a short interval so targets that arrive late are picked up instead of being
+  // mistaken for missing.
+  const [domTick, setDomTick] = useState(0);
+
+  // Skip steps whose target doesn't exist (recomputed whenever the DOM may have
+  // changed, e.g. async targets mounting).
   const effectiveIndex = useMemo(() => {
     let idx = stepIndex;
     while (idx < steps.length && !document.querySelector(steps[idx].target)) idx++;
     return idx;
-  }, [stepIndex, steps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepIndex, steps, domTick]);
 
   const step = steps[effectiveIndex];
 
-  // If all remaining steps have no target, complete
+  // Re-poll the DOM briefly so async-mounted targets can appear.
   useEffect(() => {
-    if (visible && effectiveIndex >= steps.length) {
-      onComplete();
-    }
+    if (!visible) return;
+    let cancelled = false;
+    const interval = setInterval(() => {
+      if (cancelled) return;
+      setDomTick((v) => v + 1);
+    }, 400);
+    const stop = setTimeout(() => clearInterval(interval), 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      clearTimeout(stop);
+    };
+  }, [visible, effectiveIndex]);
+
+  // Only auto-complete once targets have had a chance to mount. If every
+  // remaining step's target is genuinely absent (after the grace window), end
+  // the tour rather than blocking it.
+  useEffect(() => {
+    if (!visible || effectiveIndex < steps.length) return;
+    const t = setTimeout(() => onComplete(), 600);
+    return () => clearTimeout(t);
   }, [visible, effectiveIndex, steps.length, onComplete]);
 
   const measureTarget = useCallback(() => {

@@ -161,6 +161,7 @@ export default function Home() {
     { target: '[data-tour="import-input"]', title: t("tour.step2Title"), description: t("tour.step2Desc"), placement: "bottom" },
     { target: '[data-tour="sidebar-folders"]', title: t("tour.step3Title"), description: t("tour.step3Desc"), placement: "right" },
     { target: '[data-tour="video-grid"]', title: t("tour.step4Title"), description: t("tour.step4Desc"), placement: "top" },
+    { target: '[data-tour="cliplists-tab"]', title: t("tour.step6Title"), description: t("tour.step6Desc"), placement: "bottom" },
     { target: '[data-tour="search-tab"]', title: t("tour.step5Title"), description: t("tour.step5Desc"), placement: "bottom" },
   ];
 
@@ -1573,7 +1574,7 @@ export default function Home() {
           ] as const).map((tabItem) => (
             <button
               key={tabItem.key}
-              data-tour={tabItem.key === "import" ? "import-tab" : tabItem.key === "search" ? "search-tab" : undefined}
+              data-tour={tabItem.key === "import" ? "import-tab" : tabItem.key === "search" ? "search-tab" : tabItem.key === "cliplists" ? "cliplists-tab" : undefined}
               onClick={() => switchToTab(tabItem.key)}
               className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 tab === tabItem.key

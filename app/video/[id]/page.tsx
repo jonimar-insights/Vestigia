@@ -132,6 +132,7 @@ export default function VideoPage() {
     { target: '[data-tour="player"]', title: t("tour.videoPlayer"), description: t("tour.videoPlayerDesc"), placement: "bottom" },
     { target: '[data-tour="annotate-btn"]', title: t("tour.annotateBtn"), description: t("tour.annotateBtnDesc"), placement: "top" },
     { target: '[data-tour="timeline"]', title: t("tour.timeline"), description: t("tour.timelineDesc"), placement: "top" },
+    { target: '[data-tour="add-to-cliplist"]', title: t("tour.addToCliplistTitle"), description: t("tour.addToCliplistDesc"), placement: "top" },
   ];
 
   // Player state
@@ -1705,6 +1706,7 @@ export default function VideoPage() {
                                 <span className="text-[9px] text-muted/20">|</span>
                                 <div className="relative" data-key-moment-dropdown>
                                   <button
+                                    data-tour="add-to-cliplist"
                                     onClick={() => {
                                       if (cliplists.length === 0) loadCliplists();
                                       setKeyMomentDropdown({ index: i, open: keyMomentDropdown.index === i ? !keyMomentDropdown.open : true });
