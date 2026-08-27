@@ -123,8 +123,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [extractKeyMoments, setExtractKeyMoments] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [driveImportUrl, setDriveImportUrl] = useState("");
+  const [driveImporting, setDriveImporting] = useState(false);
+  const [driveError, setDriveError] = useState<string | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [fetching, setFetching] = useState(true);
 
@@ -592,107 +593,61 @@ export default function Home() {
     );
   }
 
-  // ── Local file upload (self-hosted video, full annotation support) ──
-  async function probeVideoDuration(file: File): Promise<number | null> {
-    return new Promise((resolve) => {
-      const el = document.createElement("video");
-      const objUrl = URL.createObjectURL(file);
-      const done = (d: number | null) => {
-        URL.revokeObjectURL(objUrl);
-        el.removeAttribute("src");
-        resolve(d);
-      };
-      const timer = setTimeout(() => done(null), 15000);
-      el.preload = "metadata";
-      el.onloadedmetadata = () => {
-        clearTimeout(timer);
-        done(Number.isFinite(el.duration) ? el.duration : null);
-      };
-      el.onerror = () => { clearTimeout(timer); done(null); };
-      el.src = objUrl;
-    });
-  }
-
-  async function captureThumbnail(file: File, duration: number | null): Promise<Blob | null> {
-    if (!document.createElement("canvas").getContext("2d")) return null;
-    return new Promise((resolve) => {
-      const el = document.createElement("video");
-      const objUrl = URL.createObjectURL(file);
-      const timer = setTimeout(() => { URL.revokeObjectURL(objUrl); resolve(null); }, 15000);
-      el.muted = true;
-      el.preload = "auto";
-      el.onseeked = () => {
-        try {
-          const canvas = document.createElement("canvas");
-          canvas.width = 640;
-          canvas.height = Math.round(640 * (el.videoHeight / el.videoWidth)) || 360;
-          canvas.getContext("2d")!.drawImage(el, 0, 0, canvas.width, canvas.height);
-          canvas.toBlob(
-            (blob) => { clearTimeout(timer); URL.revokeObjectURL(objUrl); resolve(blob); },
-            "image/jpeg",
-            0.75,
-          );
-        } catch {
-          clearTimeout(timer);
-          URL.revokeObjectURL(objUrl);
-          resolve(null);
-        }
-      };
-      el.onerror = () => { clearTimeout(timer); URL.revokeObjectURL(objUrl); resolve(null); };
-      el.src = objUrl;
-      el.onloadedmetadata = () => {
-        el.currentTime = duration && Number.isFinite(duration) ? Math.min(duration * 0.1, 5) : 0.5;
-      };
-    });
-  }
-
-  async function handleLocalUpload(file: File) {
-    setError(null);
-    setUploading(true);
+  // ── Google Drive import ──
+  // Stream mode: import from a public Drive share link (native <video> src).
+  async function handleDriveLinkImport() {
+    const url = driveImportUrl.trim();
+    if (!url) return;
+    setDriveError(null);
+    setDriveImporting(true);
     try {
-      const [{ upload }, duration] = await Promise.all([
-        import("@vercel/blob/client"),
-        probeVideoDuration(file),
-      ]);
-      const videoBlob = await upload(file.name, file, {
-        access: "public",
-        handleUploadUrl: "/api/upload",
-        contentType: file.type || "video/mp4",
-      });
-      let thumbnailUrl: string | undefined;
-      try {
-        const thumb = await captureThumbnail(file, duration);
-        if (thumb) {
-          const thumbBlob = await upload(`thumb-${file.name}.jpg`, thumb, {
-            access: "public",
-            handleUploadUrl: "/api/upload",
-            contentType: "image/jpeg",
-          });
-          thumbnailUrl = thumbBlob.url;
-        }
-      } catch {
-        // Thumbnail is optional — don't fail the import after the video
-        // itself is already stored.
-      }
       const res = await fetch("/api/videos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json().catch(() => ({} as { error?: string }));
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to import Drive video");
+      }
+      setDriveImportUrl("");
+      await loadVideos();
+    } catch (err) {
+      setDriveError(err instanceof Error ? err.message : "Drive import failed");
+    } finally {
+      setDriveImporting(false);
+    }
+  }
+
+  // Copy mode: pick a file from Google Drive, download + store it in app storage.
+  async function openDrivePicker() {
+    setDriveError(null);
+    try {
+      const { loadTokenClient, loadPicker } = await import("@/lib/drive-picker");
+      const token = await loadTokenClient();
+      const result = await loadPicker(token);
+      if (!result?.fileId) return;
+      setDriveImporting(true);
+      setDriveError(null);
+      const res = await fetch("/api/drive/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          url: videoBlob.url,
-          title: file.name.replace(/\.[^.]+$/, ""),
-          thumbnailUrl,
-          durationSeconds: duration,
+          fileId: result.fileId,
+          accessToken: token,
+          name: result.name,
+          mimeType: result.mimeType,
         }),
       });
+      const data = await res.json().catch(() => ({} as { error?: string }));
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}) as { error?: string });
-        throw new Error(data.error || "Failed to add uploaded video");
+        throw new Error(data.error || "Failed to copy Drive video");
       }
       await loadVideos();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setDriveError(err instanceof Error ? err.message : "Drive copy failed");
     } finally {
-      setUploading(false);
+      setDriveImporting(false);
     }
   }
 
@@ -1898,33 +1853,45 @@ export default function Home() {
                 />
                 {t("video.extractKeyMoments")}
               </label>
-              <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border/60">
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/mp4,video/webm,video/quicktime,video/x-matroska,.mp4,.webm,.mov,.mkv"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void handleLocalUpload(f);
-                    e.target.value = "";
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading || loading || playlistLoading}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-accent hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                >
-                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
-                  {t("upload.pick")}
-                </button>
-                {uploading && (
-                  <span className="text-xs text-muted flex items-center gap-1.5">
-                    <span className="h-3 w-3 animate-spin rounded-full border border-muted/30 border-t-accent inline-block" />
-                    {t("upload.uploading")}
-                  </span>
-                )}
+              <div className="mt-3 pt-3 border-t border-border/60 space-y-2">
+                <div className="flex items-center gap-2">
+                  <input
+                    value={driveImportUrl}
+                    onChange={(e) => setDriveImportUrl(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void handleDriveLinkImport(); }}
+                    placeholder={t("drive.linkPlaceholder")}
+                    disabled={driveImporting || loading || playlistLoading}
+                    className="flex-1 min-w-0 rounded-lg border border-border bg-surface px-3 py-1.5 text-xs focus:border-accent focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleDriveLinkImport()}
+                    disabled={driveImporting || loading || playlistLoading || !driveImportUrl.trim()}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-accent hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors shrink-0"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                    {t("drive.importLink")}
+                  </button>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => void openDrivePicker()}
+                    disabled={driveImporting || loading || playlistLoading}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-accent hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 9.5A3.5 3.5 0 015.5 3a3.5 3.5 0 010 6.5zm0 8l-2 3.5h14l-2-3.5m-10 0V14a3 3 0 013-3h4a3 3 0 013 3v3.5m-10 0H6.5m10 0H19a2.5 2.5 0 002.5-2.5V13" /></svg>
+                    {t("drive.picker")}
+                  </button>
+                  {driveImporting && (
+                    <span className="text-xs text-muted flex items-center gap-1.5">
+                      <span className="h-3 w-3 animate-spin rounded-full border border-muted/30 border-t-accent inline-block" />
+                      {t("upload.uploading")}
+                    </span>
+                  )}
+                </div>
+                <p className="text-[10px] text-muted">{t("drive.hint")}</p>
+                {driveError && <p className="text-xs text-danger">{driveError}</p>}
               </div>
               {error && <p className="mt-2 text-sm text-danger">{error}</p>}
             </form>

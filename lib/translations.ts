@@ -44,6 +44,10 @@ export const dict = {
     "import.deselectAll": "Deselect all",
     "upload.pick": "Upload video file",
     "upload.uploading": "Uploading…",
+    "drive.linkPlaceholder": "Paste a Google Drive public share link…",
+    "drive.importLink": "Import link",
+    "drive.picker": "Choose from Google Drive",
+    "drive.hint": "Link = stream from your Drive (file must be shareable). Picker = copy the file into your storage for full annotation support.",
 
     "video.import": "Import",
     "video.importing": "Importing...",
@@ -419,6 +423,10 @@ export const dict = {
     "import.deselectAll": "Desselecionar tudo",
     "upload.pick": "Carregar ficheiro de vídeo",
     "upload.uploading": "A carregar…",
+    "drive.linkPlaceholder": "Cole um link público de partilha do Google Drive…",
+    "drive.importLink": "Importar link",
+    "drive.picker": "Escolher do Google Drive",
+    "drive.hint": "Link = transmitir do seu Drive (o ficheiro tem de ser partilhável). Seletor = copiar o ficheiro para o seu armazenamento para suporte completo de anotações.",
 
     "video.import": "Importar",
     "video.importing": "A importar...",

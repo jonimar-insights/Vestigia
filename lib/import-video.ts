@@ -2,6 +2,7 @@ import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
 import { detectSocialPlatform } from "@/lib/social";
+import { extractDriveFileId, drivePlayableUrl, isGoogleDriveUrl } from "@/lib/drive";
 import { eq, and } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
 import { extractYouTubeChapters, extractTranscriptKeyMoments, extractAIKeyMoments } from "@/lib/key-moments";
@@ -90,6 +91,50 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       return { video, existing: false };
     } catch (e: unknown) {
       console.error("[upload video insert]", e);
+      const msg = e instanceof Error ? e.message : "Insert failed";
+      return { error: msg, status: 500 };
+    }
+  }
+
+  // ── Google Drive streaming (requires a public share link) ──
+  // youtubeUrl = direct-download playable src, youtubeId = "drive:<id>",
+  // platform "drive" → native HTML5 player with full seek control.
+  if (isGoogleDriveUrl(url)) {
+    const fileId = extractDriveFileId(url);
+    if (!fileId) {
+      return { error: "Could not parse a Drive file ID from that link", status: 400 };
+    }
+    const storageId = `drive:${fileId}`;
+    const driveExisting = await db
+      .select()
+      .from(videos)
+      .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
+      .limit(1);
+    if (driveExisting[0]) {
+      return { video: driveExisting[0], existing: true };
+    }
+    try {
+      const [video] = await db
+        .insert(videos)
+        .values({
+          youtubeUrl: drivePlayableUrl(fileId),
+          youtubeId: storageId,
+          platform: "drive",
+          title: clientTitle ?? null,
+          thumbnailUrl: clientThumbnail ?? null,
+          durationSeconds:
+            typeof clientDuration === "number" && Number.isFinite(clientDuration)
+              ? Math.round(clientDuration)
+              : null,
+          year: typeof clientYear === "number" ? clientYear : null,
+          channel: clientChannel ?? null,
+          createdBy: userName ?? "anonymous",
+          userId: userId ?? null,
+        })
+        .returning();
+      return { video, existing: false };
+    } catch (e: unknown) {
+      console.error("[drive video insert]", e);
       const msg = e instanceof Error ? e.message : "Insert failed";
       return { error: msg, status: 500 };
     }

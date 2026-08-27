@@ -229,10 +229,10 @@ export default function VideoPage() {
     ? parseSocialStorageId(video.youtubeId)
     : null;
   // youtube: full YT IFrame player · vimeo: full control via Player SDK ·
-  // html5: self-hosted upload (native element) · embed: platform iframe
-  // without seek API → manual timestamps only
+  // html5: self-hosted upload OR Google Drive public link (native element) ·
+  // embed: platform iframe without seek API → manual timestamps only
   const playerKind: "youtube" | "vimeo" | "html5" | "embed" =
-    video?.platform === "upload"
+    video?.platform === "upload" || video?.platform === "drive"
       ? "html5"
       : !social
         ? "youtube"

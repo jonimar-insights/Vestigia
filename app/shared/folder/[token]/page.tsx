@@ -438,7 +438,7 @@ export default function SharedFolderPage({
     ? parseSocialStorageId(selectedVideo.youtubeId)
     : null;
   const sharedKind: "youtube" | "vimeo" | "html5" | "embed" =
-    selectedVideo?.platform === "upload"
+    selectedVideo?.platform === "upload" || selectedVideo?.platform === "drive"
       ? "html5"
       : !sharedSocial
         ? "youtube"
