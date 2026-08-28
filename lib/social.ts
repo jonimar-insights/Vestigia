@@ -41,8 +41,14 @@ export function detectSocialPlatform(url: string): SocialMatch | null {
   }
 
   if (host === "vimeo.com" || host.endsWith(".vimeo.com")) {
-    const m = path.match(/\/(\d{6,})/);
-    if (m) return { platform: "vimeo", platformId: m[1] };
+    // Canonical: https://vimeo.com/<id> or https://vimeo.com/video/<id>.
+    // Prefer the id after /video/, otherwise take the LAST numeric path segment
+    // (for URLs like /album/<albumId>/video/<videoId>). Stop at ? or #.
+    const withoutQuery = path.split(/[?#]/)[0];
+    const videoSeg = withoutQuery.match(/\/video\/(\d{5,})/);
+    if (videoSeg) return { platform: "vimeo", platformId: videoSeg[1] };
+    const nums = withoutQuery.match(/(?:^|\/)(\d{5,})$/);
+    if (nums) return { platform: "vimeo", platformId: nums[1] };
   }
 
   return null;

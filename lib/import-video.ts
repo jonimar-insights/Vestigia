@@ -144,7 +144,8 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
   }
 
   // ── Vimeo is supported (full playback via the Player SDK) ──
-  const social = detectSocialPlatform(url);
+  const canonicalUrl = url.trim();
+  const social = detectSocialPlatform(canonicalUrl);
   if (social?.platform === "vimeo") {
     const storageId = socialStorageId(social);
     const existingRows = await db
@@ -156,7 +157,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       return { video: existingRows[0], existing: true };
     }
     try {
-      const meta = await fetchSocialMeta(url, social);
+      const meta = await fetchSocialMeta(canonicalUrl, social);
       const vimeoThumbnail =
         clientThumbnail ??
         meta.thumbnailUrl ??
@@ -164,7 +165,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       const [video] = await db
         .insert(videos)
         .values({
-          youtubeUrl: url,
+          youtubeUrl: canonicalUrl,
           youtubeId: storageId,
           platform: "vimeo",
           title: clientTitle ?? meta.title ?? `Vimeo video ${social.platformId}`,
