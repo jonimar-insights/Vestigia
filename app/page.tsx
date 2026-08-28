@@ -6,6 +6,7 @@ import { isTrustedImageUrl } from "@/lib/image-host";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
+import EditableTitle from "@/components/EditableTitle";
 import HistoryPanel from "@/components/HistoryPanel";
 import { pushHistory } from "@/lib/history";
 import { useLanguage } from "@/components/LanguageProvider";
@@ -969,6 +970,30 @@ export default function Home() {
   function clearTitleTranslations() {
     setTranslatedTitles(new Map());
     setTranslatedLang(null);
+  }
+
+  // Rename a video from a card: optimistic across every view, persisted via PATCH.
+  async function renameVideo(id: number, newTitle: string) {
+    const t = newTitle.trim();
+    const patchArr = (arr: Video[]) => arr.map((v) => (v.id === id ? { ...v, title: t || null } : v));
+    setVideos((prev) => patchArr(prev));
+    setAllVideos((prev) => patchArr(prev));
+    setFolderVideos((prev) => patchArr(prev));
+    if (t) setTranslatedTitles((prev) => { const m = new Map(prev); m.delete(id); return m; });
+    try {
+      const res = await fetch(`/api/videos/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: t || null }),
+      });
+      if (!res.ok) refreshViews();
+    } catch { refreshViews(); }
+  }
+
+  async function refreshViews() {
+    await loadVideos();
+    if (showAllVideos) await loadAllVideos();
+    if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
   }
 
   const visibleVideos = useMemo(() => videos.filter((v) => !pendingVideoIds.includes(v.id)), [videos, pendingVideoIds]);
@@ -2401,7 +2426,7 @@ export default function Home() {
                       )}
                       <div className="p-3 flex items-start justify-between gap-2">
                         <div className="min-w-0">
-                          <h3 className="text-sm font-medium line-clamp-2">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
+                          <EditableTitle id={video.id} title={video.title} display={translatedTitles.get(video.id) || (video.title ?? "Untitled")} className="text-sm font-medium line-clamp-2" onRename={renameVideo} />
                           <div className="flex items-center gap-2 mt-1">
                             <span className={`shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded ${(video.momentCount ?? 0) > 0 ? "text-amber-500 bg-amber-500/10" : "text-muted/50 bg-surface-hover/50"}`} title={`${video.momentCount ?? 0} key moment${(video.momentCount ?? 0) !== 1 ? "s" : ""}`}>
                               <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
@@ -2472,7 +2497,7 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
+                        <EditableTitle id={video.id} title={video.title} display={translatedTitles.get(video.id) || (video.title ?? "Untitled")} className="text-sm font-medium truncate" onRename={renameVideo} />
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
                             <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} {t("video.annotations")}</span>
@@ -2604,7 +2629,7 @@ export default function Home() {
                     )}
                     <div className="p-3 flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h3 className="text-sm font-medium line-clamp-2">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
+                        <EditableTitle id={video.id} title={video.title} display={translatedTitles.get(video.id) || (video.title ?? "Untitled")} className="text-sm font-medium line-clamp-2" onRename={renameVideo} />
                         <div className="flex items-center gap-2 mt-1">
                           {(video.momentCount ?? 0) > 0 && (
                             <span className="shrink-0 text-[9px] font-medium text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded flex items-center gap-0.5" title={`${video.momentCount} key moment${video.momentCount !== 1 ? "s" : ""}`}>
@@ -2690,7 +2715,7 @@ export default function Home() {
                         </div>
                       )}
                       <div className="flex-1 min-w-0">
-                        <h3 className="text-sm font-medium truncate">{translatedTitles.get(video.id) || (video.title ?? "Untitled")}</h3>
+                        <EditableTitle id={video.id} title={video.title} display={translatedTitles.get(video.id) || (video.title ?? "Untitled")} className="text-sm font-medium truncate" onRename={renameVideo} />
                         <div className="flex items-center gap-2 mt-1">
                           {(video.annotationCount ?? 0) > 0 && (
                             <span className="text-[9px] font-medium text-blue-500 bg-blue-500/10 px-1.5 py-0.5 rounded">{video.annotationCount} {t("video.annotations")}</span>
