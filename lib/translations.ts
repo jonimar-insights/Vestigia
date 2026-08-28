@@ -19,6 +19,14 @@ export const dict = {
     "sidebar.delete": "Delete",
     "sidebar.removeFromFolder": "Remove from folder",
 
+    "trash.title": "Trash",
+    "trash.empty": "Trash is empty",
+    "trash.restore": "Restore",
+    "trash.restoreAll": "Restore all",
+    "trash.deleteForever": "Delete forever",
+    "trash.emptyTrash": "Empty trash",
+    "trash.deleted": "Deleted",
+
     "folder.create": "Create folder",
     "folder.name": "Folder name",
     "folder.cancel": "Cancel",
@@ -403,6 +411,14 @@ export const dict = {
     "sidebar.rename": "Renomear",
     "sidebar.delete": "Eliminar",
     "sidebar.removeFromFolder": "Remover da pasta",
+
+    "trash.title": "Reciclagem",
+    "trash.empty": "A reciclagem está vazia",
+    "trash.restore": "Restaurar",
+    "trash.restoreAll": "Restaurar tudo",
+    "trash.deleteForever": "Eliminar definitivamente",
+    "trash.emptyTrash": "Esvaziar reciclagem",
+    "trash.deleted": "Eliminado",
 
     "folder.create": "Criar pasta",
     "folder.name": "Nome da pasta",

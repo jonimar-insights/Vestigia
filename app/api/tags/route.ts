@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, annotations } from "@/lib/schema";
-import { eq } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET() {
@@ -16,7 +16,7 @@ export async function GET() {
     .select({ tags: annotations.tags })
     .from(annotations)
     .innerJoin(videos, eq(videos.id, annotations.videoId))
-    .where(eq(videos.userId, userId));
+    .where(and(eq(videos.userId, userId), isNull(videos.deletedAt)));
 
   const counts: Record<string, number> = {};
 

@@ -28,6 +28,7 @@ interface Video {
   searchText?: string;
   folderName?: string | null;
   latestAnnotationAt?: string;
+  deletedAt?: string | null;
 }
 
 interface PlaylistVideo {
@@ -264,6 +265,11 @@ export default function Home() {
   const [_allVideosLoading, setAllVideosLoading] = useState(false);
   const [showAllVideos, setShowAllVideos] = useState(false);
 
+  // ── Trash (soft-deleted videos) ──
+  const [showTrash, setShowTrash] = useState(false);
+  const [trashVideos, setTrashVideos] = useState<Video[]>([]);
+  const [trashLoading, setTrashLoading] = useState(false);
+
   // ── Search enhancements ──
   const [searchTypeFilter, setSearchTypeFilter] = useState<string | null>(null);
   const [searchFolderFilter, setSearchFolderFilter] = useState<number | null>(null);
@@ -362,6 +368,16 @@ export default function Home() {
     } catch {}
   }, []);
 
+  const loadTrash = useCallback(async () => {
+    setTrashLoading(true);
+    try {
+      const res = await fetch("/api/videos/trash");
+      if (res.ok) setTrashVideos(await res.json());
+    } finally {
+      setTrashLoading(false);
+    }
+  }, []);
+
   const loadFolderVideos = useCallback(async (folderId: number) => {
     setFolderVideosLoading(true);
     try {
@@ -378,6 +394,7 @@ export default function Home() {
   useEffect(() => {
     loadVideos();  
     loadFolders(); // eslint-disable-line react-hooks/set-state-in-effect
+    loadTrash();
 
     // Auto-select folder from URL ?folder= param
     const params = new URLSearchParams(window.location.search);
@@ -396,7 +413,7 @@ export default function Home() {
         fetch(`/api/cliplists/${cid}`).then(r => r.ok ? r.json() : null).then(data => { if (data) setSelectedCliplist(data); }).catch(() => {});
       }
     }
-  }, [loadVideos, loadFolders]);
+  }, [loadVideos, loadFolders, loadTrash]);
 
   useEffect(() => {
     if (selectedFolderId !== null) {
@@ -612,6 +629,7 @@ export default function Home() {
       await loadVideos();
       if (showAllVideos) await loadAllVideos();
       if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
+      await loadTrash();
     };
     const video = currentVideoList.find((v) => v.id === id);
     enqueueDelete(
@@ -620,6 +638,56 @@ export default function Home() {
       () => {},
       { videos: [id] },
     );
+  }
+
+  // ── Trash actions ──
+  async function restoreVideo(id: number) {
+    await fetch(`/api/videos/${id}/restore`, { method: "POST" });
+    await loadTrash();
+    await loadVideos();
+    if (showAllVideos) await loadAllVideos();
+    if (selectedFolderId != null) await loadFolderVideos(selectedFolderId);
+    await loadFolders();
+  }
+
+  function deleteVideoForever(id: number) {
+    const video = trashVideos.find((v) => v.id === id);
+    enqueueDelete(
+      video?.title ? video.title.slice(0, 40) : `#${id}`,
+      async () => {
+        await fetch(`/api/videos/${id}?permanent=true`, { method: "DELETE" });
+        await loadTrash();
+        await loadFolders();
+      },
+      () => {},
+      { videos: [id] },
+    );
+  }
+
+  function emptyTrash() {
+    if (trashVideos.length === 0) return;
+    const ids = trashVideos.map((v) => v.id);
+    enqueueDelete(
+      `${ids.length} ${t("undo.videos")}`,
+      async () => {
+        await Promise.all(ids.map((id) => fetch(`/api/videos/${id}?permanent=true`, { method: "DELETE" })));
+        await loadTrash();
+        await loadFolders();
+      },
+      () => {},
+      { videos: ids },
+    );
+  }
+
+  async function restoreAllTrash() {
+    if (trashVideos.length === 0) return;
+    for (const v of trashVideos) {
+      await fetch(`/api/videos/${v.id}/restore`, { method: "POST" });
+    }
+    await loadTrash();
+    await loadVideos();
+    if (showAllVideos) await loadAllVideos();
+    await loadFolders();
   }
 
   // ── Google Drive import ──
@@ -856,6 +924,7 @@ export default function Home() {
       await loadVideos();
       if (showAllVideos) await loadAllVideos();
       if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
+      await loadTrash();
     };
     setSelectedVideoIds(new Set());
     enqueueDelete(`${ids.length} ${t("undo.videos")}`, doDelete, () => {}, { videos: ids });
@@ -1613,7 +1682,7 @@ export default function Home() {
             <div className="space-y-0.5">
               {/* All Videos */}
               <button
-                onClick={() => { setShowAllVideos(!showAllVideos); setSelectedFolderId(null); }}
+                onClick={() => { setShowAllVideos(!showAllVideos); setSelectedFolderId(null); setShowTrash(false); }}
                 className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                   showAllVideos
                     ? "bg-accent/10 text-accent font-medium"
@@ -1623,6 +1692,30 @@ export default function Home() {
                 <div className="flex items-center justify-between">
                   <span>{t("sidebar.allVideos")}</span>
                   <span className="text-[10px] text-muted/60">{showAllVideos ? allVideos.length : videos.length}</span>
+                </div>
+              </button>
+
+              {/* Trash (soft-deleted videos) */}
+              <button
+                onClick={() => { setShowTrash(!showTrash); setSelectedFolderId(null); setShowAllVideos(false); }}
+                data-tour="trash-button"
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                  showTrash
+                    ? "bg-accent/10 text-accent font-medium"
+                    : "text-muted hover:text-foreground hover:bg-surface"
+                }`}
+                title={t("trash.title")}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    {t("trash.title")}
+                  </span>
+                  {trashVideos.length > 0 && (
+                    <span className="text-[10px] text-muted/60">{trashVideos.length}</span>
+                  )}
                 </div>
               </button>
 
@@ -1654,7 +1747,7 @@ export default function Home() {
                     </form>
                   ) : (
                     <button
-                      onClick={() => { setSelectedFolderId(folder.id); setShowAllVideos(false); }}
+                      onClick={() => { setSelectedFolderId(folder.id); setShowAllVideos(false); setShowTrash(false); }}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
                         selectedFolderId === folder.id
                           ? "bg-accent/10 text-accent font-medium"
@@ -1755,7 +1848,7 @@ export default function Home() {
                     return shared.map((folder) => (
                       <div key={folder.id} className="group flex items-center justify-between px-3 py-1.5 rounded-lg text-sm text-muted hover:bg-surface-hover transition-colors">
                         <span
-                          onClick={() => setSelectedFolderId(folder.id)}
+                          onClick={() => { setSelectedFolderId(folder.id); setShowTrash(false); setShowAllVideos(false); }}
                           className="truncate text-xs cursor-pointer"
                         >
                           {folder.name}
@@ -2109,7 +2202,119 @@ export default function Home() {
               </div>
             )}
 
-            {fetching ? (
+            {showTrash ? (
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-medium flex items-center gap-2">
+                    <svg className="w-4 h-4 text-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    {t("trash.title")}
+                    {trashVideos.length > 0 && (
+                      <span className="text-[10px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded">
+                        {trashVideos.length}
+                      </span>
+                    )}
+                  </h2>
+                  {trashVideos.length > 0 && (
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => void restoreAllTrash()}
+                        disabled={trashLoading}
+                        className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted hover:text-accent hover:border-accent disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
+                        title={t("trash.restoreAll")}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        {t("trash.restoreAll")}
+                      </button>
+                      <button
+                        onClick={emptyTrash}
+                        disabled={trashLoading}
+                        className="rounded-lg border border-danger/30 text-danger px-3 py-1.5 text-xs font-medium hover:bg-danger/10 disabled:opacity-50 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-1.5"
+                        title={t("trash.emptyTrash")}
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                        </svg>
+                        {t("trash.emptyTrash")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {trashLoading ? (
+                  <p className="text-center text-muted py-12">{t("app.loading")}</p>
+                ) : trashVideos.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border py-16 text-center">
+                    <p className="text-muted">{t("trash.empty")}</p>
+                  </div>
+                ) : (
+                  <div data-tour="trash-grid" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {trashVideos
+                      .filter((v) => !pendingVideoIds.includes(v.id))
+                      .map((video) => (
+                        <div
+                          key={video.id}
+                          className="rounded-lg border border-border bg-surface overflow-hidden flex flex-col"
+                        >
+                          {video.thumbnailUrl ? (
+                            <div className="aspect-video w-full overflow-hidden bg-muted relative">
+                              <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+                            </div>
+                          ) : (
+                            <MissingThumb platform={video.platform} />
+                          )}
+                          <div className="p-3 flex-1 flex flex-col gap-1.5">
+                            <h3 className="text-sm font-medium line-clamp-2">{video.title ?? "Untitled"}</h3>
+                            <p className="text-[10px] text-muted/70">
+                              {t("trash.deleted")}{" "}
+                              {video.deletedAt
+                                ? new Date(video.deletedAt).toLocaleDateString()
+                                : ""}
+                            </p>
+                            {(video.folderName != null || video.year != null || video.channel != null) && (
+                              <div className="flex flex-wrap items-center gap-1">
+                                {video.channel != null && (
+                                  <span className="max-w-[120px] truncate text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded" title={video.channel}>{video.channel}</span>
+                                )}
+                                {video.year != null && (
+                                  <span className="text-[9px] font-medium text-muted/70 bg-surface-hover px-1.5 py-0.5 rounded">{video.year}</span>
+                                )}
+                                {video.folderName != null && (
+                                  <span className="text-[9px] font-medium text-accent bg-accent/10 px-1.5 py-0.5 rounded" title={video.folderName}>📁 {video.folderName}</span>
+                                )}
+                              </div>
+                            )}
+                            <div className="mt-auto pt-1 flex items-center justify-between gap-2">
+                              <button
+                                onClick={() => void restoreVideo(video.id)}
+                                className="inline-flex items-center gap-1 rounded-lg bg-accent px-2.5 py-1.5 text-[11px] font-medium text-white hover:bg-accent-hover transition-colors"
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                {t("trash.restore")}
+                              </button>
+                              <button
+                                onClick={() => deleteVideoForever(video.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-danger/30 text-danger px-2.5 py-1.5 text-[11px] font-medium hover:bg-danger/10 transition-colors"
+                                title={t("trash.deleteForever")}
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                                {t("trash.deleteForever")}
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            ) : fetching ? (
               <p className="text-center text-muted py-12">{t("app.loading")}</p>
             ) : selectedFolderId !== null ? (
               folderVideosLoading ? (

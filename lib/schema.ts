@@ -29,6 +29,7 @@ export const videos = pgTable("videos", {
   userId: text("user_id"),
   year: integer("year"),
   channel: text("channel"),
+  deletedAt: text("deleted_at"), // soft-delete tombstone: set → hidden from all lists
 });
 
 export const transcripts = pgTable("transcripts", {

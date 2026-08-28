@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, annotations, scenes, keyMoments, folderVideos } from "@/lib/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(
@@ -23,7 +23,7 @@ export async function GET(
   const videoRows = await db
     .select()
     .from(videos)
-    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string), isNull(videos.deletedAt)))
     .limit(1);
   if (!videoRows[0]) {
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
@@ -62,7 +62,7 @@ export async function GET(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth();
@@ -87,15 +87,29 @@ export async function DELETE(
     return NextResponse.json({ error: "Video not found" }, { status: 404 });
   }
 
-  // Remove from folders first, then delete cascade-safe children, then the video itself
-  await db.delete(folderVideos).where(eq(folderVideos.videoId, videoId));
-  await db.delete(annotations).where(eq(annotations.videoId, videoId));
-  await db.delete(keyMoments).where(eq(keyMoments.videoId, videoId));
-  await db.delete(scenes).where(eq(scenes.videoId, videoId));
-  await db.delete(transcripts).where(eq(transcripts.videoId, videoId));
-  await db.delete(videos).where(eq(videos.id, videoId));
+  // Soft delete by default: keep the row + all dependents (folder links,
+  // annotations, key moments,…) so it can be recovered from the Trash.
+  // Pass ?permanent=true to hard-delete (purges children + the row itself).
+  const permanent = request.nextUrl.searchParams.get("permanent") === "true";
 
-  return NextResponse.json({ success: true });
+  if (permanent) {
+    // Remove from folders first, then delete cascade-safe children, then the video itself
+    await db.delete(folderVideos).where(eq(folderVideos.videoId, videoId));
+    await db.delete(annotations).where(eq(annotations.videoId, videoId));
+    await db.delete(keyMoments).where(eq(keyMoments.videoId, videoId));
+    await db.delete(scenes).where(eq(scenes.videoId, videoId));
+    await db.delete(transcripts).where(eq(transcripts.videoId, videoId));
+    await db.delete(videos).where(eq(videos.id, videoId));
+
+    return NextResponse.json({ success: true, permanent: true });
+  }
+
+  await db
+    .update(videos)
+    .set({ deletedAt: new Date().toISOString() })
+    .where(eq(videos.id, videoId));
+
+  return NextResponse.json({ success: true, softDeleted: true });
 }
 
 export async function PATCH(
@@ -117,7 +131,7 @@ export async function PATCH(
   const videoRows = await db
     .select()
     .from(videos)
-    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string)))
+    .where(and(eq(videos.id, videoId), eq(videos.userId, session.user.id as string), isNull(videos.deletedAt)))
     .limit(1);
   if (!videoRows[0]) {
     return NextResponse.json({ error: "Video not found" }, { status: 404 });

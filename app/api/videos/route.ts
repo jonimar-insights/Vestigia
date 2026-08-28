@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
-import { eq, count, desc } from "drizzle-orm";
+import { eq, count, desc, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 import { createVideo } from "@/lib/import-video";
 
@@ -19,7 +19,7 @@ export async function GET() {
   const allVideos = await db
     .select()
     .from(videos)
-    .where(eq(videos.userId, userId))
+    .where(and(eq(videos.userId, userId), isNull(videos.deletedAt)))
     .orderBy(desc(videos.createdAt));
 
   const enriched = await Promise.all(

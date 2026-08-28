@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { videos, transcripts, annotations, scenes, keyMoments, folders, folderVideos } from "@/lib/schema";
-import { eq, count, asc, desc, max, inArray } from "drizzle-orm";
+import { eq, count, asc, desc, max, inArray, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(request: NextRequest) {
@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
       channel: videos.channel,
     })
     .from(videos)
-    .where(eq(videos.userId, userId))
+    .where(and(eq(videos.userId, userId), isNull(videos.deletedAt)))
     .orderBy(
       sort === "oldest"
         ? asc(videos.createdAt)

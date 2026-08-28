@@ -33,6 +33,23 @@ export type CreateVideoResult =
   | { error: string; status: number; video?: never; existing?: never }
   | { video: typeof videos.$inferSelect; existing: boolean; error?: never; status?: never };
 
+/**
+ * Re-importing a video that the user previously soft-deleted brings it back
+ * (clears deleted_at) — the Trash is a safety net, not a one-way door.
+ */
+async function restoreIfTrashed(
+  db: ReturnType<typeof getDb>,
+  row: typeof videos.$inferSelect,
+): Promise<typeof videos.$inferSelect> {
+  if (row.deletedAt == null) return row;
+  const [restored] = await db
+    .update(videos)
+    .set({ deletedAt: null })
+    .where(eq(videos.id, row.id))
+    .returning();
+  return restored;
+}
+
 export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideoResult> {
   const db = getDb();
   const {
@@ -66,7 +83,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
       .limit(1);
     if (uploadExisting[0]) {
-      return { video: uploadExisting[0], existing: true };
+      return { video: await restoreIfTrashed(db, uploadExisting[0]), existing: true };
     }
 
     const fallbackTitle = pathname.split("/").pop()?.replace(/\.[^.]+$/, "") || null;
@@ -111,7 +128,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
       .limit(1);
     if (driveExisting[0]) {
-      return { video: driveExisting[0], existing: true };
+      return { video: await restoreIfTrashed(db, driveExisting[0]), existing: true };
     }
     try {
       const driveThumbnail =
@@ -154,7 +171,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
       .limit(1);
     if (existingRows[0]) {
-      return { video: existingRows[0], existing: true };
+      return { video: await restoreIfTrashed(db, existingRows[0]), existing: true };
     }
     try {
       const meta = await fetchSocialMeta(canonicalUrl, social);
@@ -208,7 +225,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     .where(and(eq(videos.youtubeId, youtubeId), userId ? eq(videos.userId, userId) : undefined))
     .limit(1);
   if (existingRows[0]) {
-    return { video: existingRows[0], existing: true };
+    return { video: await restoreIfTrashed(db, existingRows[0]), existing: true };
   }
 
   let title: string | null = clientTitle ?? null;

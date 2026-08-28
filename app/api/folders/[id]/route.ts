@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos, videos, annotations, scenes, keyMoments, transcripts } from "@/lib/schema";
-import { eq, count, desc, and } from "drizzle-orm";
+import { eq, count, desc, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -29,7 +29,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     .select({ video: videos, addedAt: folderVideos.addedAt })
     .from(folderVideos)
     .innerJoin(videos, eq(folderVideos.videoId, videos.id))
-    .where(eq(folderVideos.folderId, folderId))
+    .where(and(eq(folderVideos.folderId, folderId), isNull(videos.deletedAt)))
     .orderBy(desc(folderVideos.addedAt));
 
   const enriched = await Promise.all(

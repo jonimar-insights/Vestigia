@@ -8,7 +8,7 @@ import {
   folders,
   folderVideos,
 } from "@/lib/schema";
-import { ilike, or, eq, and, inArray } from "drizzle-orm";
+import { ilike, or, eq, and, inArray, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 
 export async function GET(request: NextRequest) {
@@ -58,9 +58,11 @@ export async function GET(request: NextRequest) {
     .select({ id: videos.id })
     .from(videos)
     .where(
-      yearFilter
-        ? and(eq(videos.userId, session.user.id as string), eq(videos.year, yearFilter))
-        : eq(videos.userId, session.user.id as string),
+      and(
+        eq(videos.userId, session.user.id as string),
+        isNull(videos.deletedAt),
+        yearFilter ? eq(videos.year, yearFilter) : undefined,
+      ),
     );
   let userVideoIdArr = userVideoIds.map((v) => v.id);
 

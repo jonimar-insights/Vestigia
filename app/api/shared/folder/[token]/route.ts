@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos, videos, annotations, folderShares } from "@/lib/schema";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, and, isNull } from "drizzle-orm";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(
@@ -57,7 +57,7 @@ export async function GET(
       channel: videos.channel,
     })
     .from(videos)
-    .where(inArray(videos.id, videoIds));
+    .where(and(inArray(videos.id, videoIds), isNull(videos.deletedAt)));
 
   const annotationCounts = await db
     .select({

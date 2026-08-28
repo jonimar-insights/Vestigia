@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { folders, folderVideos, videos, annotations, folderShares } from "@/lib/schema";
-import { eq, inArray, desc } from "drizzle-orm";
+import { eq, inArray, desc, and, isNull } from "drizzle-orm";
 import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET(
@@ -52,17 +52,18 @@ export async function GET(
       ? await db
           .select({ id: videos.id, title: videos.title, youtubeId: videos.youtubeId })
           .from(videos)
-          .where(inArray(videos.id, videoIds))
+          .where(and(inArray(videos.id, videoIds), isNull(videos.deletedAt)))
       : [];
   const titleMap = new Map(videoRows.map((v) => [v.id, v.title]));
   const ytMap = new Map(videoRows.map((v) => [v.id, v.youtubeId]));
+  const liveVideoIds = videoRows.map((v) => v.id);
 
   const annRows =
-    videoIds.length > 0
+    liveVideoIds.length > 0
       ? await db
           .select()
           .from(annotations)
-          .where(inArray(annotations.videoId, videoIds))
+          .where(inArray(annotations.videoId, liveVideoIds))
           .orderBy(desc(annotations.createdAt))
       : [];
 
