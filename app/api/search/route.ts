@@ -27,6 +27,10 @@ export async function GET(request: NextRequest) {
   const tagSearch = q.startsWith("#") ? q.slice(1) : q;
   const tagPattern = `%"${tagSearch.replace(/[\\%_"]/g, "\\$&")}"%`;
 
+  // If the query itself is a 4-digit year (e.g. "2019"), also match videos whose
+  // Year field equals it — this lets users search by year in the query box.
+  const qYear = /^\d{4}$/.test(q) ? parseInt(q, 10) : null;
+
   const typeParam = request.nextUrl.searchParams.get("type");
   const typeFilter =
     typeParam === "annotation" ||
@@ -156,6 +160,7 @@ export async function GET(request: NextRequest) {
               or(
                 ilike(videos.title, pattern),
                 ilike(videos.channel, pattern),
+                ...(qYear != null ? [eq(videos.year, qYear)] : []),
               ),
               inArray(videos.id, userVideoIdArr),
             ),
