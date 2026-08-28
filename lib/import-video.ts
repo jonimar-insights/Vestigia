@@ -1,7 +1,7 @@
 import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
-import { detectSocialPlatform } from "@/lib/social";
+import { detectSocialPlatform, fetchSocialMeta, socialStorageId } from "@/lib/social";
 import { extractDriveFileId, drivePlayableUrl, isGoogleDriveUrl } from "@/lib/drive";
 import { eq, and } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
@@ -143,20 +143,61 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
     }
   }
 
-  // ── Social media imports are discontinued (YouTube only) ──
-  // Existing social rows still play via their platform embeds; new imports
-  // of TikTok/Instagram/X/Facebook/Vimeo URLs are rejected.
+  // ── Vimeo is supported (full playback via the Player SDK) ──
   const social = detectSocialPlatform(url);
+  if (social?.platform === "vimeo") {
+    const storageId = socialStorageId(social);
+    const existingRows = await db
+      .select()
+      .from(videos)
+      .where(and(eq(videos.youtubeId, storageId), userId ? eq(videos.userId, userId) : undefined))
+      .limit(1);
+    if (existingRows[0]) {
+      return { video: existingRows[0], existing: true };
+    }
+    try {
+      const meta = await fetchSocialMeta(url, social);
+      const vimeoThumbnail =
+        clientThumbnail ??
+        meta.thumbnailUrl ??
+        `https://i.vimeocdn.com/video/${encodeURIComponent(social.platformId)}_640x360.jpg`;
+      const [video] = await db
+        .insert(videos)
+        .values({
+          youtubeUrl: url,
+          youtubeId: storageId,
+          platform: "vimeo",
+          title: clientTitle ?? meta.title ?? `Vimeo video ${social.platformId}`,
+          thumbnailUrl: vimeoThumbnail,
+          durationSeconds:
+            typeof clientDuration === "number" && Number.isFinite(clientDuration)
+              ? Math.round(clientDuration)
+              : meta.durationSeconds,
+          year: typeof clientYear === "number" ? clientYear : null,
+          channel: clientChannel ?? null,
+          createdBy: userName ?? "anonymous",
+          userId: userId ?? null,
+        })
+        .returning();
+      return { video, existing: false };
+    } catch (e: unknown) {
+      console.error("[vimeo video insert]", e);
+      const msg = e instanceof Error ? e.message : "Insert failed";
+      return { error: msg, status: 500 };
+    }
+  }
+
+  // ── Other social media imports are discontinued (TikTok/Instagram/X/Facebook) ──
   if (social) {
     return {
-      error: `Imports from ${social.platform} are no longer supported — YouTube links only`,
+      error: `Imports from ${social.platform} are no longer supported — YouTube and Vimeo links only`,
       status: 400,
     };
   }
 
   const youtubeId = extractYouTubeId(url);
   if (!youtubeId) {
-    return { error: "Unsupported video URL (supported: YouTube)", status: 400 };
+    return { error: "Unsupported video URL (supported: YouTube, Vimeo)", status: 400 };
   }
 
   // Check if this user already imported this video

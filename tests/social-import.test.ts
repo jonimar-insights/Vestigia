@@ -37,6 +37,7 @@ async function forgeToken(email: string, name: string) {
 }
 
 async function main() {
+  loadEnv();
   const ownerToken = await forgeToken("jonimar@gmail.com", "Joao");
   const cookieName = BASE.startsWith("https://") ? "__Secure-authjs.session-token" : "authjs.session-token";
   const ownerHeaders = { "Cookie": `${cookieName}=${ownerToken}`, ...jsonHeaders };
@@ -48,9 +49,29 @@ async function main() {
       body: JSON.stringify({ url }),
     });
 
-  // ── All social networks are now rejected (YouTube only) ──
+  let vimeoToCleanup: unknown = null;
+
+  // ── Vimeo is now supported: imports successfully, plays via Player SDK ──
+  const vimeoUrl = "https://vimeo.com/76979871";
+  const vimRes = await importUrl(vimeoUrl);
+  assert.ok(vimRes.status === 200 || vimRes.status === 201, `vimeo status ${vimRes.status}`);
+  const vim = await vimRes.json();
+  assert.equal(vim.created || vim.existing || vim.platform, "vimeo", "vimeo response shape");
+  assert.ok(String(vim.youtubeId).startsWith("vimeo:"), `vimeo storage id ${vim.youtubeId}`);
+  assert.ok(vim.title, "vimeo title populated from oEmbed");
+  assert.ok(vim.thumbnailUrl, "vimeo thumbnail populated");
+  if (vimRes.status === 201) vimeoToCleanup = vim.id;
+  console.log(`vimeo imported: id=${vim.id} title="${vim.title}" thumbnail=${vim.thumbnailUrl}`);
+
+  // idempotent — second import returns the same row (200) and no duplicate
+  const vim2 = await importUrl(vimeoUrl);
+  assert.equal(vim2.status, 200, `vimeo idempotent should be 200, got ${vim2.status}`);
+  const vim2b = await vim2.json();
+  assert.equal(vim2b.id, vim.id, "vimeo idempotent");
+  console.log("vimeo idempotent: ok");
+
+  // ── Other social networks remain rejected ──
   for (const [label, url] of [
-    ["vimeo", "https://vimeo.com/76979871"],
     ["instagram", "https://www.instagram.com/reel/Cabc123XYZ/"],
     ["twitter", "https://x.com/jack/status/20"],
     ["tiktok", "https://www.tiktok.com/@scout2015/video/6718335390845095173"],
@@ -75,12 +96,16 @@ async function main() {
   assert.notEqual(yv.platform ?? "youtube", "vimeo");
   console.log("youtube unaffected:", yv.id);
 
-  // ── existing social videos still render (playback untouched): spot-check a known social row loads ──
+  // ── existing social videos still render (playback untouched) ──
   const list = await fetch(`${BASE}/api/videos`, { headers: { "Cookie": `${cookieName}=${ownerToken}` } });
   assert.ok(list.ok);
   console.log("video list ok");
 
   console.log("ALL PASS — cleaning up");
+  if (vimeoToCleanup) {
+    await fetch(`${BASE}/api/videos/${vimeoToCleanup}`, { method: "DELETE", headers: ownerHeaders });
+    console.log(`cleaned up vimeo id ${vimeoToCleanup}`);
+  }
   await fetch(`${BASE}/api/videos/${yv.id}`, { method: "DELETE", headers: ownerHeaders });
   console.log("cleanup done");
 }
