@@ -535,6 +535,7 @@ export default function Home() {
       }
       setUrl("");
       await loadVideos();
+      if (showAllVideos) await loadAllVideos();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -609,6 +610,7 @@ export default function Home() {
     const doDelete = async () => {
       await fetch(`/api/videos/${id}`, { method: "DELETE" });
       await loadVideos();
+      if (showAllVideos) await loadAllVideos();
       if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
     };
     const video = currentVideoList.find((v) => v.id === id);
@@ -639,6 +641,7 @@ export default function Home() {
       }
       setDriveImportUrl("");
       await loadVideos();
+      if (showAllVideos) await loadAllVideos();
     } catch (err) {
       setDriveError(err instanceof Error ? err.message : "Drive import failed");
     } finally {
@@ -851,6 +854,7 @@ export default function Home() {
       }
       setBulkDeleteProgress(null);
       await loadVideos();
+      if (showAllVideos) await loadAllVideos();
       if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
     };
     setSelectedVideoIds(new Set());

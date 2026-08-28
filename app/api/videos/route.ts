@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { videos, transcripts, annotations, scenes, keyMoments, folders, folderVideos } from "@/lib/schema";
-import { eq, count, notInArray, and } from "drizzle-orm";
+import { videos, transcripts, annotations, scenes, keyMoments } from "@/lib/schema";
+import { eq, count, desc } from "drizzle-orm";
 import { auth } from "@/auth";
 import { createVideo } from "@/lib/import-video";
 
@@ -13,21 +13,14 @@ export async function GET() {
   const db = getDb();
   const userId = session.user.id as string;
 
-  const folderedVideoIds = db
-    .select({ videoId: folderVideos.videoId })
-    .from(folderVideos)
-    .innerJoin(folders, eq(folders.id, folderVideos.folderId))
-    .where(eq(folders.userId, userId));
-
+  // The main dashboard shows ALL of the user's videos (including foldered
+  // ones). Videos live in folders as references, so hiding them here made the
+  // main view appear empty once everything was filed away.
   const allVideos = await db
     .select()
     .from(videos)
-    .where(
-      and(
-        notInArray(videos.id, folderedVideoIds),
-        eq(videos.userId, userId),
-      ),
-    );
+    .where(eq(videos.userId, userId))
+    .orderBy(desc(videos.createdAt));
 
   const enriched = await Promise.all(
     allVideos.map(async (v) => {

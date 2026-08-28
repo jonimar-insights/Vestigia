@@ -13,15 +13,17 @@ export async function GET(request: NextRequest) {
   const userId = session.user.id as string;
   const sort = request.nextUrl.searchParams.get("sort") ?? "newest";
 
-  const folderNameSubquery = db
-    .select({
-      videoId: folderVideos.videoId,
-      folderName: folders.name,
-    })
+  // Batch-fetch folder membership. Done separately from the video query so a
+  // video in MULTIPLE folders never produces duplicate rows via a join.
+  const folderAssocs = await db
+    .select({ videoId: folderVideos.videoId, folderName: folders.name })
     .from(folderVideos)
     .innerJoin(folders, eq(folders.id, folderVideos.folderId))
-    .where(eq(folders.userId, userId))
-    .as("folder_name_sub");
+    .where(eq(folders.userId, userId));
+  const folderNameMap = new Map<number, string>();
+  for (const fa of folderAssocs) {
+    if (!folderNameMap.has(fa.videoId)) folderNameMap.set(fa.videoId, fa.folderName);
+  }
 
   const rows = await db
     .select({
@@ -37,10 +39,8 @@ export async function GET(request: NextRequest) {
       userId: videos.userId,
       year: videos.year,
       channel: videos.channel,
-      folderName: folderNameSubquery.folderName,
     })
     .from(videos)
-    .leftJoin(folderNameSubquery, eq(folderNameSubquery.videoId, videos.id))
     .where(eq(videos.userId, userId))
     .orderBy(
       sort === "oldest"
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
       const latestAnnotationAt =
         (await db.select({ value: max(annotations.updatedAt) }).from(annotations).where(eq(annotations.videoId, v.id)))[0]?.value ?? null;
 
-      return { ...v, annotationCount, sceneCount, momentCount, hasTranscript, latestAnnotationAt };
+      return { ...v, folderName: folderNameMap.get(v.id) ?? null, annotationCount, sceneCount, momentCount, hasTranscript, latestAnnotationAt };
     }),
   );
 
