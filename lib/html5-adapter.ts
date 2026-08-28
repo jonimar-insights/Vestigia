@@ -1,12 +1,12 @@
 /**
- * Adapts a native HTML5 <video> element to the synchronous
+ * Adapts a native HTML5 <video>/<audio> element to the synchronous
  * YouTube-IFrame-style interface used by the video pages.
  * Reads are synchronous — the element itself is the source of truth.
  */
 import type { SyncPlayerInterface } from "@/lib/vimeo-adapter";
 
 export class Html5Adapter implements SyncPlayerInterface {
-  private el: HTMLVideoElement;
+  private el: HTMLMediaElement;
   private playStateCb: ((playing: boolean) => void) | null = null;
   private readyCbs: Array<() => void> = [];
   private readyFired = false;
@@ -17,7 +17,7 @@ export class Html5Adapter implements SyncPlayerInterface {
   private onEnded = () => { if (!this.destroyed) this.playStateCb?.(false); };
   private onLoadedMetadata = () => { this.finishReady(); };
 
-  constructor(el: HTMLVideoElement) {
+  constructor(el: HTMLMediaElement) {
     this.el = el;
     el.addEventListener("play", this.onPlay);
     el.addEventListener("pause", this.onPause);

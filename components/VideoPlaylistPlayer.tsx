@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
+import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 
 declare global {
@@ -816,7 +817,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 >
                   <span className="relative shrink-0 w-14 h-8 rounded overflow-hidden bg-gradient-to-br from-purple-500/20 to-accent/10">
                     {it.videoThumbnail ? (
-                      <Image src={it.videoThumbnail} alt="" fill sizes="56px" className="object-cover" />
+                      <Image src={it.videoThumbnail} alt="" fill sizes="56px" className="object-cover" unoptimized={!isTrustedImageUrl(it.videoThumbnail)} />
                     ) : (
                       <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono text-white/40">{i + 1}</span>
                     )}

@@ -27,6 +27,7 @@ export async function GET() {
       userId: videos.userId,
       year: videos.year,
       channel: videos.channel,
+      mediaType: videos.mediaType,
       deletedAt: videos.deletedAt,
     })
     .from(videos)

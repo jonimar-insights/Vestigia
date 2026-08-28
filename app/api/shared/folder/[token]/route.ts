@@ -55,6 +55,7 @@ export async function GET(
       platform: videos.platform,
       year: videos.year,
       channel: videos.channel,
+      mediaType: videos.mediaType,
     })
     .from(videos)
     .where(and(inArray(videos.id, videoIds), isNull(videos.deletedAt)));

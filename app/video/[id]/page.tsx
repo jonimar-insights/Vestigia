@@ -52,6 +52,7 @@ interface VideoData {
   thumbnailUrl: string | null;
   year: number | null;
   channel: string | null;
+  mediaType?: string | null;
   folderId: number | null;
   annotations: Annotation[];
 }
@@ -126,6 +127,9 @@ export default function VideoPage() {
   const [yearInput, setYearInput] = useState("");
   const [editingChannel, setEditingChannel] = useState(false);
   const [channelInput, setChannelInput] = useState("");
+  const [editingCover, setEditingCover] = useState(false);
+  const [coverInput, setCoverInput] = useState("");
+  const [coverMedia, setCoverMedia] = useState<"audio" | "video">("video");
 
   const [showTour, setShowTour] = useState(() => !isTourCompleted("vestigia-video-tour"));
   const VIDEO_TOUR_STEPS: TourStep[] = [
@@ -241,6 +245,8 @@ export default function VideoPage() {
           ? "vimeo"
           : "embed";
   const isSocial = !!social;
+  // Google Drive / upload audio files render as an audio player with a cover.
+  const isAudio = playerKind === "html5" && video?.mediaType === "audio";
 
   // ── YouTube IFrame API ──
   useEffect(() => {
@@ -367,7 +373,7 @@ export default function VideoPage() {
   useEffect(() => {
     if (!video || playerKind !== "html5") return;
     let destroyed = false;
-    const el = document.querySelector<HTMLVideoElement>("video[data-html5-player]");
+    const el = document.querySelector<HTMLMediaElement>("video[data-html5-player], audio[data-html5-player]");
     if (!el || playerRef.current) return;
 
     const adapter = new Html5Adapter(el);
@@ -611,6 +617,29 @@ export default function VideoPage() {
       if (res.ok) {
         const updated = await res.json();
         setVideo(prev => prev ? { ...prev, channel: updated.channel } : prev);
+      }
+    } catch {}
+  }
+
+  async function saveCover(clear = false) {
+    const cover = clear ? null : coverInput.trim() || null;
+    const body: Record<string, unknown> = { thumbnailUrl: cover };
+    // Media-type toggle only applies to native HTML5 media (Drive/upload).
+    if (!clear && playerKind === "html5" && video?.platform) {
+      if (video.platform === "drive" || video.platform === "upload") {
+        body.mediaType = coverMedia;
+      }
+    }
+    setEditingCover(false);
+    try {
+      const res = await fetch(`/api/videos/${videoId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setVideo(prev => prev ? { ...prev, thumbnailUrl: updated.thumbnailUrl, mediaType: updated.mediaType } : prev);
       }
     } catch {}
   }
@@ -1237,6 +1266,18 @@ export default function VideoPage() {
                     {video.channel ? video.channel : `+ ${t("video.channel")}`}
                   </button>
                 )}
+                {playerKind === "html5" && (
+                  <button
+                    onClick={() => { setCoverInput(video.thumbnailUrl ?? ""); setCoverMedia(video?.mediaType === "audio" ? "audio" : "video"); setEditingCover(true); }}
+                    className="text-[10px] text-muted hover:text-foreground transition-colors flex items-center gap-1"
+                    title={t("video.cover")}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A1.5 1.5 0 0021.75 19.5V4.5A1.5 1.5 0 0020.25 3H3.75A1.5 1.5 0 002.25 4.5v15A1.5 1.5 0 003.75 21zM17.25 7.5h.008v.008h-.008V7.5z" />
+                    </svg>
+                    <span>{video.mediaType === "audio" ? `${t("video.audio")} · ${t("video.cover")}` : (video.thumbnailUrl ? t("video.cover") : `+ ${t("video.cover")}`)}</span>
+                  </button>
+                )}
                 <p className="text-[10px] text-muted truncate">
                   {video.annotations.length} annotations
                 </p>
@@ -1273,6 +1314,50 @@ export default function VideoPage() {
             </button>
           </div>
         </div>
+
+        {editingCover && (
+          <div className="flex items-center gap-2 flex-wrap rounded-lg border border-border bg-surface px-3 py-2 mt-2">
+            <input
+              type="url"
+              value={coverInput}
+              onChange={e => setCoverInput(e.target.value)}
+              placeholder={t("video.coverUrl")}
+              autoFocus
+              className="flex-1 min-w-[180px] text-[11px] px-2 py-1 border border-border rounded bg-background focus:border-accent focus:outline-none"
+            />
+            {playerKind === "html5" && video && (video.platform === "drive" || video.platform === "upload") && (
+              <select
+                value={coverMedia}
+                onChange={e => setCoverMedia(e.target.value as "audio" | "video")}
+                className="text-[11px] px-1.5 py-1 border border-border rounded bg-background focus:border-accent focus:outline-none"
+                title={t("video.mediaType")}
+              >
+                <option value="video">{t("video.video")}</option>
+                <option value="audio">{t("video.audio")}</option>
+              </select>
+            )}
+            <button
+              onClick={() => saveCover()}
+              className="text-[11px] px-2.5 py-1 rounded bg-accent text-white hover:bg-accent-hover"
+            >
+              {t("video.coverSave")}
+            </button>
+            {video?.thumbnailUrl && (
+              <button
+                onClick={() => saveCover(true)}
+                className="text-[11px] px-2.5 py-1 rounded border border-border hover:bg-surface-hover"
+              >
+                {t("video.coverRemove")}
+              </button>
+            )}
+            <button
+              onClick={() => setEditingCover(false)}
+              className="text-[11px] px-2 py-1 rounded text-muted hover:text-foreground"
+            >
+              {t("annotation.cancel")}
+            </button>
+          </div>
+        )}
       </header>
 
       {/* ── MAIN ── */}
@@ -1283,7 +1368,41 @@ export default function VideoPage() {
           <div style={{ width: `${panelRatio}%` }} className="flex flex-col gap-4 min-w-0">
             {/* Video Player */}
             <div data-tour="player" className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-              {playerKind === "html5" && video ? (
+              {playerKind === "html5" && isAudio && video ? (
+                <div className="w-full h-full bg-black flex flex-col items-center justify-center gap-4 p-4">
+                  {video.thumbnailUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={video.id}
+                      src={video.thumbnailUrl}
+                      alt={video.title ?? "Audio cover"}
+                      className="max-h-[55%] max-w-full object-contain rounded-lg shadow-xl ring-1 ring-white/10"
+                      onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    />
+                  ) : (
+                    <div className="w-24 h-24 rounded-2xl bg-white/10 flex items-center justify-center">
+                      <svg className="w-12 h-12 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.818m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.75z" />
+                      </svg>
+                    </div>
+                  )}
+                  <audio
+                    key={`a-${video.id}`}
+                    data-html5-player
+                    src={video.youtubeUrl}
+                    controls
+                    preload="metadata"
+                    className="w-[min(92%,460px)]"
+                  />
+                  {!playerReady && (
+                    <div className="absolute inset-x-0 bottom-0 flex justify-center pb-2 pointer-events-none">
+                      <div className="flex items-center gap-2 rounded-full bg-black/60 px-3 py-1 text-white/70 text-xs">
+                        <div className="h-3 w-3 animate-spin rounded-full border border-white/30 border-t-white/80" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : playerKind === "html5" && video ? (
                 <video
                   key={video.id}
                   data-html5-player

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import Image from "next/image";
+import { isTrustedImageUrl } from "@/lib/image-host";
 import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
 import VideoPlaylistPlayer, { ClipItem, formatTs } from "@/components/VideoPlaylistPlayer";
@@ -2183,6 +2184,7 @@ export default function Home() {
                                 alt={v.title}
                                 fill
                                 className="object-cover rounded"
+                                unoptimized={!isTrustedImageUrl(v.thumbnail)}
                               />
                             </div>
                             <div className="flex-1 min-w-0">
@@ -2261,7 +2263,7 @@ export default function Home() {
                         >
                           {video.thumbnailUrl ? (
                             <div className="aspect-video w-full overflow-hidden bg-muted relative">
-                              <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+<Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" unoptimized={!isTrustedImageUrl(video.thumbnailUrl)} />
                             </div>
                           ) : (
                             <MissingThumb platform={video.platform} />
@@ -2382,7 +2384,7 @@ export default function Home() {
                     >
                       {video.thumbnailUrl ? (
                         <div className="aspect-video w-full overflow-hidden bg-muted relative">
-                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" />
+                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" unoptimized={!isTrustedImageUrl(video.thumbnailUrl)} />
                           <button
                             onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
                             className="absolute top-2 left-2 w-5 h-5 rounded border border-white/40 bg-black/30 backdrop-blur-sm flex items-center justify-center transition-colors hover:bg-black/50"
@@ -2460,7 +2462,7 @@ export default function Home() {
                       </button>
                       {video.thumbnailUrl ? (
                         <div className="relative w-40 h-[56px] shrink-0 overflow-hidden rounded bg-muted">
-                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" unoptimized={!isTrustedImageUrl(video.thumbnailUrl)} />
                         </div>
                       ) : (
                         <div className="w-40 h-[56px] shrink-0 overflow-hidden rounded bg-gradient-to-br from-surface-hover to-border/60 flex items-center justify-center">
@@ -2584,6 +2586,7 @@ export default function Home() {
                           alt={video.title ?? "Video"}
                           fill
                           className="object-cover group-hover:scale-105 transition-transform duration-300"
+                          unoptimized={!isTrustedImageUrl(video.thumbnailUrl)}
                         />
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
@@ -2677,7 +2680,7 @@ export default function Home() {
                       </button>
                       {video.thumbnailUrl ? (
                         <div className="relative w-40 h-[56px] shrink-0 overflow-hidden rounded bg-muted">
-                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" />
+                          <Image src={video.thumbnailUrl} alt={video.title ?? "Video"} fill className="object-cover" unoptimized={!isTrustedImageUrl(video.thumbnailUrl)} />
                         </div>
                       ) : (
                         <div className="w-40 h-[56px] shrink-0 overflow-hidden rounded bg-gradient-to-br from-surface-hover to-border/60 flex items-center justify-center">
@@ -2922,7 +2925,7 @@ export default function Home() {
                     >
                       {r.videoThumbnail && (
                         <div className="relative shrink-0 w-28 h-16">
-                          <Image src={r.videoThumbnail} alt="" fill className="object-cover rounded" />
+                          <Image src={r.videoThumbnail} alt="" fill className="object-cover rounded" unoptimized={!isTrustedImageUrl(r.videoThumbnail)} />
                           <span className="absolute bottom-1 right-1 text-[10px] bg-black/75 text-white px-1 py-0.5 rounded">
                             {formatTs(r.timestamp)}
                           </span>
@@ -3570,7 +3573,7 @@ export default function Home() {
                           <>
                           {item.videoThumbnail && (
                             <div className="relative shrink-0 w-20 h-12">
-                              <Image src={item.videoThumbnail} alt="" fill className="object-cover rounded" />
+                              <Image src={item.videoThumbnail} alt="" fill className="object-cover rounded" unoptimized={!isTrustedImageUrl(item.videoThumbnail)} />
                               <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-black/75 text-white px-0.5 rounded">
                                 {formatTs(item.timestamp)}
                               </span>

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
 import { tokenizeNoteLinks } from "@/lib/youtube";
 import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
+import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { Html5Adapter } from "@/lib/html5-adapter";
 
@@ -16,6 +17,7 @@ interface VideoData {
   thumbnailUrl: string | null;
   durationSeconds: number | null;
   platform?: string;
+  mediaType?: string | null;
   annotationCount: number;
 }
 
@@ -561,7 +563,7 @@ export default function SharedFolderPage({
   useEffect(() => {
     if (!selectedVideo || sharedKind !== "html5") return;
     let destroyed = false;
-    const el = document.querySelector<HTMLVideoElement>("video[data-html5-player]");
+    const el = document.querySelector<HTMLMediaElement>("video[data-html5-player], audio[data-html5-player]");
     if (!el || playerRef.current) return;
 
     const adapter = new Html5Adapter(el);
@@ -913,7 +915,34 @@ export default function SharedFolderPage({
             {/* Player */}
             <div className="flex-1 min-w-0">
               <div className="aspect-video w-full rounded-xl overflow-hidden border border-border bg-black shadow-sm relative">
-                {sharedKind === "html5" && selectedVideo ? (
+                {sharedKind === "html5" && selectedVideo && selectedVideo.mediaType === "audio" ? (
+                  <div className="w-full h-full bg-black flex flex-col items-center justify-center gap-4 p-4">
+                    {selectedVideo.thumbnailUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={selectedVideo.id}
+                        src={selectedVideo.thumbnailUrl}
+                        alt={selectedVideo.title ?? "Audio cover"}
+                        className="max-h-[55%] max-w-full object-contain rounded-lg shadow-xl ring-1 ring-white/10"
+                        onError={(e) => { e.currentTarget.style.display = "none"; }}
+                      />
+                    ) : (
+                      <div className="w-24 h-24 rounded-2xl bg-white/10 flex items-center justify-center">
+                        <svg className="w-12 h-12 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.818m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.75z" />
+                        </svg>
+                      </div>
+                    )}
+                    <audio
+                      key={`a-${selectedVideo.id}`}
+                      data-html5-player
+                      src={selectedVideo.youtubeUrl}
+                      controls
+                      preload="metadata"
+                      className="w-[min(92%,460px)]"
+                    />
+                  </div>
+                ) : sharedKind === "html5" && selectedVideo ? (
                   <video
                     key={selectedVideo.id}
                     data-html5-player
@@ -1382,7 +1411,7 @@ export default function SharedFolderPage({
                 >
                   <div className="aspect-video w-full overflow-hidden bg-muted relative">
                     {v.thumbnailUrl ? (
-                      <Image src={v.thumbnailUrl} alt={v.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" />
+                      <Image src={v.thumbnailUrl} alt={v.title ?? "Video"} fill className="object-cover group-hover:scale-105 transition-transform duration-300" unoptimized={!isTrustedImageUrl(v.thumbnailUrl)} />
                     ) : v.platform === "drive" ? (
                       <div className="w-full h-full flex items-center justify-center">
                         <svg className="w-10 h-10 text-muted/40" viewBox="0 0 87.3 78" fill="currentColor" aria-hidden="true">

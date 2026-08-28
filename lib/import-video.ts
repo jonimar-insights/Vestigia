@@ -2,7 +2,7 @@ import { getDb } from "@/lib/db";
 import { videos, transcripts, keyMoments } from "@/lib/schema";
 import { extractYouTubeId } from "@/lib/youtube";
 import { detectSocialPlatform, fetchSocialMeta, socialStorageId } from "@/lib/social";
-import { extractDriveFileId, drivePlayableUrl, isGoogleDriveUrl } from "@/lib/drive";
+import { extractDriveFileId, drivePlayableUrl, isGoogleDriveUrl, probeDriveFile, probeIsAudio } from "@/lib/drive";
 import { eq, and } from "drizzle-orm";
 import { fetchTranscriptWithFallback } from "@/lib/transcript";
 import { extractYouTubeChapters, extractTranscriptKeyMoments, extractAIKeyMoments } from "@/lib/key-moments";
@@ -131,9 +131,13 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
       return { video: await restoreIfTrashed(db, driveExisting[0]), existing: true };
     }
     try {
+      // Probe the public file: audio (mp3, m4a, wav, …) gets an audio player +
+      // NO auto thumbnail (the user supplies a cover picture); video otherwise
+      // falls back to Google's thumbnail.
+      const probe = await probeDriveFile(fileId).catch(() => null);
+      const isAudio = probeIsAudio(probe);
       const driveThumbnail =
-        clientThumbnail ??
-        `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w1000-h1000`;
+        clientThumbnail ?? (isAudio ? null : `https://lh3.googleusercontent.com/d/${encodeURIComponent(fileId)}=w1000-h1000`);
       const [video] = await db
         .insert(videos)
         .values({
@@ -142,6 +146,7 @@ export async function createVideo(opts: ImportVideoOptions): Promise<CreateVideo
           platform: "drive",
           title: clientTitle ?? "Google Drive video",
           thumbnailUrl: driveThumbnail,
+          mediaType: isAudio ? "audio" : null,
           durationSeconds:
             typeof clientDuration === "number" && Number.isFinite(clientDuration)
               ? Math.round(clientDuration)

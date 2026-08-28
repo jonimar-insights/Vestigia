@@ -142,6 +142,14 @@ export async function PATCH(
   if (body.year !== undefined) updates.year = body.year === null ? null : Number(body.year) || null;
   if (body.title !== undefined) updates.title = body.title || null;
   if (body.channel !== undefined) updates.channel = body.channel === null ? null : String(body.channel).trim() || null;
+  if (body.thumbnailUrl !== undefined) {
+    const t = body.thumbnailUrl;
+    updates.thumbnailUrl = typeof t === "string" && t.trim() ? t.trim() : null;
+  }
+  if (body.mediaType !== undefined) {
+    const m = typeof body.mediaType === "string" ? body.mediaType.toLowerCase() : null;
+    updates.mediaType = m === "audio" || m === "video" ? m : null;
+  }
 
   if (Object.keys(updates).length > 0) {
     await db.update(videos).set(updates).where(eq(videos.id, videoId));

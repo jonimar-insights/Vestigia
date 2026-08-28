@@ -39,6 +39,7 @@ export async function GET(request: NextRequest) {
       userId: videos.userId,
       year: videos.year,
       channel: videos.channel,
+      mediaType: videos.mediaType,
     })
     .from(videos)
     .where(and(eq(videos.userId, userId), isNull(videos.deletedAt)))
