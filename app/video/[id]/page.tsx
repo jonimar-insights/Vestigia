@@ -130,6 +130,9 @@ export default function VideoPage() {
   const [editingCover, setEditingCover] = useState(false);
   const [coverInput, setCoverInput] = useState("");
   const [coverMedia, setCoverMedia] = useState<"audio" | "video">("video");
+  const [coverUploading, setCoverUploading] = useState(false);
+  const [coverError, setCoverError] = useState("");
+  const coverFileRef = useRef<HTMLInputElement>(null);
 
   const [showTour, setShowTour] = useState(() => !isTourCompleted("vestigia-video-tour"));
   const VIDEO_TOUR_STEPS: TourStep[] = [
@@ -621,16 +624,14 @@ export default function VideoPage() {
     } catch {}
   }
 
-  async function saveCover(clear = false) {
-    const cover = clear ? null : coverInput.trim() || null;
+  async function patchVideoCover(cover: string | null) {
     const body: Record<string, unknown> = { thumbnailUrl: cover };
     // Media-type toggle only applies to native HTML5 media (Drive/upload).
-    if (!clear && playerKind === "html5" && video?.platform) {
+    if (cover !== null && playerKind === "html5" && video?.platform) {
       if (video.platform === "drive" || video.platform === "upload") {
         body.mediaType = coverMedia;
       }
     }
-    setEditingCover(false);
     try {
       const res = await fetch(`/api/videos/${videoId}`, {
         method: "PATCH",
@@ -640,8 +641,39 @@ export default function VideoPage() {
       if (res.ok) {
         const updated = await res.json();
         setVideo(prev => prev ? { ...prev, thumbnailUrl: updated.thumbnailUrl, mediaType: updated.mediaType } : prev);
+        return true;
       }
     } catch {}
+    return false;
+  }
+
+  async function saveCover(clear = false) {
+    const cover = clear ? null : coverInput.trim() || null;
+    setEditingCover(false);
+    await patchVideoCover(cover);
+  }
+
+  async function uploadCover(file: File) {
+    setCoverUploading(true);
+    setCoverError("");
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/videos/${videoId}/cover`, { method: "POST", body: fd });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.url) {
+        setCoverError(data?.error || t("video.coverUploadError") || "Upload failed");
+        return;
+      }
+      setCoverInput(data.url);
+      const ok = await patchVideoCover(data.url);
+      if (!ok) setCoverError(t("video.coverUploadError") || "Upload failed");
+    } catch {
+      setCoverError(t("video.coverUploadError") || "Upload failed");
+    } finally {
+      setCoverUploading(false);
+    }
+    if (coverFileRef.current) coverFileRef.current.value = "";
   }
 
   // Load saved summaries on mount
@@ -1325,6 +1357,28 @@ export default function VideoPage() {
               autoFocus
               className="flex-1 min-w-[180px] text-[11px] px-2 py-1 border border-border rounded bg-background focus:border-accent focus:outline-none"
             />
+            <input
+              ref={coverFileRef}
+              type="file"
+              accept="image/*"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) void uploadCover(f);
+              }}
+              className="hidden"
+              aria-label={t("video.coverUpload")}
+            />
+            <button
+              onClick={() => coverFileRef.current?.click()}
+              disabled={coverUploading}
+              className="text-[11px] px-2.5 py-1 rounded border border-border hover:bg-surface-hover disabled:opacity-50 flex items-center gap-1"
+            >
+              {coverUploading
+                ? t("video.coverUploading")
+                : (<svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+                )}
+              {t("video.coverUpload")}
+            </button>
             {playerKind === "html5" && video && (video.platform === "drive" || video.platform === "upload") && (
               <select
                 value={coverMedia}
@@ -1356,6 +1410,11 @@ export default function VideoPage() {
             >
               {t("annotation.cancel")}
             </button>
+            {coverError && (
+              <span className="text-[11px] text-red-500 w-full">
+                {coverError}
+              </span>
+            )}
           </div>
         )}
       </header>
