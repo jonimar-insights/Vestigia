@@ -89,6 +89,7 @@ export function formatTs(s: number) {
 
 export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: () => void }) {
   const [currentIdx, setCurrentIdx] = useState(0);
+  const [ended, setEnded] = useState(false);
   const [playing, setPlaying] = useState(false);
   const playerRef = useRef<YTPlayer | null>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
@@ -201,7 +202,12 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         setSlideRemainingSec(remain);
       }, 200);
       slideTimerRef.current = setTimeout(() => {
-        setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
+        // Advance during the slide; when it's the last item, hold it there
+        // (no wrap-around to black/start) per the end-of-playlist behavior.
+        const si = currentIdxRef.current;
+        if (si < itemsRef.current.length - 1) {
+          setCurrentIdx(si + 1);
+        }
       }, ms);
       return () => { if (slideTimerRef.current) clearTimeout(slideTimerRef.current); };
     } else {
@@ -313,7 +319,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 } else if (advancedRef.current) {
                   advancedRef.current = false;
                 } else {
-                  setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
+                  advanceOrEnd();
                 }
               }
             },
@@ -398,7 +404,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             } else if (advancedRef.current) {
               advancedRef.current = false;
             } else {
-              setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
+              advanceOrEnd();
             }
           }
         });
@@ -455,13 +461,29 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         return;
       }
       advancedRef.current = true;
-      setCurrentIdx((prev) => (prev < itemsRef.current.length - 1 ? prev + 1 : 0));
+      advanceOrEnd();
     }
   }, [currentTime, playing, currentIdx]);
 
   function goTo(idx: number) {
     if (idx < 0 || idx >= items.length) return;
+    setEnded(false);
     setCurrentIdx(idx);
+  }
+
+  // Advance to the next item, or stop at a blank black screen when the last
+  // clip finishes. Slides never reach here (they advance via their own timer).
+  function advanceOrEnd() {
+    const idx = currentIdxRef.current;
+    if (idx < itemsRef.current.length - 1) {
+      setEnded(false);
+      setCurrentIdx(idx + 1);
+    } else {
+      try { playerRef.current?.pauseVideo(); } catch {}
+      try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+      setEnded(true);
+      setCurrentIdx(idx);
+    }
   }
 
   // Apply speed changes immediately to both players (active one takes effect)
@@ -554,9 +576,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const clipEnd = item ? (item.endTimestamp ?? item.timestamp + 30) : 0;
   const clipFrac = isSlide || !playable ? 0 : Math.min(1, Math.max(0, (currentTime - item.timestamp) / Math.max(1, clipEnd - item.timestamp)));
   const slideMs = slideDeadlineRef.current?.ms ?? 5000;
-  const upNext = !isSlide && playable && items.length > 1 && clipEnd - currentTime <= 5
-    ? items[(currentIdx + 1) % items.length]
-    : null;
   const remainingSec = items.reduce((acc, it, i) => {
     if (i < currentIdx) return acc;
     if (it.type === "slide") return acc + (it.endTimestamp ?? 5);    const end = i === currentIdx ? clipEnd : (it.endTimestamp ?? it.timestamp + 30);
@@ -609,13 +628,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
             {/* SDK players replace their mount node (YT swaps the div for an
                 iframe), so visibility is toggled on these React-owned wrappers */}
-            <div className="absolute inset-0" style={{ display: activeKind === "youtube" ? undefined : "none" }}>
+            <div className="absolute inset-0" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
               <div ref={playerContainerRef} className="w-full h-full" />
             </div>
-            <div className="absolute inset-0 [&_iframe]:w-full [&_iframe]:h-full" style={{ display: activeKind === "vimeo" ? undefined : "none" }}>
+            <div className="absolute inset-0 [&_iframe]:w-full [&_iframe]:h-full" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
               <div ref={vimeoContainerRef} className="w-full h-full" />
             </div>
-            {item?.type !== "slide" && (
+            {ended && (
+              <div className="absolute inset-0 bg-black" />
+            )}
+            {!ended && item?.type !== "slide" && (
               ytId === "" && !vmId ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
                   <span className="text-xs text-white/40">
@@ -631,7 +653,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 </div>
               ) : null
             )}
-            {isSlide && (
+            {!ended && isSlide && (
               <div
                 className="absolute inset-0 flex items-end justify-center px-12 pt-10 pb-14 bg-black"
                 style={item?.color ? { backgroundColor: item.color } : undefined}
@@ -669,15 +691,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 </div>
               </div>
             )}
-            {upNext && (
-              <button
-                onClick={(e) => { e.stopPropagation(); goTo(currentIdx + 1); }}
-                className="absolute bottom-3 right-3 z-10 max-w-[70%] bg-black/85 border border-white/15 rounded-lg px-3 py-2 text-left hover:border-accent/50 transition-colors"
-              >
-                <span className="block text-[9px] uppercase tracking-wider text-white/40 mb-0.5">Up next in {Math.ceil(clipEnd - currentTime)}s</span>
-                <span className="block text-xs text-white truncate">{upNext.title}</span>
-              </button>
-            )}
           </div>
 
           {/* Clip / slide progress bar */}
@@ -685,7 +698,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             className="mx-auto w-full max-w-4xl px-0 shrink-0"
             onClick={(e) => e.stopPropagation()}
           >
-            {!isSlide && playable && readyNow ? (
+            {!ended && !isSlide && playable && readyNow ? (
               <div
                 className="group relative h-1.5 mx-1 cursor-pointer"
                 onPointerDown={(e) => {
@@ -743,9 +756,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   {item.type.replace("_", " ")}
                 </span>
                 <h3 className="text-sm font-semibold text-white truncate">{item.title}</h3>
-                {item.videoTitle && (
-                  <p className="text-[10px] text-white/40 truncate">{item.videoTitle}</p>
-                )}
                 {item.detail && (
                   <div
                     className="mt-1 text-xs text-white/60 leading-relaxed max-h-24 overflow-y-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded [&::-webkit-scrollbar-track]:bg-transparent"
