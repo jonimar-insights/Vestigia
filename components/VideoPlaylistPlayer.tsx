@@ -89,6 +89,9 @@ export function formatTs(s: number) {
 }
 
 export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: () => void }) {
+  // Nominal seconds a Drive stream may take to hand over metadata — used for
+  // the loading countdown (the true wait is unknowable in advance).
+  const LOAD_NOMINAL_MS = 8000;
   const [currentIdx, setCurrentIdx] = useState(0);
   const [ended, setEnded] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -97,6 +100,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const [playerReady, setPlayerReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const timeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const loadStartRef = useRef(0);
 
   const item = items[currentIdx];
 
@@ -123,6 +128,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   // True while an html5 (drive/upload) clip is waiting on its stream — Drive
   // headers can take seconds — drives the "Loading audio/video…" indicator.
   const [html5Loading, setHtml5Loading] = useState(false);
+  // Ticks ~4x/sec while a drive stream buffers; elapsed loading seconds are
+  // derived from loadStartRef so the countdown progresses without a reset race.
+  const [loadNow, setLoadNow] = useState(0);
   const fetchedIdsRef = useRef<Set<number>>(new Set());
   const lastVideoIdRef = useRef<string | null>(null);
   const advancedRef = useRef(false);
@@ -242,6 +250,17 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
   function clearTimeInterval() {
     if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
+  }
+
+  // Loading-countdown clock: update `loadNow` ~4x/sec while a drive stream
+  // buffers; elapsed is (loadNow - loadStartRef)/1000.
+  function startLoaderTick() {
+    clearLoaderTick();
+    loadStartRef.current = Date.now();
+    loadTickRef.current = setInterval(() => setLoadNow(Date.now()), 250);
+  }
+  function clearLoaderTick() {
+    if (loadTickRef.current) { clearInterval(loadTickRef.current); loadTickRef.current = null; }
   }
 
   // The player backing the current clip (Vimeo adapter, YouTube iframe, or
@@ -564,6 +583,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     return () => el.removeEventListener("loadedmetadata", onMeta);
   }, [currentIdx, html5Setup, item?.videoId, item?.timestamp, item?.type, html5SrcsState]);
 
+  // Tick the loading clock while an html5 stream buffers, resetting whenever a
+  // new clip starts loading.
+  useEffect(() => {
+    if (!html5Loading) return;
+    startLoaderTick();
+    return clearLoaderTick;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html5Loading]);
+
   useEffect(() => {
     if (!playing || !currentTime) return;
     const ap = getActivePlayer();
@@ -726,7 +754,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const isSlide = item?.type === "slide";
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
-  const activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
+  const       activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
+  const loadElapsedSec = html5Loading ? Math.max(0, (loadNow - (loadStartRef.current || loadNow)) / 1000) : 0;
+  const loadNominalSec = LOAD_NOMINAL_MS / 1000;
+  const loadRemaining = Math.max(0, Math.ceil(loadNominalSec - loadElapsedSec));
   const clipEnd = item ? (item.endTimestamp ?? item.timestamp + 30) : 0;
   const clipFrac = isSlide || !playable ? 0 : Math.min(1, Math.max(0, (currentTime - item.timestamp) / Math.max(1, clipEnd - item.timestamp)));
   const slideMs = slideDeadlineRef.current?.ms ?? 5000;
@@ -835,10 +866,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               </div>
             )}
             {!ended && h5Src && html5Loading && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/50">
-                <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-white/80">
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
+                <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-                  <span className="text-xs">Loading audio/video…</span>
+                  <span className="text-xs text-white/80">{loadRemaining}s</span>
+                </div>
+                <div className="w-48 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-white/70 transition-[width] duration-300"
+                    style={{ width: `${Math.min(100, (loadElapsedSec / loadNominalSec) * 100)}%` }}
+                  />
                 </div>
               </div>
             )}
