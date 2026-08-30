@@ -112,6 +112,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
   useEffect(() => { html5SrcsRef.current = html5SrcsState; });
+  const [html5Audio, setHtml5Audio] = useState<Map<number, boolean>>(new Map());
+  const html5AudioRef = useRef<Map<number, boolean>>(html5Audio);
+  useEffect(() => { html5AudioRef.current = html5Audio; });
   const html5PlayerRef = useRef<Html5Adapter | null>(null);
   const html5ElRef = useRef<HTMLVideoElement | null>(null);
   const [html5Ready, setHtml5Ready] = useState(false);
@@ -169,6 +172,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               youtubeId: ytOk ? raw : "",
               vimeoId: !ytOk && raw.startsWith("vimeo:") ? raw.slice("vimeo:".length) : "",
               html5Src: isHtml5 && typeof data.youtubeUrl === "string" ? data.youtubeUrl : "",
+              html5Audio: isHtml5 && data.mediaType === "audio",
             };
           }
         } catch {}
@@ -193,6 +197,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         const next = new Map(prev);
         for (const r of results) {
           if (r && r.html5Src) next.set(r.videoId, r.html5Src);
+        }
+        return next;
+      });
+      setHtml5Audio((prev) => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r?.html5Audio) next.set(r.videoId, true);
         }
         return next;
       });
@@ -668,6 +679,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const ytId = videoIds.get(item.videoId);
   const vmId = vimeoIds.get(item.videoId);
   const h5Src = html5SrcsState.get(item.videoId);
+  const isHtml5Audio = !!h5Src && !!html5Audio.get(item.videoId);
+  const audioCoverSrc = isHtml5Audio ? (item.imageUrl || item.videoThumbnail) || "" : "";
   const isSlide = item?.type === "slide";
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
@@ -740,6 +753,25 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 playsInline
               />
             </div>
+            {!ended && isHtml5Audio && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black p-8 pointer-events-none">
+                {audioCoverSrc ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={audioCoverSrc}
+                    alt={item.title || "Audio cover"}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
+                    className="max-h-[60%] max-w-full object-contain rounded-lg shadow-xl ring-1 ring-white/10"
+                  />
+                ) : (
+                  <div className="w-24 h-24 rounded-2xl bg-white/10 flex items-center justify-center">
+                    <svg className="w-12 h-12 text-white/40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.818m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.75z" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+            )}
             {ended && (
               <div className="absolute inset-0 bg-black" />
             )}
