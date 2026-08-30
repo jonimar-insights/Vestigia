@@ -98,7 +98,10 @@ export async function GET(
   if (acceptRanges) headers.set("accept-ranges", acceptRanges);
   headers.set("cross-origin-resource-policy", "cross-origin");
   headers.set("access-control-allow-origin", "*");
-  headers.set("cache-control", "no-store");
+  // Drive files are immutable per id, so let the browser cache the (range)
+  // media response instead of re-fetching 70MB+ metadata from Google on every
+  // playlist/video open. Chrome media caching honors max-age on 206 responses.
+  headers.set("cache-control", "private, max-age=86400");
 
   return new Response(upstream.body, {
     status: upstream.status,

@@ -112,9 +112,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
   useEffect(() => { html5SrcsRef.current = html5SrcsState; });
-  const [html5Audio, setHtml5Audio] = useState<Map<number, boolean>>(new Map());
-  const html5AudioRef = useRef<Map<number, boolean>>(html5Audio);
-  useEffect(() => { html5AudioRef.current = html5Audio; });
+  // Marks drive/upload videos that loaded a REAL video track (videoWidth>0).
+  // Until confirmed, an html5 clip is assumed cover-image (audio-style) —
+  // drive files are often probe-mistyped audio (mediaType "video").
+  const [html5IsVideo, setHtml5IsVideo] = useState<Map<number, boolean>>(new Map());
   const html5PlayerRef = useRef<Html5Adapter | null>(null);
   const html5ElRef = useRef<HTMLVideoElement | null>(null);
   const [html5Ready, setHtml5Ready] = useState(false);
@@ -172,7 +173,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               youtubeId: ytOk ? raw : "",
               vimeoId: !ytOk && raw.startsWith("vimeo:") ? raw.slice("vimeo:".length) : "",
               html5Src: isHtml5 && typeof data.youtubeUrl === "string" ? data.youtubeUrl : "",
-              html5Audio: isHtml5 && data.mediaType === "audio",
             };
           }
         } catch {}
@@ -197,13 +197,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         const next = new Map(prev);
         for (const r of results) {
           if (r && r.html5Src) next.set(r.videoId, r.html5Src);
-        }
-        return next;
-      });
-      setHtml5Audio((prev) => {
-        const next = new Map(prev);
-        for (const r of results) {
-          if (r?.html5Audio) next.set(r.videoId, true);
         }
         return next;
       });
@@ -540,9 +533,25 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
       try { html5ElRef.current.currentTime = cur.timestamp; } catch {}
       try { html5ElRef.current.play(); } catch {}
       try { if (speedRef.current !== 1) html5ElRef.current.playbackRate = speedRef.current; } catch {}
+      // Drive files are often audio stored as mediaType "video" — confirm a
+      // real video track (videoWidth>0) so the cover overlay can hide for
+      // genuine videos but stay up for audio/cover renders.
+      if (cur.videoId > 0 && html5ElRef.current.videoWidth <= 0 && html5ElRef.current.videoHeight <= 0) {
+        // audio — nothing to mark; cover stays
+      } else if (cur.videoId > 0) {
+        setHtml5IsVideo((prev) => {
+          if (prev.get(cur.videoId)) return prev;
+          const next = new Map(prev);
+          next.set(cur.videoId, true);
+          return next;
+        });
+      }
     };
     el.addEventListener("loadedmetadata", onMeta);
     try { el.src = src; } catch {}
+    // Start clips that begin near 0 immediately instead of waiting for
+    // metadata — Drive streams can be slow to hand over the header.
+    if (cur.timestamp < 3) { try { el.play().catch(() => {}); } catch {} }
     return () => el.removeEventListener("loadedmetadata", onMeta);
   }, [currentIdx, html5Setup, item?.videoId, item?.timestamp, item?.type, html5SrcsState]);
 
@@ -679,7 +688,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const ytId = videoIds.get(item.videoId);
   const vmId = vimeoIds.get(item.videoId);
   const h5Src = html5SrcsState.get(item.videoId);
-  const isHtml5Audio = !!h5Src && !!html5Audio.get(item.videoId);
+  // Drive/upload clips show a cover (audio-style) until the stream proves a
+  // real video track; the cover then hides to reveal the video.
+  const isHtml5Audio = !!h5Src && !html5IsVideo.get(item.videoId);
   const audioCoverSrc = isHtml5Audio ? (item.imageUrl || item.videoThumbnail) || "" : "";
   const isSlide = item?.type === "slide";
   const playable = !!(ytId || vmId || h5Src);
@@ -751,8 +762,28 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 ref={html5ElRef}
                 className="h-full w-full"
                 playsInline
+                preload="metadata"
               />
             </div>
+            {ended && (
+              <div className="absolute inset-0 bg-black" />
+            )}
+            {!ended && item?.type !== "slide" && (
+              ytId === "" && !vmId && !h5Src ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
+                  <span className="text-xs text-white/40">
+                    This clip&apos;s video isn&apos;t playable in the playlist (social or self-hosted) — use Next to continue.
+                  </span>
+                </div>
+              ) : !readyNow && !isHtml5Audio ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black">
+                  <div className="flex items-center gap-2 text-white/40">
+                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                    <span className="text-xs">Loading player...</span>
+                  </div>
+                </div>
+              ) : null
+            )}
             {!ended && isHtml5Audio && (
               <div className="absolute inset-0 flex items-center justify-center bg-black p-8 pointer-events-none">
                 {audioCoverSrc ? (
@@ -771,25 +802,6 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   </div>
                 )}
               </div>
-            )}
-            {ended && (
-              <div className="absolute inset-0 bg-black" />
-            )}
-            {!ended && item?.type !== "slide" && (
-              ytId === "" && !vmId && !h5Src ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
-                  <span className="text-xs text-white/40">
-                    This clip&apos;s video isn&apos;t playable in the playlist (social or self-hosted) — use Next to continue.
-                  </span>
-                </div>
-              ) : !readyNow ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black">
-                  <div className="flex items-center gap-2 text-white/40">
-                    <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                    <span className="text-xs">Loading player...</span>
-                  </div>
-                </div>
-              ) : null
             )}
             {!ended && isSlide && (
               <div
