@@ -42,6 +42,21 @@ export class VimeoAdapter implements SyncPlayerInterface {
   private destroyed = false;
   private loading = false;
   private pendingPlay = false;
+  // Vimeo can fire play then immediately pause while a loadVideo+seek
+  // settles (the SDK or a slow buffer interrupts the initial play). When we
+  // have asked to play (autoResume > 0) and Vimeo auto-pauses, re-issue play
+  // a bounded number of times so the clip reliably starts. Any manual pause
+  // (pauseVideo) clears the budget so we never fight the user.
+  private autoResume = 0;
+  private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private clearResumeTimer() {
+    if (this.resumeTimer) { clearTimeout(this.resumeTimer); this.resumeTimer = null; }
+  }
+
+  private armAutoResume() {
+    this.autoResume = 3;
+  }
 
   constructor(player: MinimalVimeoPlayer) {
     this.p = player;
@@ -65,6 +80,9 @@ export class VimeoAdapter implements SyncPlayerInterface {
     player.on("pause", () => {
       this.state = 2;
       this.playStateCb?.(false);
+      // If we intend to be playing but Vimeo auto-paused (the settle race),
+      // retry play after a short delay instead of sitting stuck paused.
+      if (this.autoResume > 0) this.scheduleResume();
     });
     player.on("ended", () => {
       this.state = 0;
@@ -119,11 +137,28 @@ export class VimeoAdapter implements SyncPlayerInterface {
       this.pendingPlay = true;
       return;
     }
+    this.armAutoResume();
     this.p.play().catch(() => {});
   }
 
   pauseVideo(): void {
+    this.clearResumeTimer();
+    this.autoResume = 0;
     this.p.pause().catch(() => {});
+  }
+
+  private scheduleResume() {
+    if (this.resumeTimer || this.autoResume <= 0) return;
+    this.resumeTimer = setTimeout(() => {
+      this.resumeTimer = null;
+      if (this.destroyed || this.autoResume <= 0) return;
+      // Only resume if the player is actually paused and we haven't been told
+      // to stop — re-predict play so the settle race never leaves us stuck.
+      if (this.state === 2) {
+        this.autoResume -= 1;
+        this.p.play().catch(() => {});
+      }
+    }, 350);
   }
 
   getPlayerState(): number {
@@ -144,6 +179,7 @@ export class VimeoAdapter implements SyncPlayerInterface {
         this.time = startSeconds;
         if (this.pendingPlay) {
           this.pendingPlay = false;
+          this.armAutoResume();
           await this.p.play().catch(() => {});
         }
       })

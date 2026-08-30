@@ -15,6 +15,9 @@ interface FakePlayer extends MinimalVimeoPlayer {
 function makeFakePlayer() {
   const handlers = new Map<string, Array<(data?: unknown) => void>>();
   let readyResolve: (() => void) | null = null;
+  // loadVideo is deferred so tests can play with the pendingPlay/auto-resume
+  // settle race deterministically.
+  const loadQueue: Array<{ id: number; resolve: () => void; reject: (e?: unknown) => void }> = [];
   const player: FakePlayer = {
     on(event, cb) {
       if (!handlers.has(event)) handlers.set(event, []);
@@ -31,11 +34,14 @@ function makeFakePlayer() {
     },
     async play() { player.emit("play"); },
     async pause() { player.emit("pause"); },
-    emit(event, data) {
-      for (const cb of handlers.get(event) ?? []) cb(data);
+    async loadVideo(id: number) {
+      return new Promise<void>((resolve, reject) => { loadQueue.push({ id, resolve, reject }); });
     },
+    emit(event, data) { for (const cb of handlers.get(event) ?? []) cb(data); },
     resolveReady() { readyResolve?.(); },
   };
+  // expose helpers for tests
+  (player as unknown as { _loadQueue: typeof loadQueue })._loadQueue = loadQueue;
   return player;
 }
 
@@ -90,6 +96,49 @@ async function main() {
   a5.playVideo();
   a5.pauseVideo();
   assert.deepEqual(seen, ["play", "pause"], "delegates to SDK play/pause");
+
+  // ── 6. loadVideoById + playVideo: play queued behind the load, and the
+  //      settle race (Vimeo fires play → pause) is auto-resumed ──
+  const p6 = makeFakePlayer();
+  const a6 = new VimeoAdapter(p6);
+  p6.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  const loadQueue6 = (p6 as unknown as { _loadQueue: { id: number; resolve: () => void; reject: (e?: unknown) => void }[] })._loadQueue;
+  const p6events: string[] = [];
+  p6.play = async () => { p6events.push("play"); p6.emit("play"); };
+  // emulate the transition: loadVideoById + playVideo (play queues behind load)
+  a6.loadVideoById("12345", 0);
+  a6.playVideo();
+  assert.equal(loadQueue6.length, 1, "loadVideo called once");
+  assert.equal(a6.getPlayerState(), 2, "paused while load is in flight");
+  // resolve the load: queued play fires
+  loadQueue6[0].resolve();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(p6events.includes("play"), "queued play fires after load resolves");
+  // now Vimeo auto-pauses during settle (the bug): auto-resume should re-play
+  const before = p6events.length;
+  p6.emit("pause");
+  await new Promise((r) => setTimeout(r, 450));
+  assert.ok(p6events.length > before, "auto-resume re-issues play after settle pause");
+
+  // ── 7. auto-resume never fights a manual pauseVideo ──
+  const p7 = makeFakePlayer();
+  const a7 = new VimeoAdapter(p7);
+  p7.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  let p7plays = 0;
+  p7.play = async () => { p7plays++; p7.emit("play"); };
+  a7.playVideo();
+  a7.pauseVideo(); // user pause clears the resume budget
+  const q7 = (p7 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  a7.loadVideoById("999", 0);
+  q7[0].reject(new Error("no load")); // loadVideo fails → loading reset
+  // playVideo was called while paused intent; but the earlier play already
+  // armed resume; a pause now must NOT auto-resume because pauseVideo cleared it
+  p7.emit("pause");
+  const before7 = p7plays;
+  await new Promise((r) => setTimeout(r, 450));
+  assert.equal(p7plays, before7, "no auto-resume after manual pauseVideo");
 
   console.log("ALL VIMEO ADAPTER TESTS PASS");
 }
