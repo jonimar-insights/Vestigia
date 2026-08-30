@@ -2053,7 +2053,7 @@ export default function VideoPage() {
                             <div className={`absolute left-[11px] top-[18px] w-[10px] h-[10px] rounded-full border-2 border-background ${colors.dot} ring-2 ${colors.ring} transition-transform group-hover/card:scale-125`} />
 
                             <div
-                              className={`rounded-xl border border-border/60 ${colors.border} bg-surface hover:bg-surface-hover/50 hover:border-border transition-all duration-150 overflow-hidden ${
+                              className={`rounded-xl border border-border/60 ${colors.border} bg-surface hover:bg-surface-hover/50 hover:border-border transition-all duration-150 overflow-visible ${
                                 isEditing ? "ring-1 ring-accent/30" : ""
                               } ${selectedIds.has(ann.id) ? "ring-1 ring-accent/40 bg-accent/5" : ""}`}
                               onClick={() => { if (!isEditing) playSegment(ann.timestampStart, ann.timestampEnd); }}>
