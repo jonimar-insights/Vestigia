@@ -5,6 +5,7 @@ import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
+import { Html5Adapter } from "@/lib/html5-adapter";
 
 declare global {
   interface Window {
@@ -108,6 +109,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const vimeoPlayerRef = useRef<VimeoAdapter | null>(null);
   const vimeoContainerRef = useRef<HTMLDivElement>(null);
   const [vimeoReady, setVimeoReady] = useState(false);
+  const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
+  const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
+  useEffect(() => { html5SrcsRef.current = html5SrcsState; });
+  const html5PlayerRef = useRef<Html5Adapter | null>(null);
+  const html5ElRef = useRef<HTMLVideoElement | null>(null);
+  const [html5Ready, setHtml5Ready] = useState(false);
+  const [html5Setup, setHtml5Setup] = useState(false);
   const fetchedIdsRef = useRef<Set<number>>(new Set());
   const lastVideoIdRef = useRef<string | null>(null);
   const advancedRef = useRef(false);
@@ -152,13 +160,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           if (res.ok) {
             const data = await res.json();
             // Classify by youtubeId shape: 11-char = YouTube, "vimeo:<id>" =
-            // Vimeo; other social/self-hosted prefixes stay unplayable ("").
+            // Vimeo; drive/upload use a native HTML5 element (youtubeUrl src).
             const raw = String(data.youtubeId ?? "");
             const ytOk = /^[A-Za-z0-9_-]{11}$/.test(raw);
+            const isHtml5 = data.platform === "drive" || data.platform === "upload";
             return {
               videoId: vid,
               youtubeId: ytOk ? raw : "",
               vimeoId: !ytOk && raw.startsWith("vimeo:") ? raw.slice("vimeo:".length) : "",
+              html5Src: isHtml5 && typeof data.youtubeUrl === "string" ? data.youtubeUrl : "",
             };
           }
         } catch {}
@@ -176,6 +186,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         const next = new Map(prev);
         for (const r of results) {
           if (r) next.set(r.videoId, r.vimeoId);
+        }
+        return next;
+      });
+      setHtml5Srcs((prev) => {
+        const next = new Map(prev);
+        for (const r of results) {
+          if (r && r.html5Src) next.set(r.videoId, r.html5Src);
         }
         return next;
       });
@@ -220,14 +237,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     if (timeIntervalRef.current) { clearInterval(timeIntervalRef.current); timeIntervalRef.current = null; }
   }
 
-  // The player backing the current clip (Vimeo adapter or YouTube iframe).
-  // Returns null for slides and unplayable items so controls never act on a
-  // hidden player from the previous clip.
+  // The player backing the current clip (Vimeo adapter, YouTube iframe, or
+  // native HTML5 for drive/upload). Returns null for slides and unplayable
+  // items so controls never act on a hidden player from the previous clip.
   function getActivePlayer(): YTPlayer | null {
     const cur = itemsRef.current[currentIdxRef.current];
     if (!cur) return null;
     if (vimeoIdsRef.current.get(cur.videoId)) return vimeoPlayerRef.current;
     if (videoIdsRef.current.get(cur.videoId)) return playerRef.current;
+    if (html5SrcsRef.current.get(cur.videoId)) return html5PlayerRef.current;
     return null;
   }
 
@@ -238,11 +256,12 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   useEffect(() => {
     const cur = itemsRef.current[currentIdx];
     if (!cur) return;
-    if (videoIds.get(cur.videoId) || vimeoIds.get(cur.videoId)) return;
+    if (videoIds.get(cur.videoId) || vimeoIds.get(cur.videoId) || html5SrcsState.get(cur.videoId)) return;
     try { playerRef.current?.pauseVideo(); } catch {}
     try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+    try { html5PlayerRef.current?.pauseVideo(); } catch {}
     setPlaying(false);
-  }, [currentIdx, item?.type, videoIds, vimeoIds]);
+  }, [currentIdx, item?.type, videoIds, vimeoIds, html5SrcsState]);
 
   function startTimePolling() {
     if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
@@ -266,6 +285,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     advancedRef.current = false;
     clearTimeInterval();
     try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+    try { html5PlayerRef.current?.pauseVideo(); } catch {}
     setCurrentTime(cur.timestamp);
     lastVideoIdRef.current = ytId;
 
@@ -363,6 +383,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
     try {
       playerRef.current?.pauseVideo();
+      html5PlayerRef.current?.pauseVideo();
       vimeoPlayerRef.current.loadVideoById(vmId, cur.timestamp);
       vimeoPlayerRef.current.playVideo();
       if (speedRef.current !== 1) vimeoPlayerRef.current.setPlaybackRate(speedRef.current);
@@ -439,6 +460,81 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [vimeoIds]);
 
+  // ── Native HTML5 player (Google Drive / upload) ──
+  // Bind a reusable <video>/<audio> element once the playlist has a
+  // drive/upload item; clip loading swaps `src` and seeks per item.
+  useEffect(() => {
+    const el = html5ElRef.current;
+    if (!el || html5PlayerRef.current) return;
+    const hasHtml5 = itemsRef.current.some((i) => i.videoId > 0 && html5SrcsRef.current.get(i.videoId));
+    if (!hasHtml5) return;
+    const adapter = new Html5Adapter(el);
+    html5PlayerRef.current = adapter;
+    let destroyed = false;
+    adapter.onPlayState((pl) => {
+      if (destroyed) return;
+      const curItem = itemsRef.current[currentIdxRef.current];
+      if (!curItem || !html5SrcsRef.current.get(curItem.videoId)) return;
+      setPlaying(pl);
+      if (pl) startTimePolling();
+      else clearTimeInterval();
+    });
+    adapter.onReady(() => {
+      if (destroyed) return;
+      setHtml5Ready(true);
+    });
+    adapter.onEnd(() => {
+      if (destroyed) return;
+      const curItem = itemsRef.current[currentIdxRef.current];
+      if (!curItem || !html5SrcsRef.current.get(curItem.videoId)) return;
+      setPlaying(false);
+      clearTimeInterval();
+      if (loopOneRef.current) {
+        try {
+          html5PlayerRef.current?.seekTo(curItem.timestamp, true);
+          html5PlayerRef.current?.playVideo();
+        } catch {}
+      } else if (advancedRef.current) {
+        advancedRef.current = false;
+      } else {
+        advanceOrEnd();
+      }
+    });
+    setHtml5Setup(true);
+    return () => {
+      destroyed = true;
+      if (html5PlayerRef.current) {
+        try { html5PlayerRef.current.destroy(); } catch {}
+        html5PlayerRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [html5SrcsState]);
+
+  // Load the current clip into the HTML5 element when it's a drive/upload
+  // video: swap `${src}`, seek to the clip start, and play on metadata.
+  useEffect(() => {
+    const cur = itemsRef.current[currentIdx];
+    if (!html5Setup || !html5ElRef.current || !cur || cur.type === "slide") return;
+    const src = html5SrcsState.get(cur.videoId);
+    if (!src) return;
+    const el = html5ElRef.current;
+    advancedRef.current = false;
+    clearTimeInterval();
+    try { playerRef.current?.pauseVideo(); } catch {}
+    try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+    setCurrentTime(cur.timestamp);
+    const onMeta = () => {
+      if (!html5PlayerRef.current || !html5ElRef.current) return;
+      try { html5ElRef.current.currentTime = cur.timestamp; } catch {}
+      try { html5ElRef.current.play(); } catch {}
+      try { if (speedRef.current !== 1) html5ElRef.current.playbackRate = speedRef.current; } catch {}
+    };
+    el.addEventListener("loadedmetadata", onMeta);
+    try { el.src = src; } catch {}
+    return () => el.removeEventListener("loadedmetadata", onMeta);
+  }, [currentIdx, html5Setup, item?.videoId, item?.timestamp, item?.type, html5SrcsState]);
+
   useEffect(() => {
     if (!playing || !currentTime) return;
     const ap = getActivePlayer();
@@ -447,7 +543,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     // Only real clips have clip windows — slides advance via their own timer
     // and unplayable items must not phantom-advance off stale currentTime.
     if (!cur || cur.type === "slide") return;
-    if (!videoIdsRef.current.get(cur.videoId) && !vimeoIdsRef.current.get(cur.videoId)) return;
+    if (!videoIdsRef.current.get(cur.videoId) && !vimeoIdsRef.current.get(cur.videoId) && !html5SrcsRef.current.get(cur.videoId)) return;
     try {
       if (ap.getPlayerState() !== 1) return;
     } catch { return; }
@@ -481,6 +577,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     } else {
       try { playerRef.current?.pauseVideo(); } catch {}
       try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
+      try { html5PlayerRef.current?.pauseVideo(); } catch {}
       setEnded(true);
       setCurrentIdx(idx);
     }
@@ -490,7 +587,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   useEffect(() => {
     try { playerRef.current?.setPlaybackRate?.(SPEEDS[speedIdx]); } catch {}
     try { vimeoPlayerRef.current?.setPlaybackRate(SPEEDS[speedIdx]); } catch {}
-  }, [speedIdx, playerReady, vimeoReady]);
+    try { html5PlayerRef.current?.setPlaybackRate(SPEEDS[speedIdx]); } catch {}
+  }, [speedIdx, playerReady, vimeoReady, html5Ready]);
 
   // Keyboard shortcuts: ←/→ prev-next clip, Space play/pause, Esc close
   useEffect(() => {
@@ -569,10 +667,11 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
   const ytId = videoIds.get(item.videoId);
   const vmId = vimeoIds.get(item.videoId);
+  const h5Src = html5SrcsState.get(item.videoId);
   const isSlide = item?.type === "slide";
-  const playable = !!(ytId || vmId);
-  const readyNow = ytId ? playerReady : vmId ? vimeoReady : false;
-  const activeKind: "youtube" | "vimeo" | null = isSlide ? null : vmId ? "vimeo" : "youtube";
+  const playable = !!(ytId || vmId || h5Src);
+  const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
+  const activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
   const clipEnd = item ? (item.endTimestamp ?? item.timestamp + 30) : 0;
   const clipFrac = isSlide || !playable ? 0 : Math.min(1, Math.max(0, (currentTime - item.timestamp) / Math.max(1, clipEnd - item.timestamp)));
   const slideMs = slideDeadlineRef.current?.ms ?? 5000;
@@ -634,11 +733,18 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             <div className="absolute inset-0 [&_iframe]:w-full [&_iframe]:h-full" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
               <div ref={vimeoContainerRef} className="w-full h-full" />
             </div>
+            <div className="absolute inset-0 h-full w-full" style={{ display: activeKind === "html5" && !ended ? undefined : "none" }}>
+              <video
+                ref={html5ElRef}
+                className="h-full w-full"
+                playsInline
+              />
+            </div>
             {ended && (
               <div className="absolute inset-0 bg-black" />
             )}
             {!ended && item?.type !== "slide" && (
-              ytId === "" && !vmId ? (
+              ytId === "" && !vmId && !h5Src ? (
                 <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
                   <span className="text-xs text-white/40">
                     This clip&apos;s video isn&apos;t playable in the playlist (social or self-hosted) — use Next to continue.

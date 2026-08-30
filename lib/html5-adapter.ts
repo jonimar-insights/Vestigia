@@ -9,12 +9,17 @@ export class Html5Adapter implements SyncPlayerInterface {
   private el: HTMLMediaElement;
   private playStateCb: ((playing: boolean) => void) | null = null;
   private readyCbs: Array<() => void> = [];
+  private endCbs: Array<() => void> = [];
   private readyFired = false;
   private destroyed = false;
 
   private onPlay = () => { if (!this.destroyed) this.playStateCb?.(true); };
   private onPause = () => { if (!this.destroyed) this.playStateCb?.(false); };
-  private onEnded = () => { if (!this.destroyed) this.playStateCb?.(false); };
+  private onEnded = () => {
+    if (this.destroyed) return;
+    this.playStateCb?.(false);
+    for (const cb of this.endCbs) cb();
+  };
   private onLoadedMetadata = () => { this.finishReady(); };
 
   constructor(el: HTMLMediaElement) {
@@ -37,6 +42,11 @@ export class Html5Adapter implements SyncPlayerInterface {
   onReady(cb: () => void) {
     if (this.readyFired) cb();
     else this.readyCbs.push(cb);
+  }
+
+  /** Invoke cb when the media reaches its natural end. */
+  onEnd(cb: () => void) {
+    this.endCbs.push(cb);
   }
 
   onPlayState(cb: (playing: boolean) => void) {
@@ -62,6 +72,18 @@ export class Html5Adapter implements SyncPlayerInterface {
 
   pauseVideo(): void {
     this.el.pause();
+  }
+
+  setPlaybackRate(rate: number): void {
+    try { this.el.playbackRate = rate; } catch {}
+  }
+
+  mute(): void {
+    this.el.muted = true;
+  }
+
+  unMute(): void {
+    this.el.muted = false;
   }
 
   getPlayerState(): number {
