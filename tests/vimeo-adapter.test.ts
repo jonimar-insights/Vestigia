@@ -129,7 +129,7 @@ async function main() {
   let p7plays = 0;
   p7.play = async () => { p7plays++; p7.emit("play"); };
   a7.playVideo();
-  a7.pauseVideo(); // user pause clears the resume budget
+  a7.pauseVideo(); // user pause clears the resume budget and watchdog
   const q7 = (p7 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
   a7.loadVideoById("999", 0);
   q7[0].reject(new Error("no load")); // loadVideo fails → loading reset
@@ -139,6 +139,28 @@ async function main() {
   const before7 = p7plays;
   await new Promise((r) => setTimeout(r, 450));
   assert.equal(p7plays, before7, "no auto-resume after manual pauseVideo");
+
+  // ── 10. progress-based watchdog: keeps re-issuing play while the media
+  //       silently stalls (state=playing but time never advances), and stops
+  //       the moment currentTime actually advances past the play target ──
+  const p10 = makeFakePlayer();
+  const a10 = new VimeoAdapter(p10);
+  p10.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  let plays10 = 0;
+  p10.play = async () => { plays10++; p10.emit("play"); };
+  a10.playVideo(); // beginPlay: intends to play, target = current time (0)
+  await new Promise((r) => setTimeout(r, 1150)); // ~2 watchdog ticks elapse
+  assert.ok(plays10 >= 2, `watchdog re-issues play while stalled (got ${plays10})`);
+  // media finally progresses past the target → watchdog must stop
+  p10.emit("timeupdate", { seconds: 1.2, duration: 62 });
+  const stoppedAt = plays10;
+  await new Promise((r) => setTimeout(r, 1200));
+  assert.equal(plays10, stoppedAt, "watchdog stops once time advances past target");
+  // and a subsequent Vimeo auto-pause must NOT re-play now (no longer intended)
+  p10.emit("pause");
+  await new Promise((r) => setTimeout(r, 450));
+  assert.equal(plays10, stoppedAt, "no re-play after progress achieved + pause");
 
   // ── 8. loadVideoById with a privacy hash passes {id, h} to the SDK ──
   const p8 = makeFakePlayer();

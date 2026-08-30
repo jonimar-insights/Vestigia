@@ -44,27 +44,67 @@ export class VimeoAdapter implements SyncPlayerInterface {
   private destroyed = false;
   private loading = false;
   private pendingPlay = false;
-  // Vimeo can fire play then immediately pause while a loadVideo+seek
-  // settles (the SDK or a slow buffer interrupts the initial play). When we
-  // have asked to play (autoResume > 0) and Vimeo auto-pauses, re-issue play
-  // a bounded number of times so the clip reliably starts. Any manual pause
-  // (pauseVideo) clears the budget so we never fight the user.
-  private autoResume = 0;
+  // Vimeo auto-play is unreliable: calling play() before the first frame
+  // buffers can make Vimeo report state=1 (playing) while currentTime never
+  // advances — a silent stall. Rather than trust state, we drive auto-play
+  // with a PROGRESS watchdog: while we intend to play (intendPlay) and the
+  // cached time hasn't advanced past playTarget (where playback began), keep
+  // re-issuing play() until currentTime actually moves (real playback), the
+  // clip ends, or the watchdog window elapses. Any manual pause (pauseVideo)
+  // clears intendPlay so we never fight the user.
+  private intendPlay = false;
+  private playTarget = -1;
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private watchdogBudget = 0;
 
   private clearResumeTimer() {
     if (this.resumeTimer) { clearTimeout(this.resumeTimer); this.resumeTimer = null; }
   }
 
-  private armAutoResume() {
-    this.autoResume = 3;
+  private clearWatchdog() {
+    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
+  }
+
+  private stopAutoPlay() {
+    this.intendPlay = false;
+    this.clearResumeTimer();
+    this.clearWatchdog();
+  }
+
+  private progressed() {
+    return this.time > this.playTarget;
+  }
+
+  /** Start (or continue) auto-play with progress verification. */
+  private beginPlay() {
+    this.intendPlay = true;
+    this.playTarget = this.time;
+    this.clearResumeTimer();
+    this.watchdogBudget = 16; // ~8s @500ms
+    this.issuePlay();
+    this.clearWatchdog();
+    this.watchdog = setInterval(() => {
+      if (this.destroyed || !this.intendPlay) { this.stopAutoPlay(); return; }
+      if (this.state === 0) { this.stopAutoPlay(); return; }
+      if (this.progressed()) { this.stopAutoPlay(); return; }
+      if (--this.watchdogBudget <= 0) { this.stopAutoPlay(); return; }
+      this.issuePlay();
+    }, 500);
+  }
+
+  private issuePlay() {
+    this.p.play().catch(() => {});
   }
 
   constructor(player: MinimalVimeoPlayer) {
     this.p = player;
     player.on("timeupdate", (data) => {
       const d = data as { seconds?: number; duration?: number } | undefined;
-      if (typeof d?.seconds === "number") this.time = d.seconds;
+      if (typeof d?.seconds === "number") {
+        this.time = d.seconds;
+        if (this.intendPlay && this.progressed()) this.stopAutoPlay();
+      }
       if (typeof d?.duration === "number") this.durationSec = d.duration;
     });
     player.on("seeked", (data) => {
@@ -82,13 +122,22 @@ export class VimeoAdapter implements SyncPlayerInterface {
     player.on("pause", () => {
       this.state = 2;
       this.playStateCb?.(false);
-      // If we intend to be playing but Vimeo auto-paused (the settle race),
-      // retry play after a short delay instead of sitting stuck paused.
-      if (this.autoResume > 0) this.scheduleResume();
+      // If we intend to play but Vimeo auto-paused (the settle race or a
+      // buffer stall), re-issue play shortly instead of sitting stuck paused.
+      // The watchdog continues to verify actual progress.
+      if (this.intendPlay && this.watchdogBudget > 0) {
+        this.clearResumeTimer();
+        this.resumeTimer = setTimeout(() => {
+          this.resumeTimer = null;
+          if (this.destroyed || !this.intendPlay) return;
+          if (this.state === 2 && !this.progressed()) this.issuePlay();
+        }, 350);
+      }
     });
     player.on("ended", () => {
       this.state = 0;
       this.playStateCb?.(false);
+      this.stopAutoPlay();
     });
     player.ready().then(() => {
       if (this.destroyed) return;
@@ -137,30 +186,15 @@ export class VimeoAdapter implements SyncPlayerInterface {
     // so playback starts right after the load+seek settle.
     if (this.loading) {
       this.pendingPlay = true;
+      this.intendPlay = true;
       return;
     }
-    this.armAutoResume();
-    this.p.play().catch(() => {});
+    this.beginPlay();
   }
 
   pauseVideo(): void {
-    this.clearResumeTimer();
-    this.autoResume = 0;
+    this.stopAutoPlay();
     this.p.pause().catch(() => {});
-  }
-
-  private scheduleResume() {
-    if (this.resumeTimer || this.autoResume <= 0) return;
-    this.resumeTimer = setTimeout(() => {
-      this.resumeTimer = null;
-      if (this.destroyed || this.autoResume <= 0) return;
-      // Only resume if the player is actually paused and we haven't been told
-      // to stop — re-predict play so the settle race never leaves us stuck.
-      if (this.state === 2) {
-        this.autoResume -= 1;
-        this.p.play().catch(() => {});
-      }
-    }, 350);
   }
 
   getPlayerState(): number {
@@ -170,6 +204,7 @@ export class VimeoAdapter implements SyncPlayerInterface {
   loadVideoById(videoId: string, startSeconds: number): void {
     this.time = startSeconds;
     this.pendingPlay = false;
+    this.stopAutoPlay();
     if (!this.p.loadVideo) return;
     this.loading = true;
     const { id, hash } = parseVimeoSpec(videoId);
@@ -182,11 +217,10 @@ export class VimeoAdapter implements SyncPlayerInterface {
         this.time = startSeconds;
         if (this.pendingPlay) {
           this.pendingPlay = false;
-          this.armAutoResume();
-          await this.p.play().catch(() => {});
+          this.beginPlay();
         }
       })
-      .catch(() => { this.loading = false; });
+      .catch(() => { this.loading = false; this.stopAutoPlay(); });
   }
 
   cueVideoById(videoId: string, startSeconds: number): void {
@@ -209,6 +243,7 @@ export class VimeoAdapter implements SyncPlayerInterface {
 
   destroy(): void {
     this.destroyed = true;
+    this.stopAutoPlay();
     try { this.p.destroy?.(); } catch {}
   }
 }

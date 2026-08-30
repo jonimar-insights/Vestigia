@@ -5,7 +5,7 @@ import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
-import { parseVimeoSpec } from "@/lib/social";
+import { vimeoEmbedUrl } from "@/lib/social";
 import { Html5Adapter } from "@/lib/html5-adapter";
 
 declare global {
@@ -115,7 +115,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const vimeoIdsRef = useRef<Map<number, string>>(vimeoIds);
   useEffect(() => { vimeoIdsRef.current = vimeoIds; });
   const vimeoPlayerRef = useRef<VimeoAdapter | null>(null);
-  const vimeoContainerRef = useRef<HTMLDivElement>(null);
+  const vimeoContainerRef = useRef<HTMLIFrameElement>(null);
   const [vimeoReady, setVimeoReady] = useState(false);
   const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
@@ -426,19 +426,14 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     if (!container || vimeoPlayerRef.current) return;
     const firstVmItem = itemsRef.current.find((i) => i.videoId > 0 && vimeoIds.get(i.videoId));
     if (!firstVmItem) return;
-    const firstVmId = vimeoIds.get(firstVmItem.videoId)!;
     let destroyed = false;
 
     function createVimeoPlayer() {
       if (destroyed || vimeoPlayerRef.current || !window.Vimeo?.Player || !container) return;
       try {
-        const { id, hash } = parseVimeoSpec(firstVmId);
-        // Unlisted/privacy videos must be created from the full URL (with ?h=),
-        // not the bare id — otherwise the embed is refused.
-        const options = hash
-          ? { url: `https://player.vimeo.com/video/${id}?h=${hash}`, width: "100%" }
-          : { id: Number(id), width: "100%" };
-        const p = new window.Vimeo.Player(container, options) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
+        // Build over the existing ?api=1 iframe (like the annotation player):
+        // the lightweight app_id div-embed auto-play stalls silently.
+        const p = new window.Vimeo.Player(container) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
         const adapter = new VimeoAdapter(p);
         vimeoPlayerRef.current = adapter;
         adapter.onReady(() => {
@@ -782,6 +777,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const ytId = videoIds.get(item.videoId);
   const vmId = vimeoIds.get(item.videoId);
   const h5Src = html5SrcsState.get(item.videoId);
+  const firstVmItem = items.find((i) => i.videoId > 0 && vimeoIds.get(i.videoId));
+  const firstVmId = firstVmItem ? vimeoIds.get(firstVmItem.videoId) : undefined;
   // Drive/upload clips show a cover (audio-style) until the stream proves a
   // real video track; the cover then hides to reveal the video.
   const isHtml5Audio = !!h5Src && !html5IsVideo.get(item.videoId);
@@ -856,8 +853,15 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             <div className="absolute inset-0" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
               <div ref={playerContainerRef} className="w-full h-full" />
             </div>
-            <div className="absolute inset-0 [&_iframe]:w-full [&_iframe]:h-full" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
-              <div ref={vimeoContainerRef} className="w-full h-full" />
+            <div className="absolute inset-0" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
+              <iframe
+                ref={vimeoContainerRef}
+                src={firstVmId ? vimeoEmbedUrl(firstVmId) : undefined}
+                title="Vimeo player"
+                className="w-full h-full"
+                allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
+                allowFullScreen
+              />
             </div>
             <div className="absolute inset-0 h-full w-full" style={{ display: activeKind === "html5" && !ended ? undefined : "none" }}>
               <video
