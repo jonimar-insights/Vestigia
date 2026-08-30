@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useLanguage } from "@/components/LanguageProvider";
 import { formatTimestamp, sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
-import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
+import { parseSocialStorageId, socialEmbedUrl, vimeoEmbedUrl } from "@/lib/social";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { Html5Adapter } from "@/lib/html5-adapter";
 import HistoryPanel from "@/components/HistoryPanel";
@@ -1474,7 +1474,7 @@ export default function VideoPage() {
                 <>
                   <iframe
                     key={video.id}
-                    src={`${socialEmbedUrl(social.platform, social.platformId, video.youtubeUrl)}?api=1`}
+                    src={vimeoEmbedUrl(social.platformId)}
                     data-vimeo-player
                     title={video.title ?? "Video"}
                     className="w-full h-full"

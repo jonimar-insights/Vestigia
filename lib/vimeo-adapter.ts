@@ -3,6 +3,8 @@
  * YouTube-IFrame-style interface used by the video page.
  * Time/duration/state are cached from SDK events so reads stay synchronous.
  */
+import { parseVimeoSpec } from "@/lib/social";
+
 export interface MinimalVimeoPlayer {
   on(event: string, cb: (data?: unknown) => void): void;
   ready(): Promise<unknown>;
@@ -11,8 +13,8 @@ export interface MinimalVimeoPlayer {
   setCurrentTime(seconds: number): Promise<unknown>;
   play(): Promise<void>;
   pause(): Promise<void>;
-  /** Swap another video into the same embed (SDK supports this). */
-  loadVideo?(id: number): Promise<unknown>;
+  /** Swap another video into the same embed (SDK supports id or {id,h}). */
+  loadVideo?(spec: { id: number; h?: string }): Promise<unknown>;
   setPlaybackRate?(rate: number): Promise<unknown>;
   setMuted?(muted: boolean): Promise<unknown>;
   destroy?(): Promise<void> | void;
@@ -170,8 +172,9 @@ export class VimeoAdapter implements SyncPlayerInterface {
     this.pendingPlay = false;
     if (!this.p.loadVideo) return;
     this.loading = true;
+    const { id, hash } = parseVimeoSpec(videoId);
     this.p
-      .loadVideo(Number(videoId))
+      .loadVideo({ id: Number(id), h: hash })
       .then(async () => {
         if (this.destroyed) return;
         if (startSeconds > 0) await this.p.setCurrentTime(startSeconds).catch(() => {});

@@ -5,6 +5,7 @@ import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
+import { parseVimeoSpec } from "@/lib/social";
 import { Html5Adapter } from "@/lib/html5-adapter";
 
 declare global {
@@ -431,7 +432,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     function createVimeoPlayer() {
       if (destroyed || vimeoPlayerRef.current || !window.Vimeo?.Player || !container) return;
       try {
-        const p = new window.Vimeo.Player(container, { id: Number(firstVmId), width: "100%" }) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
+        const { id, hash } = parseVimeoSpec(firstVmId);
+        // Unlisted/privacy videos must be created from the full URL (with ?h=),
+        // not the bare id — otherwise the embed is refused.
+        const options = hash
+          ? { url: `https://player.vimeo.com/video/${id}?h=${hash}`, width: "100%" }
+          : { id: Number(id), width: "100%" };
+        const p = new window.Vimeo.Player(container, options) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
         const adapter = new VimeoAdapter(p);
         vimeoPlayerRef.current = adapter;
         adapter.onReady(() => {

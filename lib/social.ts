@@ -45,13 +45,43 @@ export function detectSocialPlatform(url: string): SocialMatch | null {
     // Prefer the id after /video/, otherwise take the LAST numeric path segment
     // (for URLs like /album/<albumId>/video/<videoId>). Stop at ? or #.
     const withoutQuery = path.split(/[?#]/)[0];
+    let platformId: string | null = null;
     const videoSeg = withoutQuery.match(/\/video\/(\d{5,})/);
-    if (videoSeg) return { platform: "vimeo", platformId: videoSeg[1] };
-    const nums = withoutQuery.match(/(?:^|\/)(\d{5,})$/);
-    if (nums) return { platform: "vimeo", platformId: nums[1] };
+    if (videoSeg) platformId = videoSeg[1];
+    else {
+      const nums = withoutQuery.match(/(?:^|\/)(\d{5,})$/);
+      if (nums) platformId = nums[1];
+    }
+    if (!platformId) return null;
+    // Unlisted/privacy-restricted videos need the ?h= hash in the embed URL.
+    // Fold it into the platformId so it survives storage + dedup.
+    const h = u.searchParams.get("h");
+    return { platform: "vimeo", platformId: h ? `${platformId}?h=${h}` : platformId };
   }
 
   return null;
+}
+
+/**
+ * Split a Vimeo spec string ("<id>?h=<hash>" or "<id>") into an id + optional
+ * privacy hash. Used by the Player SDK, which needs `loadVideo({id, h})` /
+ * a URL including the hash for unlisted videos.
+ */
+export function parseVimeoSpec(spec: string): { id: string; hash?: string } {
+  const q = spec.indexOf("?");
+  if (q === -1) return { id: spec };
+  const id = spec.slice(0, q);
+  const params = new URLSearchParams(spec.slice(q + 1));
+  const hash = params.get("h") ?? undefined;
+  return { id, hash };
+}
+
+/** Build the full playable player.vimeo.com URL (with api=1 + privacy hash). */
+export function vimeoEmbedUrl(platformId: string): string {
+  const { id, hash } = parseVimeoSpec(platformId);
+  const base = `https://player.vimeo.com/video/${id}`;
+  const query = hash ? `?h=${hash}` : "";
+  return `${base}${query}?api=1`;
 }
 
 export function isSocialUrl(url: string): boolean {

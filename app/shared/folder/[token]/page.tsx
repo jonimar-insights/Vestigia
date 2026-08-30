@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Image from "next/image";
 import { useSession, signIn } from "next-auth/react";
 import { tokenizeNoteLinks } from "@/lib/youtube";
-import { parseSocialStorageId, socialEmbedUrl } from "@/lib/social";
+import { parseSocialStorageId, socialEmbedUrl, vimeoEmbedUrl } from "@/lib/social";
 import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { Html5Adapter } from "@/lib/html5-adapter";
@@ -954,7 +954,7 @@ export default function SharedFolderPage({
                 ) : sharedKind === "vimeo" && sharedSocial ? (
                   <iframe
                     key={selectedVideo.id}
-                    src={`${socialEmbedUrl(sharedSocial.platform, sharedSocial.platformId, selectedVideo.youtubeUrl)}?api=1`}
+                    src={vimeoEmbedUrl(sharedSocial.platformId)}
                     data-vimeo-player
                     title={selectedVideo.title ?? "Video"}
                     className="w-full h-full"

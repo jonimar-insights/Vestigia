@@ -17,7 +17,7 @@ function makeFakePlayer() {
   let readyResolve: (() => void) | null = null;
   // loadVideo is deferred so tests can play with the pendingPlay/auto-resume
   // settle race deterministically.
-  const loadQueue: Array<{ id: number; resolve: () => void; reject: (e?: unknown) => void }> = [];
+  const loadQueue: Array<{ id: number; h?: string; resolve: () => void; reject: (e?: unknown) => void }> = [];
   const player: FakePlayer = {
     on(event, cb) {
       if (!handlers.has(event)) handlers.set(event, []);
@@ -34,8 +34,8 @@ function makeFakePlayer() {
     },
     async play() { player.emit("play"); },
     async pause() { player.emit("pause"); },
-    async loadVideo(id: number) {
-      return new Promise<void>((resolve, reject) => { loadQueue.push({ id, resolve, reject }); });
+    async loadVideo(spec: { id: number; h?: string }) {
+      return new Promise<void>((resolve, reject) => { loadQueue.push({ id: spec.id, h: spec.h, resolve, reject }); });
     },
     emit(event, data) { for (const cb of handlers.get(event) ?? []) cb(data); },
     resolveReady() { readyResolve?.(); },
@@ -103,7 +103,7 @@ async function main() {
   const a6 = new VimeoAdapter(p6);
   p6.resolveReady();
   await new Promise((r) => setTimeout(r, 10));
-  const loadQueue6 = (p6 as unknown as { _loadQueue: { id: number; resolve: () => void; reject: (e?: unknown) => void }[] })._loadQueue;
+  const loadQueue6 = (p6 as unknown as { _loadQueue: { id: number; h?: string; resolve: () => void; reject: (e?: unknown) => void }[] })._loadQueue;
   const p6events: string[] = [];
   p6.play = async () => { p6events.push("play"); p6.emit("play"); };
   // emulate the transition: loadVideoById + playVideo (play queues behind load)
@@ -139,6 +139,44 @@ async function main() {
   const before7 = p7plays;
   await new Promise((r) => setTimeout(r, 450));
   assert.equal(p7plays, before7, "no auto-resume after manual pauseVideo");
+
+  // ── 8. loadVideoById with a privacy hash passes {id, h} to the SDK ──
+  const p8 = makeFakePlayer();
+  const a8 = new VimeoAdapter(p8);
+  p8.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  const q8 = (p8 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  a8.loadVideoById("76979871?h=8272103f6e", 0);
+  assert.equal(q8.length, 1, "loadVideo called once for hashed spec");
+  assert.deepEqual(
+    { id: q8[0].id, h: q8[0].h },
+    { id: 76979871, h: "8272103f6e" },
+    "hash spec passed through to SDK loadVideo"
+  );
+  // bare-id spec (public video) omits h
+  const p8b = makeFakePlayer();
+  const a8b = new VimeoAdapter(p8b);
+  p8b.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  const q8b = (p8b as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  a8b.loadVideoById("12133658", 0);
+  assert.deepEqual({ id: q8b[0].id, h: q8b[0].h }, { id: 12133658, h: undefined }, "bare id omits h");
+  q8[0].resolve();
+
+  // ── 9. social helpers: detect hash, build embed URL, parse spec ──
+  const { detectSocialPlatform, vimeoEmbedUrl, parseVimeoSpec } = await import("../lib/social");
+  const m = detectSocialPlatform("https://player.vimeo.com/video/12133658?h=bfdbe1c46f");
+  assert.deepEqual(m, { platform: "vimeo", platformId: "12133658?h=bfdbe1c46f" }, "hash captured in platformId");
+  assert.deepEqual(detectSocialPlatform("https://vimeo.com/12133658"), { platform: "vimeo", platformId: "12133658" }, "no hash for public video");
+  assert.equal(
+    vimeoEmbedUrl("12133658?h=bfdbe1c46f"),
+    "https://player.vimeo.com/video/12133658?h=bfdbe1c46f?api=1",
+    "embed url includes hash + api"
+  );
+  assert.deepEqual(parseVimeoSpec("76979871?h=8272103f6e"), { id: "76979871", hash: "8272103f6e" }, "spec parse");
+  const bare = parseVimeoSpec("12133658");
+  assert.equal(bare.id, "12133658", "spec parse bare id");
+  assert.equal(bare.hash, undefined, "spec parse bare no hash");
 
   console.log("ALL VIMEO ADAPTER TESTS PASS");
 }
