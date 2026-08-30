@@ -261,6 +261,7 @@ export default function Home() {
   const [pendingCliplistIds, setPendingCliplistIds] = useState<number[]>([]);
   const [pendingItemIds, setPendingItemIds] = useState<number[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [sortMode, setSortMode] = useState<"newest" | "oldest" | "year" | "name">("newest");
 
   // ── Video grid enhancements ──
   const [allVideos, setAllVideos] = useState<Video[]>([]);
@@ -1002,10 +1003,26 @@ export default function Home() {
   const currentVideoList = selectedFolderId !== null ? visibleFolderVideos : visibleVideos;
   const allSelected = currentVideoList.length > 0 && currentVideoList.every((v) => selectedVideoIds.has(v.id));
 
-  // ── Grid: source selection only (no client-side filter/sort) ──
+  // ── Grid: source selection + sort ──
   const gridVideos = useMemo(() => {
-    return showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
-  }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos]);
+    const source = showAllVideos ? allVideos : (selectedFolderId !== null ? visibleFolderVideos : visibleVideos);
+    const sorted = [...source];
+    switch (sortMode) {
+      case "oldest":
+        sorted.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        break;
+      case "year":
+        sorted.sort((a, b) => (b.year ?? -1) - (a.year ?? -1) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        break;
+      case "name":
+        sorted.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", undefined, { numeric: true, sensitivity: "base" }));
+        break;
+      default:
+        sorted.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        break;
+    }
+    return sorted;
+  }, [showAllVideos, allVideos, selectedFolderId, visibleFolderVideos, visibleVideos, sortMode]);
 
   const uniqueYears = useMemo(() => {
     const source = showAllVideos ? allVideos : videos;
@@ -2377,6 +2394,17 @@ export default function Home() {
                           {translating ? "..." : translatedLang ? "EN →" : "PT →"}
                         </button>
                       </div>
+                      <select
+                        value={sortMode}
+                        onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+                        className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[11px] font-medium text-muted focus:outline-none focus:border-accent cursor-pointer"
+                        title={t("grid.sortBy")}
+                      >
+                        <option value="newest">{t("grid.sortNewest")}</option>
+                        <option value="oldest">{t("grid.sortOldest")}</option>
+                        <option value="year">{t("grid.sortYear")}</option>
+                        <option value="name">{t("grid.sortName")}</option>
+                      </select>
                       <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
                       <button
                         onClick={() => setViewMode("grid")}
@@ -2574,6 +2602,17 @@ export default function Home() {
                         {translating ? "..." : translatedLang ? "EN →" : "PT →"}
                       </button>
                     </div>
+                    <select
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value as typeof sortMode)}
+                      className="rounded-lg border border-border bg-surface px-2 py-1.5 text-[11px] font-medium text-muted focus:outline-none focus:border-accent cursor-pointer"
+                      title={t("grid.sortBy")}
+                    >
+                      <option value="newest">{t("grid.sortNewest")}</option>
+                      <option value="oldest">{t("grid.sortOldest")}</option>
+                      <option value="year">{t("grid.sortYear")}</option>
+                      <option value="name">{t("grid.sortName")}</option>
+                    </select>
                     <div className="flex items-center gap-1 rounded-lg border border-border bg-surface p-0.5">
                     <button
                       onClick={() => setViewMode("grid")}
