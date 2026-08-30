@@ -348,10 +348,11 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             },
             onStateChange: (e: { data: number }) => {
               if (destroyed) return;
-              // Ignore YouTube events while a Vimeo clip is active —
-              // pausing the hidden YT player must not flip shared UI state.
               const curItem = itemsRef.current[currentIdxRef.current];
-              if (curItem && vimeoIdsRef.current.get(curItem.videoId)) return;
+              // Ignore YouTube events while a Vimeo or drive/upload
+              // (html5) clip is active — pausing the hidden YT player must
+              // not flip shared UI state or stop the html5 clip's time poll.
+              if (curItem && (vimeoIdsRef.current.get(curItem.videoId) || html5SrcsRef.current.get(curItem.videoId))) return;
               const state = e.data;
               const pl = state === 1;
               setPlaying(pl);
