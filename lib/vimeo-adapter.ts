@@ -1,171 +1,815 @@
 /**
+ * Vimeo Player Adapter
+ *
  * Adapts the Vimeo Player SDK (promise-based) to the synchronous
  * YouTube-IFrame-style interface used by the video page.
- * Time/duration/state are cached from SDK events so reads stay synchronous.
+ *
+ * Design goals:
+ * - Keep the public interface synchronous for the playlist player.
+ * - Cache Vimeo state from SDK events.
+ * - Never make readiness dependent on getDuration().
+ * - Make autoplay resilient to browser/Vimeo startup stalls.
+ * - Use muted autoplay as a fallback when unmuted autoplay stalls.
+ * - Never let an asynchronous Vimeo operation block the playlist forever.
+ * - Protect against stale async loadVideo() operations.
+ * - Clean up every timer and callback on destroy().
  */
+
 import { parseVimeoSpec } from "@/lib/social";
+
+/* -------------------------------------------------------------------------- */
+/* Types                                                                      */
+/* -------------------------------------------------------------------------- */
 
 export interface MinimalVimeoPlayer {
   on(event: string, cb: (data?: unknown) => void): void;
+
+  /**
+   * Resolves when the Vimeo player SDK is ready.
+   */
   ready(): Promise<unknown>;
+
+  /**
+   * Promise-based Vimeo getters.
+   */
   getCurrentTime(): Promise<number>;
   getDuration(): Promise<number>;
+
+  /**
+   * Promise-based playback controls.
+   */
   setCurrentTime(seconds: number): Promise<unknown>;
   play(): Promise<void>;
   pause(): Promise<void>;
-  /** Swap another video into the same embed (SDK supports id or {id,h}). */
+
+  /**
+   * Swap another video into the same Vimeo embed.
+   *
+   * Vimeo supports either an id or an object containing id/hash.
+   * We use the object form because Vimeo private/unlisted videos
+   * may require the hash.
+   */
   loadVideo?(spec: { id: number; h?: string }): Promise<unknown>;
+
   setPlaybackRate?(rate: number): Promise<unknown>;
   setMuted?(muted: boolean): Promise<unknown>;
+
   destroy?(): Promise<void> | void;
 }
 
+/**
+ * This intentionally mirrors the YouTube player interface consumed
+ * by VideoPlaylistPlayer.tsx.
+ */
 export interface SyncPlayerInterface {
   getCurrentTime(): number;
   getDuration(): number;
+
   seekTo(seconds: number, allowSeekAhead: boolean): void;
+
   playVideo(): void;
   pauseVideo(): void;
+
   getPlayerState(): number;
+
   loadVideoById(videoId: string, startSeconds: number): void;
   cueVideoById(videoId: string, startSeconds: number): void;
+
   destroy(): void;
 }
 
-// YT player state codes used by the app: 1 = playing
+/* -------------------------------------------------------------------------- */
+/* Constants                                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * YT-compatible player states used by the application.
+ *
+ * 0 = ended
+ * 1 = playing
+ * 2 = paused
+ */
+const PLAYER_ENDED = 0;
+const PLAYER_PLAYING = 1;
+const PLAYER_PAUSED = 2;
+
+/**
+ * Vimeo's ready promise should normally resolve very quickly.
+ *
+ * We deliberately do not fail the player at this point; the timeout
+ * exists to make the failure observable rather than leaving the UI
+ * permanently stuck on "Loading player...".
+ */
+const READY_TIMEOUT_MS = 8000;
+
+/**
+ * Autoplay watchdog checks every half second.
+ */
+const WATCHDOG_INTERVAL_MS = 500;
+
+/**
+ * After this amount of real time without progress we force muted
+ * autoplay to encourage Vimeo/browser buffering.
+ */
+const WARM_MUTE_AFTER_MS = 2500;
+
+/**
+ * Give Vimeo roughly 10 seconds to begin actual playback.
+ */
+const WATCHDOG_MAX_ATTEMPTS = 20;
+
+/**
+ * When Vimeo emits pause during an intended autoplay operation,
+ * wait briefly before attempting play again.
+ */
+const RESUME_DELAY_MS = 350;
+
+/**
+ * Do not consider extremely tiny floating-point changes meaningful
+ * playback progress.
+ */
+const PROGRESS_EPSILON = 0.01;
+
+/* -------------------------------------------------------------------------- */
+/* Debugging                                                                  */
+/* -------------------------------------------------------------------------- */
+
+function dbg(...args: unknown[]) {
+  if (
+    typeof window !== "undefined" &&
+    (window as { __VIMEO_DEBUG?: boolean }).__VIMEO_DEBUG
+  ) {
+    console.log("[VimeoAdapter]", ...args);
+  }
+}
+
+function dbgWarn(...args: unknown[]) {
+  if (
+    typeof window !== "undefined" &&
+    (window as { __VIMEO_DEBUG?: boolean }).__VIMEO_DEBUG
+  ) {
+    console.warn("[VimeoAdapter]", ...args);
+  }
+}
+
+function dbgError(...args: unknown[]) {
+  if (
+    typeof window !== "undefined" &&
+    (window as { __VIMEO_DEBUG?: boolean }).__VIMEO_DEBUG
+  ) {
+    console.error("[VimeoAdapter]", ...args);
+  }
+}
+
+/* -------------------------------------------------------------------------- */
+/* Adapter                                                                    */
+/* -------------------------------------------------------------------------- */
+
 export class VimeoAdapter implements SyncPlayerInterface {
-  private p: MinimalVimeoPlayer;
+  private readonly p: MinimalVimeoPlayer;
+
+  /* Cached Vimeo state ----------------------------------------------------- */
+
   private time = 0;
   private durationSec = 0;
-  private state = 2; // paused
+  private state = PLAYER_PAUSED;
+
+  /* External callbacks ----------------------------------------------------- */
+
   private playStateCb: ((playing: boolean) => void) | null = null;
   private readyCbs: Array<() => void> = [];
+
+  /* Lifecycle -------------------------------------------------------------- */
+
   private readyFired = false;
   private destroyed = false;
+
+  /**
+   * Indicates whether the Vimeo SDK has reported readiness.
+   *
+   * This is intentionally separate from readyFired so diagnostics can
+   * distinguish SDK readiness from callback completion.
+   */
+  private sdkReady = false;
+
+  private readyTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /* Video loading ---------------------------------------------------------- */
+
   private loading = false;
   private pendingPlay = false;
-  // Vimeo auto-play is unreliable: calling play() before the first frame
-  // buffers can make Vimeo report state=1 (playing) while currentTime never
-  // advances — a silent stall. Rather than trust state, we drive auto-play
-  // with a PROGRESS watchdog: while we intend to play (intendPlay) and the
-  // cached time hasn't advanced past playTarget (where playback began), keep
-  // re-issuing play() until currentTime actually moves (real playback), the
-  // clip ends, or the watchdog window elapses. Any manual pause (pauseVideo)
-  // clears intendPlay so we never fight the user.
+
+  /**
+   * Incremented for every loadVideoById() request.
+   *
+   * If an old Vimeo load resolves after a newer one has started,
+   * its completion handler is ignored.
+   */
+  private loadGeneration = 0;
+
+  /* Autoplay watchdog ------------------------------------------------------ */
+
   private intendPlay = false;
   private playTarget = -1;
+
   private resumeTimer: ReturnType<typeof setTimeout> | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
+
   private watchdogBudget = 0;
+  private stalledMs = 0;
+
+  /**
+   * True when muted autoplay was automatically used to warm the
+   * Vimeo buffer.
+   */
+  private warmMuted = false;
+
+  /**
+   * True when the user explicitly muted the player.
+   *
+   * The autoplay watchdog must never automatically unmute in this
+   * situation.
+   */
+  private userMuted = false;
+
+  /* ------------------------------------------------------------------------ */
+  /* Timer management                                                         */
+  /* ------------------------------------------------------------------------ */
 
   private clearResumeTimer() {
-    if (this.resumeTimer) { clearTimeout(this.resumeTimer); this.resumeTimer = null; }
+    if (this.resumeTimer) {
+      clearTimeout(this.resumeTimer);
+      this.resumeTimer = null;
+    }
   }
 
   private clearWatchdog() {
-    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
+    if (this.watchdog) {
+      clearInterval(this.watchdog);
+      this.watchdog = null;
+    }
   }
 
+  private clearReadyTimer() {
+    if (this.readyTimer) {
+      clearTimeout(this.readyTimer);
+      this.readyTimer = null;
+    }
+  }
+
+  /**
+   * Stop all automatic playback attempts.
+   *
+   * Manual pauseVideo() calls this method so the watchdog never fights
+   * the user's explicit pause action.
+   */
   private stopAutoPlay() {
     this.intendPlay = false;
+
     this.clearResumeTimer();
     this.clearWatchdog();
+
+    this.watchdogBudget = 0;
+    this.stalledMs = 0;
   }
 
-  private progressed() {
-    return this.time > this.playTarget;
+  /* ------------------------------------------------------------------------ */
+  /* Playback progress                                                        */
+  /* ------------------------------------------------------------------------ */
+
+  private progressed(): boolean {
+    return this.time > this.playTarget + PROGRESS_EPSILON;
   }
 
-  /** Start (or continue) auto-play with progress verification. */
+  /**
+   * Start autoplay with actual-progress verification.
+   *
+   * Vimeo can report "playing" while currentTime remains unchanged.
+   * Therefore the adapter does not trust the play event alone.
+   */
   private beginPlay() {
+    if (this.destroyed) return;
+
     this.intendPlay = true;
     this.playTarget = this.time;
+    this.stalledMs = 0;
+    this.warmMuted = false;
+
     this.clearResumeTimer();
-    this.watchdogBudget = 16; // ~8s @500ms
-    this.issuePlay();
     this.clearWatchdog();
+
+    this.watchdogBudget = WATCHDOG_MAX_ATTEMPTS;
+
+    dbg("beginPlay", {
+      time: this.time,
+      target: this.playTarget,
+    });
+
+    this.issuePlay();
+
     this.watchdog = setInterval(() => {
-      if (this.destroyed || !this.intendPlay) { this.stopAutoPlay(); return; }
-      if (this.state === 0) { this.stopAutoPlay(); return; }
-      if (this.progressed()) { this.stopAutoPlay(); return; }
-      if (--this.watchdogBudget <= 0) { this.stopAutoPlay(); return; }
+      if (this.destroyed) {
+        this.stopAutoPlay();
+        return;
+      }
+
+      if (!this.intendPlay) {
+        this.stopAutoPlay();
+        return;
+      }
+
+      /**
+       * If the video has ended, there is no reason to continue issuing
+       * play commands.
+       */
+      if (this.state === PLAYER_ENDED) {
+        this.stopAutoPlay();
+        return;
+      }
+
+      /**
+       * This is the important test.
+       *
+       * Do not trust Vimeo's "play" event. Trust actual currentTime
+       * movement.
+       */
+      if (this.progressed()) {
+        dbg("real playback progress detected", {
+          time: this.time,
+          target: this.playTarget,
+          warmMuted: this.warmMuted,
+        });
+
+        /**
+         * If muted autoplay was only used as a warm-up mechanism,
+         * restore sound after actual playback begins.
+         */
+        if (this.warmMuted && !this.userMuted) {
+          this.warmMuted = false;
+
+          this.p
+            .setMuted?.(false)
+            .then(() => {
+              dbg("unmuted after playback progress");
+            })
+            .catch((error) => {
+              dbgWarn("failed to restore audio after muted autoplay", error);
+            });
+        }
+
+        this.stopAutoPlay();
+        return;
+      }
+
+      this.stalledMs += WATCHDOG_INTERVAL_MS;
+
+      /**
+       * After 2.5 seconds without actual progress, use muted autoplay.
+       *
+       * Browser autoplay policies generally allow muted playback even
+       * when unmuted autoplay is blocked.
+       */
+      if (
+        this.stalledMs >= WARM_MUTE_AFTER_MS &&
+        !this.warmMuted &&
+        !this.userMuted
+      ) {
+        this.warmMuted = true;
+
+        dbg("autoplay stalled; forcing muted Vimeo playback");
+
+        this.p
+          .setMuted?.(true)
+          .then(() => {
+            if (this.destroyed || !this.intendPlay) return;
+
+            dbg("Vimeo muted for autoplay warm-up");
+            this.issuePlay();
+          })
+          .catch((error) => {
+            dbgWarn("failed to mute Vimeo during autoplay warm-up", error);
+          });
+      }
+
+      this.watchdogBudget -= 1;
+
+      if (this.watchdogBudget <= 0) {
+        dbgWarn("autoplay watchdog exhausted", {
+          time: this.time,
+          target: this.playTarget,
+          state: this.state,
+          warmMuted: this.warmMuted,
+        });
+
+        this.stopAutoPlay();
+        return;
+      }
+
+      dbg("autoplay watchdog retry", {
+        time: this.time,
+        target: this.playTarget,
+        state: this.state,
+        stalledMs: this.stalledMs,
+        budget: this.watchdogBudget,
+        warmMuted: this.warmMuted,
+      });
+
       this.issuePlay();
-    }, 500);
+    }, WATCHDOG_INTERVAL_MS);
   }
 
+  /**
+   * Issue a Vimeo play request without allowing a rejected promise to
+   * break the watchdog.
+   */
   private issuePlay() {
-    this.p.play().catch(() => {});
+    if (this.destroyed) return;
+
+    dbg("issuePlay()", {
+      time: this.time,
+      target: this.playTarget,
+      state: this.state,
+    });
+
+    this.p
+      .play()
+      .then(() => {
+        dbg("Vimeo play() resolved");
+      })
+      .catch((error) => {
+        /**
+         * Autoplay rejection is not fatal.
+         *
+         * The watchdog will retry and, if necessary, transition to
+         * muted autoplay.
+         */
+        dbgWarn("Vimeo play() rejected", error);
+      });
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Event binding                                                             */
+  /* ------------------------------------------------------------------------ */
+
+  private bindEvents() {
+    /* Time updates ---------------------------------------------------------- */
+
+    this.p.on("timeupdate", (data) => {
+      if (this.destroyed) return;
+
+      const d = data as
+        | {
+            seconds?: number;
+            duration?: number;
+          }
+        | undefined;
+
+      if (typeof d?.seconds === "number" && Number.isFinite(d.seconds)) {
+        this.time = Math.max(0, d.seconds);
+
+        if (this.intendPlay && this.progressed()) {
+          this.stopAutoPlay();
+        }
+      }
+
+      if (
+        typeof d?.duration === "number" &&
+        Number.isFinite(d.duration) &&
+        d.duration > 0
+      ) {
+        this.durationSec = d.duration;
+      }
+
+      dbg("timeupdate", {
+        seconds: d?.seconds,
+        duration: d?.duration,
+        intendPlay: this.intendPlay,
+        target: this.playTarget,
+        state: this.state,
+      });
+    });
+
+    /* Seeked ---------------------------------------------------------------- */
+
+    this.p.on("seeked", (data) => {
+      if (this.destroyed) return;
+
+      const d = data as
+        | {
+            seconds?: number;
+            duration?: number;
+          }
+        | undefined;
+
+      if (typeof d?.seconds === "number" && Number.isFinite(d.seconds)) {
+        this.time = Math.max(0, d.seconds);
+      }
+
+      if (
+        typeof d?.duration === "number" &&
+        Number.isFinite(d.duration) &&
+        d.duration > 0
+      ) {
+        this.durationSec = d.duration;
+      }
+
+      dbg("seeked", {
+        seconds: d?.seconds,
+        duration: d?.duration,
+      });
+    });
+
+    /* Duration changes ------------------------------------------------------ */
+
+    this.p.on("durationchange", (data) => {
+      if (this.destroyed) return;
+
+      const d = data as
+        | {
+            duration?: number;
+          }
+        | undefined;
+
+      if (
+        typeof d?.duration === "number" &&
+        Number.isFinite(d.duration) &&
+        d.duration > 0
+      ) {
+        this.durationSec = d.duration;
+      }
+
+      dbg("durationchange", d?.duration);
+    });
+
+    /* Play ------------------------------------------------------------------ */
+
+    this.p.on("play", () => {
+      if (this.destroyed) return;
+
+      this.state = PLAYER_PLAYING;
+
+      dbg("event: play", {
+        intendPlay: this.intendPlay,
+        time: this.time,
+        target: this.playTarget,
+      });
+
+      this.playStateCb?.(true);
+    });
+
+    /* Playing ---------------------------------------------------------------- */
+
+    this.p.on("playing", () => {
+      if (this.destroyed) return;
+
+      this.state = PLAYER_PLAYING;
+
+      dbg("event: playing", {
+        time: this.time,
+        target: this.playTarget,
+      });
+
+      this.playStateCb?.(true);
+    });
+
+    /* Pause ----------------------------------------------------------------- */
+
+    this.p.on("pause", () => {
+      if (this.destroyed) return;
+
+      this.state = PLAYER_PAUSED;
+
+      dbg("event: pause", {
+        intendPlay: this.intendPlay,
+        time: this.time,
+        target: this.playTarget,
+        budget: this.watchdogBudget,
+      });
+
+      this.playStateCb?.(false);
+
+      /**
+       * Vimeo can auto-pause during the initial embed/load settle.
+       *
+       * If we explicitly intend to play, give Vimeo a short moment and
+       * then retry.
+       */
+      if (
+        this.intendPlay &&
+        this.watchdogBudget > 0 &&
+        !this.destroyed
+      ) {
+        this.clearResumeTimer();
+
+        this.resumeTimer = setTimeout(() => {
+          this.resumeTimer = null;
+
+          if (this.destroyed || !this.intendPlay) return;
+
+          if (
+            this.state === PLAYER_PAUSED &&
+            !this.progressed()
+          ) {
+            dbg("pause recovery: retrying play()");
+            this.issuePlay();
+          }
+        }, RESUME_DELAY_MS);
+      }
+    });
+
+    /* Ended ----------------------------------------------------------------- */
+
+    this.p.on("ended", () => {
+      if (this.destroyed) return;
+
+      this.state = PLAYER_ENDED;
+
+      dbg("event: ended");
+
+      this.playStateCb?.(false);
+
+      this.stopAutoPlay();
+    });
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* Constructor / readiness                                                  */
+  /* ------------------------------------------------------------------------ */
 
   constructor(player: MinimalVimeoPlayer) {
     this.p = player;
-    player.on("timeupdate", (data) => {
-      const d = data as { seconds?: number; duration?: number } | undefined;
-      if (typeof d?.seconds === "number") {
-        this.time = d.seconds;
-        if (this.intendPlay && this.progressed()) this.stopAutoPlay();
-      }
-      if (typeof d?.duration === "number") this.durationSec = d.duration;
-    });
-    player.on("seeked", (data) => {
-      const d = data as { seconds?: number; duration?: number } | undefined;
-      if (typeof d?.seconds === "number") this.time = d.seconds;
-    });
-    player.on("durationchange", (data) => {
-      const d = data as { duration?: number } | undefined;
-      if (typeof d?.duration === "number") this.durationSec = d.duration;
-    });
-    player.on("play", () => {
-      this.state = 1;
-      this.playStateCb?.(true);
-    });
-    player.on("pause", () => {
-      this.state = 2;
-      this.playStateCb?.(false);
-      // If we intend to play but Vimeo auto-paused (the settle race or a
-      // buffer stall), re-issue play shortly instead of sitting stuck paused.
-      // The watchdog continues to verify actual progress.
-      if (this.intendPlay && this.watchdogBudget > 0) {
-        this.clearResumeTimer();
-        this.resumeTimer = setTimeout(() => {
-          this.resumeTimer = null;
-          if (this.destroyed || !this.intendPlay) return;
-          if (this.state === 2 && !this.progressed()) this.issuePlay();
-        }, 350);
-      }
-    });
-    player.on("ended", () => {
-      this.state = 0;
-      this.playStateCb?.(false);
-      this.stopAutoPlay();
-    });
-    player.ready().then(() => {
-      if (this.destroyed) return;
-      const finish = () => {
-        if (this.destroyed || this.readyFired) return;
-        this.readyFired = true;
-        for (const cb of this.readyCbs) cb();
-        this.readyCbs = [];
-      };
-      player.getDuration()
-        .then((d) => { this.durationSec = d; finish(); })
-        .catch(finish);
-    }).catch(() => {});
+
+    this.bindEvents();
+
+    dbg("VimeoAdapter created");
+
+    /**
+     * IMPORTANT:
+     *
+     * Vimeo readiness is determined solely by player.ready().
+     *
+     * We deliberately do NOT wait for getDuration().
+     *
+     * Previously, a hanging getDuration() promise could prevent
+     * VideoPlaylistPlayer.tsx from ever receiving onReady(), leaving
+     * the UI permanently at "Loading player...".
+     */
+    this.clearReadyTimer();
+
+    this.readyTimer = setTimeout(() => {
+      this.readyTimer = null;
+
+      if (this.destroyed || this.readyFired) return;
+
+      dbgError(
+        `Vimeo SDK did not become ready within ${READY_TIMEOUT_MS}ms`
+      );
+    }, READY_TIMEOUT_MS);
+
+    player
+      .ready()
+      .then(() => {
+        if (this.destroyed) return;
+
+        this.sdkReady = true;
+        this.clearReadyTimer();
+
+        dbg("Vimeo SDK ready");
+
+        /**
+         * Fire application readiness immediately.
+         *
+         * Duration is fetched independently below.
+         */
+        this.fireReady();
+
+        /**
+         * Duration is useful metadata, but it must NEVER prevent
+         * the player from becoming ready.
+         */
+        this.refreshDuration();
+      })
+      .catch((error) => {
+        this.clearReadyTimer();
+
+        if (this.destroyed) return;
+
+        dbgError("Vimeo SDK ready() rejected", error);
+      });
   }
 
-  /** Invoke cb once the SDK reports ready (immediately if already ready). */
+  /**
+   * Fire all pending readiness callbacks exactly once.
+   */
+  private fireReady() {
+    if (this.destroyed || this.readyFired) return;
+
+    this.readyFired = true;
+
+    dbg("ready fired");
+
+    const callbacks = this.readyCbs;
+    this.readyCbs = [];
+
+    for (const cb of callbacks) {
+      try {
+        cb();
+      } catch (error) {
+        /**
+         * Do not allow one consumer callback to prevent subsequent
+         * readiness callbacks from running.
+         */
+        dbgError("Vimeo ready callback threw", error);
+      }
+    }
+  }
+
+  /**
+   * Fetch duration independently of player readiness.
+   */
+  private refreshDuration() {
+    if (this.destroyed) return;
+
+    this.p
+      .getDuration()
+      .then((duration) => {
+        if (this.destroyed) return;
+
+        if (
+          typeof duration === "number" &&
+          Number.isFinite(duration) &&
+          duration >= 0
+        ) {
+          this.durationSec = duration;
+
+          dbg("duration loaded", duration);
+        }
+      })
+      .catch((error) => {
+        /**
+         * Duration is non-critical metadata.
+         *
+         * Never turn a duration failure into a player initialization
+         * failure.
+         */
+        dbgWarn("getDuration() failed", error);
+      });
+  }
+
+  /**
+   * Invoke cb once the Vimeo SDK is ready.
+   *
+   * If readiness already happened, invoke immediately.
+   */
   onReady(cb: () => void) {
-    if (this.readyFired) cb();
-    else this.readyCbs.push(cb);
+    if (this.destroyed) return;
+
+    if (this.readyFired) {
+      try {
+        cb();
+      } catch (error) {
+        dbgError("Vimeo ready callback threw", error);
+      }
+
+      return;
+    }
+
+    this.readyCbs.push(cb);
   }
 
+  /**
+   * Register the playback-state callback used by the playlist.
+   */
   onPlayState(cb: (playing: boolean) => void) {
+    if (this.destroyed) return;
+
     this.playStateCb = cb;
   }
 
-  /** Pull the current time from the SDK into the synchronous cache. */
+  /* ------------------------------------------------------------------------ */
+  /* Synchronous cache API                                                     */
+  /* ------------------------------------------------------------------------ */
+
+  /**
+   * Pull the current time from Vimeo into our synchronous cache.
+   *
+   * This is intentionally fire-and-forget.
+   */
   refreshTime() {
-    this.p.getCurrentTime().then((t) => { this.time = t; }).catch(() => {});
+    if (this.destroyed) return;
+
+    this.p
+      .getCurrentTime()
+      .then((time) => {
+        if (this.destroyed) return;
+
+        if (typeof time === "number" && Number.isFinite(time)) {
+          this.time = Math.max(0, time);
+        }
+      })
+      .catch((error) => {
+        dbgWarn("getCurrentTime() failed", error);
+      });
   }
 
   getCurrentTime(): number {
@@ -176,74 +820,430 @@ export class VimeoAdapter implements SyncPlayerInterface {
     return this.durationSec;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Seeking                                                                   */
+  /* ------------------------------------------------------------------------ */
+
   seekTo(seconds: number, _allowSeekAhead: boolean): void {
-    this.time = seconds;
-    this.p.setCurrentTime(seconds).catch(() => {});
+    if (this.destroyed) return;
+
+    const target = Number.isFinite(seconds)
+      ? Math.max(0, seconds)
+      : 0;
+
+    /**
+     * Update the synchronous cache immediately.
+     *
+     * This keeps the playlist UI responsive while Vimeo completes
+     * the asynchronous seek.
+     */
+    this.time = target;
+
+    dbg("seekTo()", target);
+
+    this.p
+      .setCurrentTime(target)
+      .then(() => {
+        dbg("setCurrentTime() resolved", target);
+      })
+      .catch((error) => {
+        dbgWarn("setCurrentTime() rejected", {
+          target,
+          error,
+        });
+      });
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Playback                                                                   */
+  /* ------------------------------------------------------------------------ */
+
   playVideo(): void {
-    // While a loadVideo swap is in flight the SDK swallows play() — queue it
-    // so playback starts right after the load+seek settle.
+    if (this.destroyed) return;
+
+    dbg("playVideo()", {
+      loading: this.loading,
+      pendingPlay: this.pendingPlay,
+      sdkReady: this.sdkReady,
+      readyFired: this.readyFired,
+    });
+
+    /**
+     * Don't call Vimeo.play() while loadVideo() is replacing the video.
+     *
+     * Vimeo can silently swallow play() during this period.
+     */
     if (this.loading) {
       this.pendingPlay = true;
       this.intendPlay = true;
+
+      dbg("play queued because Vimeo video is loading");
+
       return;
     }
+
+    /**
+     * If the SDK has not reported readiness yet, queue playback.
+     *
+     * In normal operation VideoPlaylistPlayer calls play after onReady,
+     * but this makes the adapter robust against callers getting ahead
+     * of the SDK.
+     */
+    if (!this.readyFired) {
+      this.pendingPlay = true;
+      this.intendPlay = true;
+
+      dbg("play queued because Vimeo SDK is not ready");
+
+      return;
+    }
+
     this.beginPlay();
   }
 
   pauseVideo(): void {
+    if (this.destroyed) return;
+
+    dbg("pauseVideo()");
+
+    /**
+     * A manual pause is authoritative.
+     *
+     * The autoplay watchdog must stop immediately.
+     */
+    this.pendingPlay = false;
     this.stopAutoPlay();
-    this.p.pause().catch(() => {});
+
+    this.p
+      .pause()
+      .then(() => {
+        dbg("Vimeo pause() resolved");
+      })
+      .catch((error) => {
+        dbgWarn("Vimeo pause() rejected", error);
+      });
   }
 
   getPlayerState(): number {
     return this.state;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Loading videos                                                             */
+  /* ------------------------------------------------------------------------ */
+
   loadVideoById(videoId: string, startSeconds: number): void {
-    this.time = startSeconds;
+    if (this.destroyed) return;
+
+    const generation = ++this.loadGeneration;
+
+    const start = Number.isFinite(startSeconds)
+      ? Math.max(0, startSeconds)
+      : 0;
+
+    dbg("loadVideoById()", {
+      videoId,
+      startSeconds: start,
+      generation,
+      ready: this.readyFired,
+    });
+
+    /**
+     * Update the visible position immediately.
+     */
+    this.time = start;
+
+    /**
+     * A new load supersedes any previous autoplay attempt.
+     */
     this.pendingPlay = false;
     this.stopAutoPlay();
-    if (!this.p.loadVideo) return;
-    this.loading = true;
+
+    if (!this.p.loadVideo) {
+      dbgError(
+        "Vimeo SDK player does not expose loadVideo(); cannot swap videos",
+        {
+          videoId,
+          startSeconds: start,
+        }
+      );
+
+      return;
+    }
+
     const { id, hash } = parseVimeoSpec(videoId);
+
+    const numericId = Number(id);
+
+    if (!Number.isFinite(numericId) || numericId <= 0) {
+      dbgError("Invalid Vimeo video ID", {
+        videoId,
+        parsedId: id,
+        hash,
+      });
+
+      return;
+    }
+
+    dbg("parsed Vimeo spec", {
+      videoId,
+      id: numericId,
+      hash,
+    });
+
+    this.loading = true;
+
+    const spec: { id: number; h?: string } = {
+      id: numericId,
+    };
+
+    if (hash) {
+      spec.h = hash;
+    }
+
     this.p
-      .loadVideo({ id: Number(id), h: hash })
-      .then(async () => {
+      .loadVideo(spec)
+      .then(() => {
+        /**
+         * Ignore completion from an old video load if a newer
+         * loadVideoById() has already started.
+         */
         if (this.destroyed) return;
-        if (startSeconds > 0) await this.p.setCurrentTime(startSeconds).catch(() => {});
+
+        if (generation !== this.loadGeneration) {
+          dbg("ignoring stale Vimeo load resolution", {
+            generation,
+            currentGeneration: this.loadGeneration,
+          });
+
+          return;
+        }
+
+        dbg("Vimeo loadVideo() resolved", {
+          videoId,
+          startSeconds: start,
+          generation,
+        });
+
         this.loading = false;
-        this.time = startSeconds;
+
+        /**
+         * Keep the synchronous cache aligned with the requested
+         * clip start while Vimeo settles.
+         */
+        this.time = start;
+
+        /**
+         * Do NOT await this seek.
+         *
+         * Vimeo can leave setCurrentTime() pending immediately after
+         * loadVideo(). Awaiting it can prevent queued playback from
+         * ever starting.
+         */
+        if (start > 0) {
+          this.p
+            .setCurrentTime(start)
+            .then(() => {
+              if (this.destroyed) return;
+
+              dbg("post-load Vimeo seek resolved", start);
+            })
+            .catch((error) => {
+              dbgWarn("post-load Vimeo seek rejected", {
+                start,
+                error,
+              });
+            });
+        }
+
+        /**
+         * If the playlist requested playback while the video was
+         * loading, start the autoplay watchdog now.
+         */
         if (this.pendingPlay) {
           this.pendingPlay = false;
+
+          dbg("starting queued playback after Vimeo load");
+
           this.beginPlay();
         }
       })
-      .catch(() => { this.loading = false; this.stopAutoPlay(); });
+      .catch((error) => {
+        if (this.destroyed) return;
+
+        if (generation !== this.loadGeneration) {
+          dbg("ignoring stale Vimeo load rejection", {
+            generation,
+            currentGeneration: this.loadGeneration,
+          });
+
+          return;
+        }
+
+        this.loading = false;
+        this.pendingPlay = false;
+
+        dbgError("Vimeo loadVideo() rejected", {
+          videoId,
+          startSeconds: start,
+          generation,
+          error,
+        });
+
+        this.stopAutoPlay();
+      });
   }
 
   cueVideoById(videoId: string, startSeconds: number): void {
-    // SDK has no cue-only mode; loading without play() is close enough —
-    // callers that want playback invoke playVideo() right after.
+    if (this.destroyed) return;
+
+    /**
+     * Vimeo's SDK doesn't expose the same cue-only behaviour as
+     * YouTube.
+     *
+     * Loading without play is therefore the closest equivalent.
+     */
+    dbg("cueVideoById()", {
+      videoId,
+      startSeconds,
+    });
+
     this.loadVideoById(videoId, startSeconds);
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Vimeo-specific controls                                                   */
+  /* ------------------------------------------------------------------------ */
+
   setPlaybackRate(rate: number): void {
-    this.p.setPlaybackRate?.(rate)?.catch(() => {});
+    if (this.destroyed) return;
+
+    if (!this.p.setPlaybackRate) {
+      dbgWarn("Vimeo setPlaybackRate() unavailable");
+      return;
+    }
+
+    if (!Number.isFinite(rate) || rate <= 0) {
+      dbgWarn("Invalid playback rate", rate);
+      return;
+    }
+
+    this.p
+      .setPlaybackRate(rate)
+      .then(() => {
+        dbg("Vimeo playback rate set", rate);
+      })
+      .catch((error) => {
+        dbgWarn("Vimeo setPlaybackRate() rejected", {
+          rate,
+          error,
+        });
+      });
   }
 
+  /**
+   * Explicit user mute.
+   *
+   * Marking userMuted=true prevents the autoplay watchdog from
+   * automatically unmuting later.
+   */
   mute(): void {
-    this.p.setMuted?.(true)?.catch(() => {});
+    if (this.destroyed) return;
+
+    this.userMuted = true;
+    this.warmMuted = false;
+
+    dbg("user mute");
+
+    if (!this.p.setMuted) {
+      dbgWarn("Vimeo setMuted() unavailable");
+      return;
+    }
+
+    this.p
+      .setMuted(true)
+      .then(() => {
+        dbg("Vimeo muted");
+      })
+      .catch((error) => {
+        dbgWarn("Vimeo mute rejected", error);
+      });
   }
 
+  /**
+   * Explicit user unmute.
+   *
+   * Once the user unmutes, the adapter is again allowed to use
+   * its muted-autoplay warm-up strategy if required.
+   */
   unMute(): void {
-    this.p.setMuted?.(false)?.catch(() => {});
+    if (this.destroyed) return;
+
+    this.userMuted = false;
+    this.warmMuted = false;
+
+    dbg("user unmute");
+
+    if (!this.p.setMuted) {
+      dbgWarn("Vimeo setMuted() unavailable");
+      return;
+    }
+
+    this.p
+      .setMuted(false)
+      .then(() => {
+        dbg("Vimeo unmuted");
+      })
+      .catch((error) => {
+        dbgWarn("Vimeo unmute rejected", error);
+      });
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Destruction                                                               */
+  /* ------------------------------------------------------------------------ */
 
   destroy(): void {
+    if (this.destroyed) return;
+
+    dbg("destroy()");
+
     this.destroyed = true;
+
+    /**
+     * Stop every automatic operation first.
+     */
     this.stopAutoPlay();
-    try { this.p.destroy?.(); } catch {}
+
+    this.clearReadyTimer();
+
+    this.pendingPlay = false;
+    this.loading = false;
+
+    /**
+     * Release callbacks so no future consumer can accidentally be
+     * retained by the adapter.
+     */
+    this.readyCbs = [];
+    this.playStateCb = null;
+
+    /**
+     * Invalidate every outstanding loadVideo() operation.
+     */
+    this.loadGeneration += 1;
+
+    try {
+      const result = this.p.destroy?.();
+
+      if (result && typeof (result as Promise<void>).catch === "function") {
+        (result as Promise<void>).catch((error) => {
+          dbgWarn("Vimeo destroy() rejected", error);
+        });
+      }
+    } catch (error) {
+      dbgWarn("Vimeo destroy() threw", error);
+    }
+
+    dbg("destroy complete");
   }
 }

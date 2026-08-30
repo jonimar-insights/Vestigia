@@ -14,6 +14,7 @@ declare global {
     // video/shared pages with their local YTPlayer symbol and must not
     // be redeclared here with a different identity.
     Vimeo?: { Player: new (element: HTMLElement, options?: Record<string, unknown>) => unknown };
+    __VIMEO_DEBUG?: boolean;
   }
 }
 
@@ -114,9 +115,17 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   useEffect(() => { videoIdsRef.current = videoIds; });
   const vimeoIdsRef = useRef<Map<number, string>>(vimeoIds);
   useEffect(() => { vimeoIdsRef.current = vimeoIds; });
+  useEffect(() => {
+    if (window.__VIMEO_DEBUG)
+      console.log(
+        "[playlist] vimeoIds changed → " +
+          JSON.stringify([...vimeoIds].map(([k, v]) => `${typeof k}:${String(k)}=${v}`))
+      );
+  }, [vimeoIds]);
   const vimeoPlayerRef = useRef<VimeoAdapter | null>(null);
   const vimeoContainerRef = useRef<HTMLIFrameElement>(null);
   const [vimeoReady, setVimeoReady] = useState(false);
+  const [vimeoInitError, setVimeoInitError] = useState<string | null>(null);
   const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
   useEffect(() => { html5SrcsRef.current = html5SrcsState; });
@@ -403,21 +412,49 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   // Load the current clip into the Vimeo player when it's a Vimeo video.
   useEffect(() => {
     const cur = itemsRef.current[currentIdx];
+    if (window.__VIMEO_DEBUG)
+      console.log(
+        "[playlist] vimeo clip-load effect " +
+          JSON.stringify({
+            currentIdx,
+            vimeoReady,
+            hasPlayer: !!vimeoPlayerRef.current,
+            curVideoId: cur?.videoId,
+            vmId: cur?.videoId != null ? (vimeoIds.get(cur.videoId) ?? null) : null,
+            vmIdNum: cur?.videoId != null ? (vimeoIds.get(Number(cur.videoId)) ?? null) : null,
+            entries: [...vimeoIds].map(([k, v]) => `${typeof k}:${String(k)}=${v}`),
+          })
+      );
     if (!vimeoReady || !vimeoPlayerRef.current || !cur || cur.type === "slide") return;
+    setVimeoInitError(null);
     const vmId = vimeoIds.get(cur.videoId);
     if (!vmId) return;
 
     advancedRef.current = false;
     clearTimeInterval();
     setCurrentTime(cur.timestamp);
+    if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load: post-guards OK, about to try");
 
     try {
-      playerRef.current?.pauseVideo();
-      html5PlayerRef.current?.pauseVideo();
+      if (window.__VIMEO_DEBUG)
+        console.log("[playlist] playerRef info", {
+          type: typeof playerRef.current,
+          ctor: (playerRef.current as { constructor?: { name?: string } } | null)?.constructor?.name,
+          keys: playerRef.current ? Object.keys(playerRef.current).slice(0, 12) : null,
+        });
+      // Pause the OTHER players before starting this clip. Each cross-player
+      // pause is individually shielded: a half-initialized YT/HTML5 player
+      // (e.g. one built for a later clip in the list) can throw, and it must
+      // never abort the Vimeo load below.
+      try { playerRef.current?.pauseVideo(); } catch {}
+      try { html5PlayerRef.current?.pauseVideo(); } catch {}
+      if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load: loadVideoById", vmId, "ts", cur.timestamp, "then playVideo");
       vimeoPlayerRef.current.loadVideoById(vmId, cur.timestamp);
       vimeoPlayerRef.current.playVideo();
       if (speedRef.current !== 1) vimeoPlayerRef.current.setPlaybackRate(speedRef.current);
-    } catch {}
+    } catch (e) {
+      if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load ERROR:", String(e), (e as Error)?.stack?.slice?.(0, 400));
+    }
   }, [currentIdx, vimeoReady, item?.videoId, item?.timestamp, item?.type, vimeoIds]);
 
   // ── Vimeo Player SDK (created on demand from the first Vimeo clip) ──
@@ -427,6 +464,12 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     const firstVmItem = itemsRef.current.find((i) => i.videoId > 0 && vimeoIds.get(i.videoId));
     if (!firstVmItem) return;
     let destroyed = false;
+    setVimeoInitError(null);
+    const timeout = window.setTimeout(() => {
+      if (!destroyed && !vimeoReady) {
+        setVimeoInitError("Vimeo player could not be initialized. Try again.");
+      }
+    }, 7000);
 
     function createVimeoPlayer() {
       if (destroyed || vimeoPlayerRef.current || !window.Vimeo?.Player || !container) return;
@@ -439,6 +482,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         adapter.onReady(() => {
           if (destroyed) return;
           setVimeoReady(true);
+          setVimeoInitError(null);
           if (speedRef.current !== 1) adapter.setPlaybackRate(speedRef.current);
         });
         adapter.onPlayState((pl) => {
@@ -462,12 +506,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         });
       } catch (err) {
         console.error("[Vimeo Player] createVimeoPlayer failed:", err);
+        setVimeoInitError("Vimeo player could not be initialized. Try again.");
       }
     }
 
     if (window.Vimeo?.Player) {
       createVimeoPlayer();
-      return () => { destroyed = true; };
+      return () => {
+        destroyed = true;
+        window.clearTimeout(timeout);
+      };
     }
 
     if (!document.querySelector('script[src*="player.vimeo.com/api/player.js"]')) {
@@ -476,12 +524,13 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
       document.head.appendChild(s);
     }
     const poll = setInterval(() => {
-      if (!destroyed && window.Vimeo?.Player) { clearInterval(poll); createVimeoPlayer(); }
+      if (!destroyed && window.Vimeo?.Player) { clearInterval(poll); window.clearTimeout(timeout); createVimeoPlayer(); }
     }, 100);
 
     return () => {
       destroyed = true;
       clearInterval(poll);
+      window.clearTimeout(timeout);
       if (vimeoPlayerRef.current) {
         try { vimeoPlayerRef.current.destroy(); } catch {}
         vimeoPlayerRef.current = null;
@@ -882,10 +931,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                   </span>
                 </div>
               ) : !readyNow && !isHtml5Audio ? (
-                <div className="absolute inset-0 flex items-center justify-center bg-black">
+                <div className="absolute inset-0 flex items-center justify-center bg-black px-8 text-center">
                   <div className="flex items-center gap-2 text-white/40">
                     <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
-                    <span className="text-xs">Loading player...</span>
+                    <span className="text-xs">{vmId && vimeoInitError ? vimeoInitError : "Loading player..."}</span>
                   </div>
                 </div>
               ) : null
