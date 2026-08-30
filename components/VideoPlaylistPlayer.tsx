@@ -869,7 +869,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 pointer-events-none">
                 <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2">
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
-                  <span className="text-xs text-white/80">{loadRemaining}s</span>
+                  <span className="text-xs text-white/80">Loading from Google Drive ({loadRemaining}s)</span>
                 </div>
                 <div className="w-48 h-1.5 rounded-full bg-white/10 overflow-hidden">
                   <div
