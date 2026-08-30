@@ -493,7 +493,11 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
       if (!curItem || !html5SrcsRef.current.get(curItem.videoId)) return;
       setPlaying(false);
       clearTimeInterval();
-      if (loopOneRef.current) {
+      // Hold-mode drive/upload clip hit its natural end: pause and don't
+      // advance to the next clip.
+      if (curItem.endTimestamp == null) {
+        endHoldPlayer();
+      } else if (loopOneRef.current) {
         try {
           html5PlayerRef.current?.seekTo(curItem.timestamp, true);
           html5PlayerRef.current?.playVideo();
@@ -567,6 +571,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     try {
       if (ap.getPlayerState() !== 1) return;
     } catch { return; }
+    // Hold-mode drive/upload clip (no end set): run to the media's NATURAL
+    // end, then pause — don't let the raw 548s WAV keep playing, and don't
+    // advance to the next clip (hold semantics preserved).
+    if (cur.endTimestamp == null && html5SrcsRef.current.get(cur.videoId)) {
+      const d = ap.getDuration();
+      if (d > 0 && currentTime >= d) {
+        endHoldPlayer();
+      }
+      return;
+    }
     if (currentTime < cur.timestamp) return;
     const end = cur.endTimestamp ?? (cur.timestamp + 30);
     if (currentTime >= end) {
@@ -579,12 +593,24 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
       advancedRef.current = true;
       advanceOrEnd();
     }
+    // endHoldPlayer/advanceOrEnd are stable function declarations; keeping the
+    // array narrowed to the time-polling triggers preserves clip-window timing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentTime, playing, currentIdx]);
 
   function goTo(idx: number) {
     if (idx < 0 || idx >= items.length) return;
     setEnded(false);
     setCurrentIdx(idx);
+  }
+
+  // A hold-mode drive/upload clip reached its natural end: pause and keep the
+  // clip in place (no advance to the next item).
+  function endHoldPlayer() {
+    try { html5PlayerRef.current?.pauseVideo(); } catch {}
+    clearTimeInterval();
+    setPlaying(false);
+    setEnded(true);
   }
 
   // Advance to the next item, or stop at a blank black screen when the last
