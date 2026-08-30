@@ -120,6 +120,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const html5ElRef = useRef<HTMLVideoElement | null>(null);
   const [html5Ready, setHtml5Ready] = useState(false);
   const [html5Setup, setHtml5Setup] = useState(false);
+  // True while an html5 (drive/upload) clip is waiting on its stream — Drive
+  // headers can take seconds — drives the "Loading audio/video…" indicator.
+  const [html5Loading, setHtml5Loading] = useState(false);
   const fetchedIdsRef = useRef<Set<number>>(new Set());
   const lastVideoIdRef = useRef<string | null>(null);
   const advancedRef = useRef(false);
@@ -532,8 +535,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     try { playerRef.current?.pauseVideo(); } catch {}
     try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
     setCurrentTime(cur.timestamp);
+    setHtml5Loading(true);
     const onMeta = () => {
       if (!html5PlayerRef.current || !html5ElRef.current) return;
+      setHtml5Loading(false);
       try { html5ElRef.current.currentTime = cur.timestamp; } catch {}
       try { html5ElRef.current.play(); } catch {}
       try { if (speedRef.current !== 1) html5ElRef.current.playbackRate = speedRef.current; } catch {}
@@ -827,6 +832,14 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                     </svg>
                   </div>
                 )}
+              </div>
+            )}
+            {!ended && h5Src && html5Loading && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none bg-black/50">
+                <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-white/80">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                  <span className="text-xs">Loading audio/video…</span>
+                </div>
               </div>
             )}
             {!ended && isSlide && (
