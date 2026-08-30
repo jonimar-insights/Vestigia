@@ -99,6 +99,8 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const timeIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const loadStartRef = useRef(0);
@@ -674,7 +676,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t instanceof HTMLVideoElement)) return;
-      if (e.key === "Escape") { onClose(); return; }
+      if (e.key === "Escape") {
+        // In browser fullscreen, exit fullscreen (explicitly, so it also works
+        // in automated/embedded browsers) rather than closing the modal.
+        if (document.fullscreenElement) {
+          document.exitFullscreen().catch(() => {});
+          return;
+        }
+        onClose();
+        return;
+      }
       const onButton = t?.closest("button");
       if (e.key === " ") {
         if (onButton) return; // focused button handles Space itself
@@ -692,6 +703,22 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Track browser fullscreen so the header toggle icon stays in sync (and so
+  // Esc from the browser fullscreen API doesn't close the modal underneath).
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      document.exitFullscreen().catch(() => {});
+    } else if (rootRef.current?.requestFullscreen) {
+      rootRef.current.requestFullscreen().catch(() => {});
+    }
+  }
 
   // Auto-scroll the active item into view (sidebar + mobile strip)
   useEffect(() => {
@@ -771,7 +798,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const listedIdxs = items.map((_, i) => i).filter((i) => !filter || items[i].type === filter);
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={onClose}>
+    <div ref={rootRef} className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={onClose}>
       <div className="flex flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex-1 flex flex-col min-w-0">
           <div className="flex items-center justify-between px-4 py-2 shrink-0 gap-2">
@@ -805,12 +832,17 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
                 title={loopOne ? "Loop off" : "Loop this clip"}>
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
               </button>
+              <button onClick={toggleFullscreen}
+                className={`p-1 rounded transition-colors ${isFullscreen ? "text-accent" : "text-white/60 hover:text-white hover:bg-white/10"}`}
+                title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isFullscreen ? "M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" : "M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"} /></svg>
+              </button>
               <span className="text-xs text-white/40 ml-1">{currentIdx + 1}/{items.length}</span>
               <span className="text-[10px] text-white/30 hidden sm:inline">· {fmtRemaining(remainingSec)}</span>
             </div>
           </div>
 
-          <div className="aspect-video mx-auto w-full max-w-4xl bg-black relative">
+          <div className={isFullscreen ? "flex-1 min-h-0 w-full bg-black relative" : "aspect-video mx-auto w-full max-w-4xl bg-black relative"}>
             {/* SDK players replace their mount node (YT swaps the div for an
                 iframe), so visibility is toggled on these React-owned wrappers */}
             <div className="absolute inset-0" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
@@ -920,6 +952,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
           </div>
 
           {/* Clip / slide progress bar */}
+          {!isFullscreen && (
           <div
             className="mx-auto w-full max-w-4xl px-0 shrink-0"
             onClick={(e) => e.stopPropagation()}
@@ -955,8 +988,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               </div>
             ) : null}
           </div>
+          )}
 
           {/* Mobile queue strip */}
+          {!isFullscreen && (
           <div ref={stripScrollRef} className="md:hidden flex gap-2 overflow-x-auto px-4 py-2 shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {items.map((it, i) => (
               <button
@@ -974,7 +1009,9 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               </button>
             ))}
           </div>
+          )}
 
+          {!isFullscreen && (
           <div className="px-4 py-3 shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1009,8 +1046,10 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
               </div>
             </div>
           </div>
+          )}
         </div>
 
+        {!isFullscreen && (
         <div className="w-72 border-l border-white/10 bg-black/40 hidden md:flex flex-col shrink-0">
           <div className="px-3 py-2 text-[10px] font-semibold text-white/40 uppercase tracking-wider border-b border-white/10 shrink-0 flex items-center justify-between">
             <span>Playlist</span>
@@ -1072,6 +1111,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
             })}
           </div>
         </div>
+        )}
       </div>
     </div>
   );
