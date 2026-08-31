@@ -2512,23 +2512,34 @@ export default function Home() {
                               </button>
                               {folderDropdown.open && folderDropdown.videoId === video.id && (
                                 <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                  <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.moveTo")}</div>
-                                  {folderList.filter((f) => f.id !== selectedFolderId && !pendingFolderIds.includes(f.id)).map((f) => (
-                                    <button
-                                      key={f.id}
-                                      onClick={(e) => { e.preventDefault(); moveVideoToFolder(f.id, video.id); }}
-                                      className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                                    >
-                                      {f.name}
-                                    </button>
-                                  ))}
-                                  <div className="border-t border-border my-1" />
-                                  <button
-                                    onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
-                                  >
-                                    {t("folder.removeFromFolder")}
-                                  </button>
+                                  <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{selectedFolderId !== null ? t("folder.moveTo") : t("folder.addTo")}</div>
+                                  {folderList.filter((f) => !pendingFolderIds.includes(f.id)).map((f) => {
+                                    const isCurrent = selectedFolderId !== null && f.id === selectedFolderId;
+                                    return (
+                                      <button
+                                        key={f.id}
+                                        disabled={isCurrent}
+                                        onClick={(e) => { e.preventDefault(); if (selectedFolderId !== null && f.id !== selectedFolderId) { moveVideoToFolder(f.id, video.id); } else { addVideoToFolder(f.id, video.id); } }}
+                                        className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between ${isCurrent ? "text-muted/60 cursor-default" : "text-foreground hover:bg-accent/10 transition-colors"}`}
+                                      >
+                                        <span className="truncate">{f.name}</span>
+                                        {isCurrent && (
+                                          <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                  {selectedFolderId !== null && (
+                                    <>
+                                      <div className="border-t border-border my-1" />
+                                      <button
+                                        onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                        className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                      >
+                                        {t("folder.removeFromFolder")}
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2611,23 +2622,34 @@ export default function Home() {
                             </button>
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.moveTo")}</div>
-                                {folderList.filter((f) => f.id !== selectedFolderId && !pendingFolderIds.includes(f.id)).map((f) => (
-                                  <button
-                                    key={f.id}
-                                    onClick={(e) => { e.preventDefault(); moveVideoToFolder(f.id, video.id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                                  >
-                                    {f.name}
-                                  </button>
-                                ))}
-                                <div className="border-t border-border my-1" />
-                                <button
-                                  onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
-                                  className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
-                                >
-                                  {t("folder.removeFromFolder")}
-                                </button>
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{selectedFolderId !== null ? t("folder.moveTo") : t("folder.addTo")}</div>
+                                {folderList.filter((f) => !pendingFolderIds.includes(f.id)).map((f) => {
+                                  const isCurrent = selectedFolderId !== null && f.id === selectedFolderId;
+                                  return (
+                                    <button
+                                      key={f.id}
+                                      disabled={isCurrent}
+                                      onClick={(e) => { e.preventDefault(); if (selectedFolderId !== null && f.id !== selectedFolderId) { moveVideoToFolder(f.id, video.id); } else { addVideoToFolder(f.id, video.id); } }}
+                                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between ${isCurrent ? "text-muted/60 cursor-default" : "text-foreground hover:bg-accent/10 transition-colors"}`}
+                                    >
+                                      <span className="truncate">{f.name}</span>
+                                      {isCurrent && (
+                                        <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                                {selectedFolderId !== null && (
+                                  <>
+                                    <div className="border-t border-border my-1" />
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                      className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                    >
+                                      {t("folder.removeFromFolder")}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2771,16 +2793,34 @@ export default function Home() {
                             </button>
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
-                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
-                                  <button
-                                    key={folder.id}
-                                    onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                                  >
-                                    {folder.name}
-                                  </button>
-                                ))}
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{selectedFolderId !== null ? t("folder.moveTo") : t("folder.addTo")}</div>
+                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => {
+                                  const isCurrent = selectedFolderId !== null && folder.id === selectedFolderId;
+                                  return (
+                                    <button
+                                      key={folder.id}
+                                      disabled={isCurrent}
+                                      onClick={(e) => { e.preventDefault(); if (selectedFolderId !== null && folder.id !== selectedFolderId) { moveVideoToFolder(folder.id, video.id); } else { addVideoToFolder(folder.id, video.id); } }}
+                                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between ${isCurrent ? "text-muted/60 cursor-default" : "text-foreground hover:bg-accent/10 transition-colors"}`}
+                                    >
+                                      <span className="truncate">{folder.name}</span>
+                                      {isCurrent && (
+                                        <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                                {selectedFolderId !== null && (
+                                  <>
+                                    <div className="border-t border-border my-1" />
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                      className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                    >
+                                      {t("folder.removeFromFolder")}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2863,16 +2903,34 @@ export default function Home() {
                             </button>
                             {folderDropdown.open && folderDropdown.videoId === video.id && (
                               <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
-                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.addTo")}</div>
-                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
-                                  <button
-                                    key={folder.id}
-                                    onClick={(e) => { e.preventDefault(); addVideoToFolder(folder.id, video.id); }}
-                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                                  >
-                                    {folder.name}
-                                  </button>
-                                ))}
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{selectedFolderId !== null ? t("folder.moveTo") : t("folder.addTo")}</div>
+                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => {
+                                  const isCurrent = selectedFolderId !== null && folder.id === selectedFolderId;
+                                  return (
+                                    <button
+                                      key={folder.id}
+                                      disabled={isCurrent}
+                                      onClick={(e) => { e.preventDefault(); if (selectedFolderId !== null && folder.id !== selectedFolderId) { moveVideoToFolder(folder.id, video.id); } else { addVideoToFolder(folder.id, video.id); } }}
+                                      className={`w-full text-left px-3 py-1.5 text-sm flex items-center justify-between ${isCurrent ? "text-muted/60 cursor-default" : "text-foreground hover:bg-accent/10 transition-colors"}`}
+                                    >
+                                      <span className="truncate">{folder.name}</span>
+                                      {isCurrent && (
+                                        <svg className="w-4 h-4 text-accent shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                                {selectedFolderId !== null && (
+                                  <>
+                                    <div className="border-t border-border my-1" />
+                                    <button
+                                      onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                      className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                    >
+                                      {t("folder.removeFromFolder")}
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             )}
                           </div>
@@ -2922,15 +2980,15 @@ export default function Home() {
                   {bulkFolderDropdown && (
                     <div className="absolute bottom-full mb-2 left-0 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
                       <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.select")}</div>
-                      {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
-                        <button
-                          key={folder.id}
-                          onClick={() => bulkAddToFolder(folder.id)}
-                          className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
-                        >
-                          {folder.name}
-                        </button>
-                      ))}
+                                {folderList.filter((folder) => !pendingFolderIds.includes(folder.id)).map((folder) => (
+                                  <button
+                                    key={folder.id}
+                                    onClick={(e) => { e.preventDefault(); bulkAddToFolder(folder.id); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                                  >
+                                    {folder.name}
+                                  </button>
+                                ))}
                       {folderList.length === 0 && (
                         <div className="px-3 py-2 text-sm text-muted">{t("folder.noFolders")}</div>
                       )}
