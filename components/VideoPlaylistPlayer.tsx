@@ -80,6 +80,9 @@ export interface ClipItem {
   createdAt: string;
   videoTitle: string | null;
   videoThumbnail: string | null;
+  _youtubeId?: string;
+  _vimeoId?: string;
+  _html5Src?: string;
 }
 
 export function formatTs(s: number) {
@@ -90,7 +93,7 @@ export function formatTs(s: number) {
   return `${m}:${String(sec).padStart(2, "0")}`;
 }
 
-export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipItem[]; onClose: () => void }) {
+export default function VideoPlaylistPlayer({ items, onClose, preclassified }: { items: ClipItem[]; onClose: () => void; preclassified?: boolean }) {
   // Nominal seconds a Drive stream may take to hand over metadata — used for
   // the loading countdown (the true wait is unknowable in advance).
   const LOAD_NOMINAL_MS = 8000;
@@ -109,8 +112,23 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
 
   const item = items[currentIdx];
 
-  const [videoIds, setVideoIds] = useState<Map<number, string>>(new Map());
-  const [vimeoIds, setVimeoIds] = useState<Map<number, string>>(new Map());
+  function seedMaps() {
+    const yt = new Map<number, string>();
+    const vim = new Map<number, string>();
+    const h5 = new Map<number, string>();
+    if (preclassified) {
+      for (const it of items) {
+        if (it.videoId <= 0) continue;
+        if (it._youtubeId) yt.set(it.videoId, it._youtubeId);
+        if (it._vimeoId) vim.set(it.videoId, it._vimeoId);
+        if (it._html5Src) h5.set(it.videoId, it._html5Src);
+      }
+    }
+    return { yt, vim, h5 };
+  }
+
+  const [videoIds, setVideoIds] = useState<Map<number, string>>(() => seedMaps().yt);
+  const [vimeoIds, setVimeoIds] = useState<Map<number, string>>(() => seedMaps().vim);
   const videoIdsRef = useRef<Map<number, string>>(videoIds);
   useEffect(() => { videoIdsRef.current = videoIds; });
   const vimeoIdsRef = useRef<Map<number, string>>(vimeoIds);
@@ -126,7 +144,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   const vimeoContainerRef = useRef<HTMLIFrameElement>(null);
   const [vimeoReady, setVimeoReady] = useState(false);
   const [vimeoInitError, setVimeoInitError] = useState<string | null>(null);
-  const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(new Map());
+  const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(() => seedMaps().h5);
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
   useEffect(() => { html5SrcsRef.current = html5SrcsState; });
   // Marks drive/upload videos that loaded a REAL video track (videoWidth>0).
@@ -176,8 +194,16 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
   });
 
   useEffect(() => {
+    const preclassifiedIds = new Set<number>();
+    if (preclassified) {
+      for (const it of items) {
+        if (it.videoId > 0 && (it._youtubeId || it._vimeoId || it._html5Src)) {
+          preclassifiedIds.add(it.videoId);
+        }
+      }
+    }
     const uniqueIds = [...new Set(items.filter(i => i.videoId > 0).map((i) => i.videoId))];
-    const missingIds = uniqueIds.filter((id) => !fetchedIdsRef.current.has(id));
+    const missingIds = uniqueIds.filter((id) => !fetchedIdsRef.current.has(id) && !preclassifiedIds.has(id));
     if (missingIds.length === 0) return;
     missingIds.forEach((id) => fetchedIdsRef.current.add(id));
     Promise.all(
@@ -224,7 +250,7 @@ export default function VideoPlaylistPlayer({ items, onClose }: { items: ClipIte
         return next;
       });
     });
-  }, [items]);
+  }, [items, preclassified]);
 
   useEffect(() => {
     const cur = itemsRef.current[currentIdx];

@@ -30,7 +30,13 @@ export async function GET(
   const videoIds = [...new Set(items.map((i) => i.videoId))];
   const videoMap = new Map<
     number,
-    { title: string | null; thumbnailUrl: string | null; youtubeId: string | null }
+    {
+      title: string | null;
+      thumbnailUrl: string | null;
+      youtubeId: string | null;
+      platform: string | null;
+      youtubeUrl: string | null;
+    }
   >();
   for (const vid of videoIds) {
     const vRows = await db
@@ -38,6 +44,8 @@ export async function GET(
         title: videos.title,
         thumbnailUrl: videos.thumbnailUrl,
         youtubeId: videos.youtubeId,
+        platform: videos.platform,
+        youtubeUrl: videos.youtubeUrl,
       })
       .from(videos)
       .where(eq(videos.id, vid))
@@ -45,13 +53,22 @@ export async function GET(
     if (vRows[0]) videoMap.set(vid, vRows[0]);
   }
 
-  const itemsWithVideo = items.map((item) => ({
-    ...item,
-    tags: item.tags ? JSON.parse(item.tags) : [],
-    videoTitle: videoMap.get(item.videoId)?.title ?? null,
-    videoThumbnail: videoMap.get(item.videoId)?.thumbnailUrl ?? null,
-    youtubeId: videoMap.get(item.videoId)?.youtubeId ?? null,
-  }));
+  const itemsWithVideo = items.map((item) => {
+    const v = videoMap.get(item.videoId);
+    const raw = String(v?.youtubeId ?? "");
+    const ytOk = /^[A-Za-z0-9_-]{11}$/.test(raw);
+    const isHtml5 = v?.platform === "drive" || v?.platform === "upload";
+    return {
+      ...item,
+      tags: item.tags ? JSON.parse(item.tags) : [],
+      videoTitle: v?.title ?? null,
+      videoThumbnail: v?.thumbnailUrl ?? null,
+      youtubeId: v?.youtubeId ?? null,
+      _youtubeId: ytOk ? raw : "",
+      _vimeoId: !ytOk && raw.startsWith("vimeo:") ? raw.slice("vimeo:".length) : "",
+      _html5Src: isHtml5 && typeof v?.youtubeUrl === "string" ? (v as { youtubeUrl: string }).youtubeUrl : "",
+    };
+  });
 
   return NextResponse.json({ ...list, items: itemsWithVideo });
 }

@@ -46,7 +46,7 @@ export default function SharedCliplistPage() {
 
   if (playing && data.items.length > 0) {
     return (
-      <VideoPlaylistPlayer items={data.items} onClose={() => setPlaying(false)} />
+      <VideoPlaylistPlayer items={data.items} onClose={() => setPlaying(false)} preclassified />
     );
   }
 
