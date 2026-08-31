@@ -2462,7 +2462,7 @@ export default function Home() {
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
-                      className="group rounded-lg border border-border bg-surface hover:border-accent/50 transition-colors overflow-hidden"
+                      className="group rounded-lg border border-border bg-surface hover:border-accent/50 transition-colors relative"
                     >
                       {video.thumbnailUrl ? (
                         <div className="aspect-video w-full overflow-hidden bg-muted relative">
@@ -2548,12 +2548,12 @@ export default function Home() {
                   ))}
                 </div>
                   ) : (
-                  <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border overflow-hidden">
-                    {gridVideos.map((video) => (
+                  <div className="flex flex-col divide-y divide-border/50 rounded-lg border border-border">
+                    {gridVideos.map((video, idx) => (
                     <Link
                       key={video.id}
                       href={`/video/${video.id}`}
-                      className="group flex items-center gap-4 px-4 py-3 bg-surface hover:bg-surface-hover transition-colors"
+                      className={`group flex items-center gap-4 px-4 py-3 bg-surface hover:bg-surface-hover transition-colors relative ${idx === 0 ? "rounded-t-lg" : ""} ${idx === gridVideos.length - 1 ? "rounded-b-lg" : ""}`}
                     >
                       <button
                         onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleVideoSelection(video.id); }}
