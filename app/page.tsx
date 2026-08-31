@@ -881,6 +881,32 @@ export default function Home() {
     setFolderDropdown({ videoId: -1, open: false });
   }
 
+  function moveVideoToFolder(targetFolderId: number, videoId: number) {
+    const fromFolderId = selectedFolderId!;
+    enqueueDelete(
+      t("undo.removedFromFolder"),
+      async () => {
+        try {
+          await fetch(`/api/folders/${targetFolderId}/videos`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId }),
+          });
+          await fetch(`/api/folders/${fromFolderId}/videos`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ videoId }),
+          });
+        } catch {}
+        await loadFolders();
+        await loadVideos();
+        if (selectedFolderId === fromFolderId) await loadFolderVideos(fromFolderId);
+        setFolderDropdown({ videoId: -1, open: false });
+      },
+      () => {},
+    );
+  }
+
   function removeVideoFromFolder(folderId: number, videoId: number) {
     enqueueDelete(
       t("undo.removedFromFolder"),
@@ -2472,17 +2498,40 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="flex items-center gap-0.5">
-                          {/* Remove from folder */}
-                          {selectedFolderId !== null && (
-                            <button
-                              onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
-                              className="text-muted hover:text-accent transition-colors p-1 rounded"
-                              title={t("sidebar.removeFromFolder")}
-                            >
-                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                              </svg>
-                            </button>
+                          {/* Folder dropdown (inside folder: move/remove) */}
+                          {selectedFolderId !== null && folderList.length > 0 && (
+                            <div className="relative" data-folder-dropdown>
+                              <button
+                                onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
+                                className="text-muted hover:text-accent transition-colors p-1 rounded"
+                                title={t("folder.moveTo")}
+                              >
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                                </svg>
+                              </button>
+                              {folderDropdown.open && folderDropdown.videoId === video.id && (
+                                <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                                  <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.moveTo")}</div>
+                                  {folderList.filter((f) => f.id !== selectedFolderId && !pendingFolderIds.includes(f.id)).map((f) => (
+                                    <button
+                                      key={f.id}
+                                      onClick={(e) => { e.preventDefault(); moveVideoToFolder(f.id, video.id); }}
+                                      className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                                    >
+                                      {f.name}
+                                    </button>
+                                  ))}
+                                  <div className="border-t border-border my-1" />
+                                  <button
+                                    onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                  >
+                                    {t("folder.removeFromFolder")}
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           )}
                           <button
                             onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
@@ -2549,16 +2598,39 @@ export default function Home() {
                         </div>
                       </div>
                       <div className="flex items-center gap-0.5 shrink-0">
-                        {selectedFolderId !== null && (
-                          <button
-                            onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
-                            className="text-muted hover:text-accent transition-colors p-1.5 rounded"
-                            title={t("sidebar.removeFromFolder")}
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-                            </svg>
-                          </button>
+                        {selectedFolderId !== null && folderList.length > 0 && (
+                          <div className="relative" data-folder-dropdown>
+                            <button
+                              onClick={(e) => { e.preventDefault(); setFolderDropdown({ videoId: video.id, open: folderDropdown.videoId === video.id ? !folderDropdown.open : true }); }}
+                              className="text-muted hover:text-accent transition-colors p-1.5 rounded"
+                              title={t("folder.moveTo")}
+                            >
+                              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                              </svg>
+                            </button>
+                            {folderDropdown.open && folderDropdown.videoId === video.id && (
+                              <div className="absolute right-0 top-full mt-1 w-48 rounded-lg border border-border bg-surface shadow-xl z-50 py-1">
+                                <div className="px-3 py-1.5 text-[10px] text-muted/60 font-medium uppercase tracking-wider">{t("folder.moveTo")}</div>
+                                {folderList.filter((f) => f.id !== selectedFolderId && !pendingFolderIds.includes(f.id)).map((f) => (
+                                  <button
+                                    key={f.id}
+                                    onClick={(e) => { e.preventDefault(); moveVideoToFolder(f.id, video.id); }}
+                                    className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-accent/10 transition-colors"
+                                  >
+                                    {f.name}
+                                  </button>
+                                ))}
+                                <div className="border-t border-border my-1" />
+                                <button
+                                  onClick={(e) => { e.preventDefault(); removeVideoFromFolder(selectedFolderId, video.id); }}
+                                  className="w-full text-left px-3 py-1.5 text-sm text-danger hover:bg-danger/10 transition-colors"
+                                >
+                                  {t("folder.removeFromFolder")}
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         )}
                         <button
                           onClick={(e) => { e.preventDefault(); handleDelete(video.id); }}
