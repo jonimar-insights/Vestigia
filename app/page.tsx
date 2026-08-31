@@ -627,11 +627,14 @@ export default function Home() {
   }, []);
 
   async function handleDelete(id: number) {
+    if (selectedFolderId !== null) {
+      removeVideoFromFolder(selectedFolderId, id);
+      return;
+    }
     const doDelete = async () => {
       await fetch(`/api/videos/${id}`, { method: "DELETE" });
       await loadVideos();
       if (showAllVideos) await loadAllVideos();
-      if (selectedFolderId !== null) await loadFolderVideos(selectedFolderId);
       await loadTrash();
     };
     const video = currentVideoList.find((v) => v.id === id);
