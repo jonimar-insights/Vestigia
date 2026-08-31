@@ -54,6 +54,15 @@ export interface YTPlayer {
   setPlaybackRate?(rate: number): void;
   mute?(): void;
   unMute?(): void;
+  getSphericalProperties?(): Record<string, unknown>;
+  setSphericalProperties?(props: { yaw?: number; pitch?: number; fov?: number; roll?: number }): void;
+}
+
+export interface SphericalView {
+  yaw: number;
+  pitch: number;
+  roll: number;
+  fov: number;
 }
 
 const SPEEDS = [1, 1.25, 1.5] as const;
@@ -165,6 +174,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const lastVideoIdRef = useRef<string | null>(null);
   const advancedRef = useRef(false);
   const slideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Enhancement state ──
   const [speedIdx, setSpeedIdx] = useState(0);
@@ -174,6 +184,15 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const [loopOne, setLoopOne] = useState(false);
   const loopOneRef = useRef(false);
   useEffect(() => { loopOneRef.current = loopOne; }, [loopOne]);
+  // 360° spherical view for the active YouTube clip. `is360` is true once the
+  // current video reports a non-empty getSphericalProperties() — the embed
+  // video has no native orbit drag, so pointer drag drives the view via
+  // setSphericalProperties. viewRef mirrors the latest yaw/pitch for the drag
+  // handler without re-rendering.
+  const [is360, setIs360] = useState(false);
+  const viewRef = useRef<SphericalView>({ yaw: 0, pitch: 0, roll: 0, fov: 75 });
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const currentIdxRef = useRef(0);
   useEffect(() => { currentIdxRef.current = currentIdx; }, [currentIdx]);
   const [filter, setFilter] = useState<string | null>(null);
@@ -359,7 +378,42 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       // loadVideoById resets playback rate — re-apply the chosen speed
       if (speedRef.current !== 1) playerRef.current.setPlaybackRate?.(speedRef.current);
     } catch {}
+
+    // Not a 360 clip until spherical properties report a non-empty object —
+    // the embed's handoff for a 360 source may lag the load, so poll briefly.
+    setIs360(false);
   }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type, videoIds]);
+
+  // Detect 360° for the current YouTube clip once the player has settled.
+  // Polls getSphericalProperties() — empty {} for non-360 — for a short
+  // window after a clip starts, then keeps checking on play-state activity.
+  useEffect(() => {
+    const cur = itemsRef.current[currentIdx];
+    if (!playerRef.current || !cur || cur.type === "slide") return;
+    if (!videoIds.get(cur.videoId)) return;
+    // Only spherical properties report the view after the embed reaches the
+    // playing state; if the player isn't ready yet, defer until it is.
+    if (!playerReady) return;
+    let disposed = false;
+    let tries = 0;
+    const check = () => {
+      if (disposed) return;
+      let sp: Record<string, unknown> | undefined;
+      try { sp = playerRef.current?.getSphericalProperties?.(); } catch {}
+      const isSpherical = !!(sp && Object.keys(sp).length > 0);
+      if (isSpherical) {
+        const yaw = typeof sp?.yaw === "number" ? sp.yaw : viewRef.current.yaw;
+        const pitch = typeof sp?.pitch === "number" ? sp.pitch : viewRef.current.pitch;
+        viewRef.current = { ...viewRef.current, yaw, pitch };
+        setIs360(true);
+        return;
+      }
+      if (tries++ < 30) timeoutRef.current = setTimeout(check, 150);
+    };
+    check();
+    return () => { disposed = true; if (timeoutRef.current) clearTimeout(timeoutRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentIdx, item?.videoId, playerReady]);
 
   useEffect(() => {
     const container = playerContainerRef.current;
@@ -847,6 +901,64 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     } catch {}
   }
 
+  // ── 360° orbit: pointer drag converts deltas to yaw/pitch and pushes the
+  // view via YT's setSphericalProperties. The embed has no native orbit, and
+  // its iframe would swallow drags, so an overlay captures the pointer while
+  // a 360 clip is active. Rolling offset (unchecking an earlier roll term)
+  // is intentionally omitted — drag maps to horizontal/vertical look only.
+  function on360PointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (!is360) return;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    // Re-seed yaw/pitch from the player so drags continue from the current
+    // view instead of resetting to the initial look.
+    try {
+      const sp = playerRef.current?.getSphericalProperties?.();
+      if (sp) {
+        if (typeof sp.yaw === "number") viewRef.current.yaw = sp.yaw;
+        if (typeof sp.pitch === "number") viewRef.current.pitch = sp.pitch;
+      }
+    } catch {}
+  }
+
+  function on360PointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (!is360 || !dragRef.current) return;
+    const { x, y } = dragRef.current;
+    const dx = e.clientX - x;
+    const dy = e.clientY - y;
+    dragRef.current = { x: e.clientX, y: e.clientY };
+    const view = viewRef.current;
+    view.yaw = (view.yaw - dx * 0.25 + 360) % 360;
+    view.pitch = Math.max(-90, Math.min(90, view.pitch - dy * 0.25));
+    viewRef.current = view;
+    try {
+      playerRef.current?.setSphericalProperties?.({ yaw: view.yaw, pitch: view.pitch });
+    } catch {}
+  }
+
+  function on360PointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    dragRef.current = null;
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
+  }
+
+  // Zoom the 360 view (FOV) with the wheel — the API is the only way to change
+  // FOV inside an embed, on both desktop and mobile. Attached non-passive so
+  // preventDefault blocks the iframe from stealing the wheel to zoom video.
+  useEffect(() => {
+    const el = overlayRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (!is360) return;
+      e.preventDefault();
+      const view = viewRef.current;
+      view.fov = Math.max(30, Math.min(120, view.fov + e.deltaY * 0.05));
+      viewRef.current = view;
+      try { playerRef.current?.setSphericalProperties?.({ fov: view.fov }); } catch {}
+    };
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => el.removeEventListener("wheel", handler);
+  }, [is360]);
+
   if (items.length === 0) return null;
 
   const ytId = videoIds.get(item.videoId);
@@ -928,6 +1040,25 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             <div className="absolute inset-0" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
               <div ref={playerContainerRef} className="w-full h-full" />
             </div>
+
+            {/* 360° orbit: the embed has no native drag, and its iframe would
+                swallow the pointer — an overlay captures drags + wheel while a
+                360 clip is active and drives the view via setSphericalProperties. */}
+            {is360 && activeKind === "youtube" && !ended && (
+              <div
+                ref={overlayRef}
+                className="absolute inset-0 z-10 touch-none cursor-grab active:cursor-grabbing"
+                onPointerDown={on360PointerDown}
+                onPointerMove={on360PointerMove}
+                onPointerUp={on360PointerUp}
+                onPointerCancel={on360PointerUp}
+                onPointerLeave={on360PointerUp}
+              >
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 pointer-events-none select-none rounded-full bg-black/60 px-2.5 py-1 text-[10px] text-white/70 backdrop-blur-sm">
+                  Drag to look around · scroll to zoom
+                </div>
+              </div>
+            )}
             <div className="absolute inset-0" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
               <iframe
                 ref={vimeoContainerRef}
