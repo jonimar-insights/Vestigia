@@ -1451,6 +1451,9 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   // progress row, mobile strip, details) is hidden so the slide itself is the
   // whole screen. A slim floating bar keeps counter/fullscreen/close handy.
   const slidePresenting = !ended && isSlide;
+  // A slide with only an image (no description) is presented as a full-bleed
+  // background: the image fills the entire screen instead of a card window.
+  const fullBleedImage = isSlide && !!item?.imageUrl && !item?.detail;
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
   const       activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
@@ -1650,7 +1653,30 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                 </div>
               </div>
             )}
-            {!ended && isSlide && (
+            {!ended && isSlide && (fullBleedImage ? (
+              <div
+                className="absolute inset-0 bg-black"
+                style={item?.color ? { backgroundColor: item.color } : undefined}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={item.imageUrl ?? ""}
+                  alt={item.title || "Slide"}
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+                <div
+                  className="absolute inset-x-0 bottom-[clamp(0.75rem,2vh,1.5rem)] flex items-center justify-center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="rounded-full bg-black/60 px-3 py-1 text-[clamp(0.7rem,1.3vmin,1rem)] text-white/80">
+                    {slideRemainingSec === null
+                      ? <>Holding — press <span className="text-white/90 font-medium">Next</span> or → to continue</>
+                      : <>Auto-advancing in {Math.ceil(slideRemainingSec)}s</>}
+                  </span>
+                </div>
+              </div>
+            ) : (
               <div
                 className="absolute inset-0 flex items-center justify-center px-[clamp(1rem,4vw,5rem)] py-[clamp(1rem,5vh,3.5rem)] bg-black"
                 style={item?.color ? { backgroundColor: item.color } : undefined}
@@ -1689,7 +1715,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                   </div>
                 </div>
               </div>
-            )}
+            ))}
 
             {slidePresenting && (
               <div
