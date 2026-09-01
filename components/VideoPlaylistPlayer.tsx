@@ -125,7 +125,20 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const [playerReady, setPlayerReady] = useState(false);
   const [youtubeIs360, setYoutubeIs360] = useState(false);
   // 360° camera interaction state (see the 360 layer below).
-  const [orientationSensor, setOrientationSensor] = useState(false);
+  // Device orientation only steers the view on gyro-capable devices; the
+  // official API ignores enableOrientationSensor where there's no sensor.
+  const [gyroCapable] = useState(() =>
+    typeof window !== "undefined" &&
+    "DeviceOrientationEvent" in window &&
+    (navigator.maxTouchPoints > 0 || /(Android|iPhone|iPad|iPod)/i.test(navigator.userAgent))
+  );
+  // The embed starts with the sensor ON on supported devices (API default
+  // true), so the UI reflects: capable -> on, otherwise no button at all.
+  const [orientationSensor, setOrientationSensor] = useState(gyroCapable);
+  // Mirror of orientationSensor that stays stable during a drag, since the
+  // layer handlers run against the closure value of the render they were
+  // created in (a drag is many moves before any re-render).
+  const orientationSensorRef = useRef(gyroCapable);
   // Last applied/known spherical values so a drag is relative to the current
   // viewpoint instead of resetting to yaw=0/pitch=0 on every gesture.
   const lastSphericalRef = useRef<YouTubeSphericalProperties>({});
@@ -379,6 +392,14 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     const dx = e.clientX - d.lastX;
     const dy = e.clientY - d.lastY;
     if (dx === 0 && dy === 0) return;
+    // First real move beats the orientation sensor: while the sensor is ON,
+    // the API ignores explicit yaw/pitch on mobile (only the sensor steers),
+    // so a drag must turn it off before taking over the viewpoint.
+    if (orientationSensorRef.current) {
+      orientationSensorRef.current = false;
+      setOrientationSensor(false);
+      syncSpherical({ enableOrientationSensor: false });
+    }
     d.lastX = e.clientX;
     d.lastY = e.clientY;
     // Sensitivities chosen so a full drag ≈ multiple viewport rotations;
@@ -395,6 +416,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
 
   function toggleOrientationSensor() {
     const next = !orientationSensor;
+    orientationSensorRef.current = next;
     setOrientationSensor(next);
     syncSpherical({ enableOrientationSensor: next });
   }
@@ -1307,13 +1329,15 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                   <span className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white/80 transition-opacity whitespace-nowrap">
                     {orientationSensor ? "gyro · drag to look · wheel to zoom" : "drag to look · wheel to zoom"}
                   </span>
-                  <button
-                    onClick={toggleOrientationSensor}
-                    className="pointer-events-auto absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white/60 hover:text-white hover:bg-black/70 transition-colors"
-                    title={orientationSensor ? "Disable device-orientation (gyroscope) control" : "Enable device-orientation (gyroscope) control on mobile"}
-                  >
-                    {orientationSensor ? "gyro: on" : "gyro: off"}
-                  </button>
+                  {gyroCapable && (
+                    <button
+                      onClick={toggleOrientationSensor}
+                      className="pointer-events-auto absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white/60 hover:text-white hover:bg-black/70 transition-colors"
+                      title={orientationSensor ? "Disable device-orientation (gyroscope) control" : "Enable device-orientation (gyroscope) control: hold your device and move it to look around"}
+                    >
+                      {orientationSensor ? "gyro: on" : "gyro: off"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
