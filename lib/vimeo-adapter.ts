@@ -965,6 +965,16 @@ export class VimeoAdapter implements SyncPlayerInterface {
     this.pendingPlay = false;
     this.stopAutoPlay();
 
+    /**
+     * Audio should always come back on when the playlist moves to the
+     * next clip, unless the user explicitly muted. A previous clip's
+     * muted-autoplay warm-up must never silence the new video.
+     */
+    if (!this.userMuted) {
+      this.warmMuted = false;
+      this.p.setMuted?.(false).catch(() => {});
+    }
+
     if (!this.p.loadVideo) {
       dbgError(
         "Vimeo SDK player does not expose loadVideo(); cannot swap videos",

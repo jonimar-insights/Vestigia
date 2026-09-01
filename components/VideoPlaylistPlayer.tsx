@@ -262,6 +262,8 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const speedRef = useRef(1);
   useEffect(() => { speedRef.current = SPEEDS[speedIdx]; }, [speedIdx]);
   const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  useEffect(() => { mutedRef.current = muted; }, [muted]);
   const [loopOne, setLoopOne] = useState(false);
   const loopOneRef = useRef(false);
   useEffect(() => { loopOneRef.current = loopOne; }, [loopOne]);
@@ -575,6 +577,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
     try { html5PlayerRef.current?.pauseVideo(); } catch {}
     setCurrentTime(cur.timestamp);
+    ensureUnmuted();
     // Same video across consecutive clips keeps its viewpoint; only a
     // DIFFERENT video starts from the in-frame camera origin.
     const prevYtId = lastVideoIdRef.current;
@@ -991,6 +994,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       // never abort the Vimeo load below.
       try { playerRef.current?.pauseVideo(); } catch {}
       try { html5PlayerRef.current?.pauseVideo(); } catch {}
+      ensureUnmuted();
       if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load: loadVideoById", vmId, "ts", cur.timestamp, "then playVideo");
       vimeoPlayerRef.current.loadVideoById(vmId, cur.timestamp);
       vimeoPlayerRef.current.playVideo();
@@ -998,6 +1002,8 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     } catch (e) {
       if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load ERROR:", String(e), (e as Error)?.stack?.slice?.(0, 400));
     }
+    // ensureUnmuted is stable and refs-only; keep deps narrowed to the triggers.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIdx, vimeoReady, item?.videoId, item?.timestamp, item?.type, vimeoIds]);
 
   // ── Vimeo Player SDK (created on demand from the first Vimeo clip) ──
@@ -1151,6 +1157,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     try { playerRef.current?.pauseVideo(); } catch {}
     try { vimeoPlayerRef.current?.pauseVideo(); } catch {}
     setCurrentTime(cur.timestamp);
+    ensureUnmuted();
     setHtml5Loading(true);
     const onMeta = () => {
       if (!html5PlayerRef.current || !html5ElRef.current) return;
@@ -1178,6 +1185,8 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     // metadata — Drive streams can be slow to hand over the header.
     if (cur.timestamp < 3) { try { el.play().catch(() => {}); } catch {} }
     return () => el.removeEventListener("loadedmetadata", onMeta);
+    // ensureUnmuted is stable and refs-only; keep deps narrowed to the triggers.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIdx, html5Setup, item?.videoId, item?.timestamp, item?.type, html5SrcsState]);
 
   // Tick the loading clock while an html5 stream buffers, resetting whenever a
@@ -1342,6 +1351,16 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       ap.seekTo(target, true);
       setCurrentTime(target);
     } catch {}
+  }
+
+  // Ensure the by-default-unmuted behaviour: when the user hasn't muted, make
+  // sure the active player has audio back on at the start of each clip (a
+  // stale muted state must never carry over from autoplay warm-ups).
+  function ensureUnmuted() {
+    if (mutedRef.current) return;
+    const ap = getActivePlayer();
+    if (!ap) return;
+    try { ap.unMute?.(); } catch {}
   }
 
   function toggleMute() {
