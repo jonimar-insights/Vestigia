@@ -205,6 +205,21 @@ export class VimeoAdapter implements SyncPlayerInterface {
   private pendingPlay = false;
 
   /**
+   * The Vimeo spec ("<id>?h=<hash>" or "<id>") currently loaded in the
+   * player, or null when nothing has been explicitly loaded yet.
+   *
+   * The playlist builds the player over an existing ?api=1 iframe that is
+   * SEEDED with the first Vimeo clip's own embed URL, so the video is
+   * already bootstrapping inside the player before the adapter exists. The
+   * constructor accepts that spec as {@link initialSpec} so a redundant
+   * loadVideo() (a second /config + CDN bootstrap) is never issued for the
+   * very video the iframe already contains. Every explicit loadVideoById()
+   * records the spec here on success, so consecutive clips of the SAME video
+   * also seek instead of reloading.
+   */
+  private loadedSpec: string | null = null;
+
+  /**
    * Incremented for every loadVideoById() request.
    *
    * If an old Vimeo load resolves after a newer one has started,
@@ -650,8 +665,19 @@ export class VimeoAdapter implements SyncPlayerInterface {
   /* Constructor / readiness                                                  */
   /* ------------------------------------------------------------------------ */
 
-  constructor(player: MinimalVimeoPlayer) {
+  constructor(player: MinimalVimeoPlayer, initialSpec?: string | null) {
     this.p = player;
+
+    /**
+     * When the player is created over an iframe whose src already boots a
+     * specific video (the playlist's seeded first-Vimeo-clip iframe), that
+     * video is effectively loaded — reloading it later would pay a second
+     * full bootstrap. Seed the loaded-spec cache with it.
+     */
+    if (initialSpec) {
+      this.loadedSpec = initialSpec;
+      dbg("VimeoAdapter seeded with already-loaded spec", initialSpec);
+    }
 
     this.bindEvents();
 
@@ -1020,6 +1046,49 @@ export class VimeoAdapter implements SyncPlayerInterface {
       hash,
     });
 
+    /**
+     * Same-video fast path.
+     *
+     * The first Vimeo clip is loaded implicitly by the seeded ?api=1 iframe
+     * (the player is created over it), so reloading it here would trigger a
+     * SECOND /config + CDN bootstrap before the first frame — the visible
+     * "this clip is slower than the others" stall. Consecutive clips of the
+     * same video hit the same waste. When the target video is already the
+     * loaded one, just seek to the clip window and let playback proceed.
+     */
+    if (this.loadedSpec === videoId && !this.loading) {
+      dbg("loadVideoById(): video already loaded, seeking instead of reloading", {
+        videoId,
+        startSeconds: start,
+      });
+
+      if (start > 0) {
+        this.p
+          .setCurrentTime(start)
+          .then(() => {
+            dbg("same-video seek resolved", start);
+          })
+          .catch((error: unknown) => {
+            dbgWarn("same-video seek rejected", {
+              start,
+              error,
+            });
+          });
+      }
+
+      /**
+       * Playback queued (e.g. playVideo() raced the seek) is delivered now
+       * the target video is confirmed loaded — but never before the SDK is
+       * actually ready, which is the job of fireReady().
+       */
+      if (this.pendingPlay && this.readyFired) {
+        this.pendingPlay = false;
+        this.beginPlay();
+      }
+
+      return;
+    }
+
     this.loading = true;
 
     const spec: { id: number; h?: string } = {
@@ -1055,6 +1124,12 @@ export class VimeoAdapter implements SyncPlayerInterface {
         });
 
         this.loading = false;
+
+        /**
+         * This video is now the one physically loaded in the player, so a
+         * later loadVideoById() for the SAME spec can skip the reload.
+         */
+        this.loadedSpec = videoId;
 
         /**
          * Keep the synchronous cache aligned with the requested

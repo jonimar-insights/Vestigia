@@ -1072,9 +1072,13 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       if (destroyed || vimeoPlayerRef.current || !window.Vimeo?.Player || !container) return;
       try {
         // Build over the existing ?api=1 iframe (like the annotation player):
-        // the lightweight app_id div-embed auto-play stalls silently.
+        // the lightweight app_id div-embed auto-play stalls silently. The
+        // iframe already boots the FIRST Vimeo clip's embed URL, so tell the
+        // adapter it's loaded (its same-video fast path seeks instead of
+        // re-bootstrapping — the seeded clip never reloads its own video).
+        const seededSpec = firstVmItem ? vimeoIds.get(firstVmItem.videoId) : undefined;
         const p = new window.Vimeo.Player(container) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
-        const adapter = new VimeoAdapter(p);
+        const adapter = new VimeoAdapter(p, seededSpec);
         vimeoPlayerRef.current = adapter;
         adapter.onReady(() => {
           if (destroyed) return;

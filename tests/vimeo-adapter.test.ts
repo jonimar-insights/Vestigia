@@ -208,6 +208,52 @@ async function main() {
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(p11._muted, false, "manual pause does not re-mute");
 
+  // ── 12. same-video fast path: a video the player ALREADY has loaded (the
+  //       seeded ?api=1 iframe of the first Vimeo clip, or a previous explicit
+  //       load) is NOT reloaded — loadVideoById() seeks and plays directly —
+  //       while a DIFFERENT video still issues loadVideo, and the fast path is
+  //       DISABLED while another video is mid-load (so a stale in-flight load
+  //       can never swap the video out from under the requested seek) ──
+  const p12 = makeFakePlayer();
+  const a12 = new VimeoAdapter(p12, "62514288"); // iframe was seeded with this video
+  p12.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  const q12 = (p12 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  let plays12 = 0;
+  p12.play = async () => { plays12++; p12.emit("play"); };
+  // same video as the seed → must NOT trigger a second bootstrap
+  a12.loadVideoById("62514288", 12);
+  assert.equal(q12.length, 0, "seeded video is not reloaded");
+  a12.playVideo();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(plays12 > 0, "playback starts without reloading the seeded video");
+  // a DIFFERENT video is loaded normally
+  a12.loadVideoById("12133658", 0);
+  assert.equal(q12.length, 1, "different video issues loadVideo");
+  q12[0].resolve();
+  await new Promise((r) => setTimeout(r, 20));
+  // and once explicitly loaded, the same video again is also seek-only
+  a12.loadVideoById("12133658", 30);
+  assert.equal(q12.length, 1, "explicitly-loaded video is not reloaded either");
+  assert.equal(a12.getCurrentTime(), 30, "same-video fast path seeks the cached time");
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(a12.getCurrentTime(), 30, "same-video seek lands");
+  // fast path is DISABLED while a DIFFERENT video is still loading
+  const beforeLen = q12.length; // 1
+  a12.loadVideoById("77777", 5); // push #2 → loading = true
+  a12.loadVideoById("12133658", 40); // loadedSpec matches, but a load IS in flight
+  assert.equal(q12.length, beforeLen + 2, "fast path disabled while another load is in flight");
+  assert.equal(a12.getCurrentTime(), 40, "full-load path still caches the target time");
+  q12[beforeLen].resolve(); // 77777 resolves → stale generation, must be ignored
+  q12[beforeLen + 1].resolve(); // 12133658 reload resolves → authoritative
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(a12.getCurrentTime(), 40, "reloaded target video wins over the stale load");
+  assert.equal(q12.length, beforeLen + 2, "no extra loadVideo after the reload completed");
+  // fast path is re-enabled once the load finished
+  a12.loadVideoById("12133658", 50);
+  assert.equal(q12.length, beforeLen + 2, "fast path re-enabled after the reload completed");
+  assert.equal(a12.getCurrentTime(), 50, "same-video fast path works after reloading");
+
   // ── 8. loadVideoById with a privacy hash passes {id, h} to the SDK ──
   const p8 = makeFakePlayer();
   const a8 = new VimeoAdapter(p8);
