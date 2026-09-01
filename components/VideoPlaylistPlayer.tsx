@@ -1646,35 +1646,37 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             )}
             {!ended && isSlide && (
               <div
-                className="absolute inset-0 flex items-center justify-center px-12 py-10 bg-black"
+                className="absolute inset-0 flex items-center justify-center px-[clamp(1rem,4vw,5rem)] py-[clamp(1rem,5vh,3.5rem)] bg-black"
                 style={item?.color ? { backgroundColor: item.color } : undefined}
               >
-                <div className="text-center max-w-2xl w-full max-h-full flex flex-col items-center">
+                {/* Content scales with the viewport (vmin tracks the smaller
+                    dimension) so a slide looks right at any screen resolution. */}
+                <div className="text-center w-full max-h-full flex flex-col items-center max-w-[min(78vmin,72rem)]">
                   {item?.imageUrl && (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
                       src={item.imageUrl}
                       alt=""
                       onError={(e) => { e.currentTarget.style.display = "none"; }}
-                      className="mb-5 max-h-[45%] max-w-full object-contain rounded-lg shadow-lg"
+                      className="mb-[clamp(0.75rem,2vh,1.5rem)] max-h-[min(38vh,50%)] max-w-[min(86vmin,100%)] object-contain rounded-lg shadow-lg"
                     />
                   )}
                   {!item?.imageUrl && (
-                    <div className="w-16 h-16 mx-auto mb-6 shrink-0 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
-                      <svg className="w-8 h-8 text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <div className="w-[clamp(3rem,8vmin,5rem)] h-[clamp(3rem,8vmin,5rem)] mx-auto mb-[clamp(1rem,3vh,2rem)] shrink-0 rounded-2xl bg-gradient-to-br from-purple-500/20 to-accent/5 flex items-center justify-center border border-purple-500/10">
+                      <svg className="w-[clamp(1.5rem,4vmin,2.5rem)] h-[clamp(1.5rem,4vmin,2.5rem)] text-purple-400/60" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1l2.5-1.5A1 1 0 0121 7v10a1 1 0 01-1.5.86L17 16v1a2 2 0 01-2 2z" />
                       </svg>
                     </div>
                   )}
-                  <h2 className="text-2xl font-bold text-white mb-3">{item.title}</h2>
+                  <h2 className="text-[clamp(1.75rem,5vmin,6rem)] leading-tight font-bold text-white mb-[clamp(0.5rem,1.5vh,1rem)] break-words">{item.title}</h2>
                   {item.detail && (
                     <div
-                      className="text-base text-white/60 leading-relaxed max-h-56 overflow-y-auto"
+                      className="text-[clamp(0.9rem,2vmin,1.75rem)] text-white/60 leading-relaxed max-h-[clamp(12rem,40vh,30rem)] overflow-y-auto"
                       dangerouslySetInnerHTML={{ __html: renderNoteHtml(item.detail) }}
                     />
                   )}
-                  <div className="mt-8 flex items-center justify-center gap-2 text-white/30 text-xs">
-                    <div className="w-1.5 h-1.5 rounded-full bg-purple-400/50 animate-pulse" />
+                  <div className="mt-[clamp(1rem,3vh,2.5rem)] flex items-center justify-center gap-2 text-white/30 text-[clamp(0.7rem,1.3vmin,1rem)]">
+                    <div className="w-[clamp(0.375rem,0.7vmin,0.75rem)] h-[clamp(0.375rem,0.7vmin,0.75rem)] rounded-full bg-purple-400/50 animate-pulse" />
                     {slideRemainingSec === null
                       ? <>Holding — press <span className="text-white/50 font-medium">Next</span> or → to continue</>
                       : <>Auto-advancing in {Math.ceil(slideRemainingSec)}s</>}
