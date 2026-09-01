@@ -327,6 +327,17 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     setPlaying(false);
   }, [currentIdx, item?.type, videoIds, vimeoIds, html5SrcsState]);
 
+  function applyYoutubeIframePermissions(container: HTMLElement | null) {
+    const iframe = container?.querySelector?.("iframe");
+    if (!iframe) return;
+    iframe.setAttribute(
+      "allow",
+      "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+    );
+    iframe.setAttribute("allowfullscreen", "");
+    iframe.setAttribute("referrerPolicy", "strict-origin-when-cross-origin");
+  }
+
   function startTimePolling() {
     if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
     timeIntervalRef.current = setInterval(() => {
@@ -376,7 +387,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       try {
         playerRef.current = new window.YT.Player(container, {
           videoId: firstYtId,
-          playerVars: { autoplay: 0, modestbranding: 1, rel: 0, controls: 1, enablejsapi: 1, playsinline: 1 },
+          playerVars: { autoplay: 0, modestbranding: 1, rel: 0, controls: 1, enablejsapi: 1, playsinline: 1, fs: 1 },
           events: {
             onReady: () => {
               if (destroyed) return;
@@ -385,14 +396,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
               // certain media: gyroscope/accelerometer power device-orientation
               // 360° viewing, autoplay/encrypted-media for playback in an embed,
               // and web-share/fullscreen for the player chrome.
-              const ifr = container.querySelector?.("iframe");
-              if (ifr) {
-                ifr.setAttribute(
-                  "allow",
-                  "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                );
-                ifr.setAttribute("allowfullscreen", "");
-              }
+              applyYoutubeIframePermissions(container);
               setPlayerReady(true);
             },
             onStateChange: (e: { data: number }) => {

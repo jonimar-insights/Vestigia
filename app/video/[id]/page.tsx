@@ -264,11 +264,20 @@ export default function VideoPage() {
       try {
         new window.YT.Player(container, {
           videoId: ytId,
-          playerVars: { autoplay: 0, modestbranding: 1, rel: 0, controls: 1, enablejsapi: 1 },
+          playerVars: { autoplay: 0, modestbranding: 1, rel: 0, controls: 1, enablejsapi: 1, playsinline: 1, fs: 1 },
           events: {
             onReady: (e: { target: YTPlayer }) => {
               if (destroyed) return;
               playerRef.current = e.target;
+              const iframe = container.querySelector("iframe");
+              if (iframe) {
+                iframe.setAttribute(
+                  "allow",
+                  "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
+                );
+                iframe.setAttribute("allowfullscreen", "");
+                iframe.setAttribute("referrerPolicy", "strict-origin-when-cross-origin");
+              }
               setDuration(e.target.getDuration());
               setPlayerReady(true);
               const t = new URLSearchParams(window.location.search).get("t");
