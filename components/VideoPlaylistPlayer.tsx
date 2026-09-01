@@ -1447,6 +1447,10 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const isHtml5Audio = !!h5Src && !html5IsVideo.get(item.videoId);
   const audioCoverSrc = isHtml5Audio ? (item.imageUrl || item.videoThumbnail) || "" : "";
   const isSlide = item?.type === "slide";
+  // Slides are presented full-bleed: the modal chrome (header, sidebar,
+  // progress row, mobile strip, details) is hidden so the slide itself is the
+  // whole screen. A slim floating bar keeps counter/fullscreen/close handy.
+  const slidePresenting = !ended && isSlide;
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
   const       activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
@@ -1476,6 +1480,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     <div ref={rootRef} className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={onClose}>
       <div className="flex flex-1 min-h-0" onClick={(e) => e.stopPropagation()}>
         <div className="flex-1 flex flex-col min-w-0">
+          {!slidePresenting && (
           <div className="flex items-center justify-between px-4 py-2 shrink-0 gap-2">
             <div className="flex items-center gap-2 min-w-0">
               <button onClick={onClose} className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors" title="Close (Esc)">
@@ -1524,6 +1529,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
               <span className="text-[10px] text-white/30 hidden sm:inline">· {fmtRemaining(remainingSec)}</span>
             </div>
           </div>
+          )}
 
           <div className={isFullscreen || isSlide ? "flex-1 min-h-0 w-full bg-black relative" : "aspect-video mx-auto w-full max-w-4xl bg-black relative"}>
             {/* SDK players replace their mount node (YT swaps the div for an
@@ -1684,10 +1690,39 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                 </div>
               </div>
             )}
+
+            {slidePresenting && (
+              <div
+                className="absolute inset-x-0 top-0 z-30 flex items-center justify-between px-3 py-2 gap-2"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <span className="rounded-full bg-black/50 px-2 py-0.5 text-[10px] font-mono text-white/50">
+                  {currentIdx + 1}/{items.length} · slide
+                </span>
+                <div className="flex items-center gap-1">
+                  <button onClick={() => goTo(currentIdx - 1)} disabled={currentIdx === 0}
+                    className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-colors" title="Previous (←)">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <button onClick={() => goTo(currentIdx + 1)} disabled={currentIdx === items.length - 1}
+                    className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 disabled:opacity-30 transition-colors" title="Next (→)">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                  <button onClick={toggleFullscreen}
+                    className={`p-1 rounded transition-colors ${isFullscreen ? "text-accent" : "text-white/60 hover:text-white hover:bg-white/10"}`}
+                    title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}>
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isFullscreen ? "M8 3v3a2 2 0 01-2 2H3m18 0h-3a2 2 0 01-2-2V3m0 18v-3a2 2 0 012-2h3M3 16h3a2 2 0 012 2v3" : "M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"} /></svg>
+                  </button>
+                  <button onClick={onClose} className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors" title="Close (Esc)">
+                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Clip / slide progress bar */}
-          {!isFullscreen && (
+          {!(isFullscreen || slidePresenting) && (
           <div
             className="mx-auto w-full max-w-4xl px-0 shrink-0"
             onClick={(e) => e.stopPropagation()}
@@ -1726,7 +1761,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
           )}
 
           {/* Mobile queue strip */}
-          {!isFullscreen && (
+          {!(isFullscreen || slidePresenting) && (
           <div ref={stripScrollRef} className="md:hidden flex gap-2 overflow-x-auto px-4 py-2 shrink-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {items.map((it, i) => (
               <button
@@ -1746,7 +1781,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
           </div>
           )}
 
-          {!isFullscreen && (
+          {!(isFullscreen || slidePresenting) && (
           <div className="px-4 py-3 shrink-0">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0 flex-1">
@@ -1784,7 +1819,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
           )}
         </div>
 
-        {!isFullscreen && (
+        {!(isFullscreen || slidePresenting) && (
         <div className="w-72 border-l border-white/10 bg-black/40 hidden md:flex flex-col shrink-0">
           <div className="px-3 py-2 text-[10px] font-semibold text-white/40 uppercase tracking-wider border-b border-white/10 shrink-0 flex items-center justify-between">
             <span>Playlist</span>
