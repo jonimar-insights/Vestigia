@@ -1,30 +1,23 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-
-declare global {
-  interface Window {
-    YT?: {
-      Player: new (
-        element: HTMLElement,
-        options: any
-      ) => any;
-    };
-  }
-}
+import {
+  type YouTubeIFramePlayer,
+  type YouTubeSphericalProperties,
+} from "@/lib/youtube-adapter";
 
 export default function YouTube360Test() {
   const containerRef =
     useRef<HTMLDivElement>(null);
 
   const playerRef =
-    useRef<any>(null);
+    useRef<YouTubeIFramePlayer | null>(null);
 
   const [ready, setReady] =
     useState(false);
 
   const [spherical, setSpherical] =
-    useState<any>(null);
+    useState<YouTubeSphericalProperties | null>(null);
 
   useEffect(() => {
     let destroyed = false;
@@ -55,7 +48,11 @@ export default function YouTube360Test() {
             },
 
             events: {
-              onReady: (event: any) => {
+              onReady: (
+                event: {
+                  target: YouTubeIFramePlayer;
+                }
+              ) => {
                 if (destroyed) return;
 
                 setReady(true);
@@ -94,11 +91,14 @@ export default function YouTube360Test() {
                   props
                 );
 
-                setSpherical(props);
+                setSpherical(props ?? null);
               },
 
               onStateChange: (
-                event: any
+                event: {
+                  target: YouTubeIFramePlayer;
+                  data: number;
+                }
               ) => {
                 console.log(
                   "YOUTUBE STATE:",
@@ -114,11 +114,14 @@ export default function YouTube360Test() {
                   props
                 );
 
-                setSpherical(props);
+                setSpherical(props ?? null);
               },
 
               onError: (
-                event: any
+                event: {
+                  target: YouTubeIFramePlayer;
+                  data: number;
+                }
               ) => {
                 console.error(
                   "YOUTUBE ERROR:",
@@ -167,7 +170,7 @@ export default function YouTube360Test() {
       clearInterval(interval);
 
       try {
-        playerRef.current?.destroy();
+        playerRef.current?.destroy?.();
       } catch {}
 
       playerRef.current = null;
@@ -185,13 +188,13 @@ export default function YouTube360Test() {
 
     if (!current) return;
 
-    player.setSphericalProperties({
+    player.setSphericalProperties?.({
       ...current,
       yaw: (current.yaw ?? 0) + 30,
     });
 
     setSpherical(
-      player.getSphericalProperties?.()
+      player.getSphericalProperties?.() ?? null
     );
   }
 
@@ -206,13 +209,13 @@ export default function YouTube360Test() {
 
     if (!current) return;
 
-    player.setSphericalProperties({
+    player.setSphericalProperties?.({
       ...current,
       yaw: (current.yaw ?? 0) - 30,
     });
 
     setSpherical(
-      player.getSphericalProperties?.()
+      player.getSphericalProperties?.() ?? null
     );
   }
 
