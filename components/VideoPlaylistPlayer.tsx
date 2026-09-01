@@ -232,6 +232,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const vimeoContainerRef = useRef<HTMLIFrameElement>(null);
   const [vimeoReady, setVimeoReady] = useState(false);
   const [vimeoInitError, setVimeoInitError] = useState<string | null>(null);
+  const [vimeoLaunching, setVimeoLaunching] = useState(false);
   const [html5SrcsState, setHtml5Srcs] = useState<Map<number, string>>(() => seedMaps().h5);
   const html5SrcsRef = useRef<Map<number, string>>(html5SrcsState);
   useEffect(() => { html5SrcsRef.current = html5SrcsState; });
@@ -1027,6 +1028,9 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
       try { html5PlayerRef.current?.pauseVideo(); } catch {}
       ensureUnmuted();
       if (window.__VIMEO_DEBUG) console.log("[playlist] vimeo clip-load: loadVideoById", vmId, "ts", cur.timestamp, "then playVideo");
+      // Re-arm the "Starting Vimeo…" loading pill; it clears the moment the
+      // clip's first frame actually renders (see the vimeoLaunching effect).
+      setVimeoLaunching(true);
       vimeoPlayerRef.current.loadVideoById(vmId, cur.timestamp);
       vimeoPlayerRef.current.playVideo();
       if (speedRef.current !== 1) vimeoPlayerRef.current.setPlaybackRate(speedRef.current);
@@ -1036,6 +1040,19 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     // ensureUnmuted is stable and refs-only; keep deps narrowed to the triggers.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentIdx, vimeoReady, item?.videoId, item?.timestamp, item?.type, vimeoIds]);
+
+  // Clear the "Starting Vimeo…" pill once the clip's first frame actually
+  // renders (currentTime rises past its start), or when we leave the
+  // Vimeo clip / it ends. Latching avoids a spurious pill when the user
+  // later scrubs back to the clip start or loop-one seeks to the start.
+  useEffect(() => {
+    const cur = itemsRef.current[currentIdx];
+    if (!vimeoReady || !vimeoPlayerRef.current) return;
+    const curKind = cur?.type === "slide" ? null : vimeoIds.get(cur.videoId) ? "vimeo" : null;
+    if (curKind !== "vimeo") { setVimeoLaunching(false); return; }
+    if (cur && currentTime > (cur.timestamp ?? 0)) setVimeoLaunching(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentTime, playing, currentIdx, item?.type, item?.videoId, item?.timestamp, vimeoIds]);
 
   // ── Vimeo Player SDK (created on demand from the first Vimeo clip) ──
   useEffect(() => {
@@ -1429,6 +1446,12 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
   const       activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
+  // Vimeo is "ready" once the SDK hands us the adapter, but the clip still
+  // has to wait on Vimeo's own /config + CDN bootstrap before the first
+  // frame actually renders — during that window currentTime stays pinned at
+  // the clip start. Show a loading pill until real playback begins.
+  const vimeoStarting =
+    activeKind === "vimeo" && !!vimeoReady && vimeoLaunching && !ended;
   const loadElapsedSec = html5Loading ? Math.max(0, (loadNow - (loadStartRef.current || loadNow)) / 1000) : 0;
   const loadNominalSec = LOAD_NOMINAL_MS / 1000;
   const loadRemaining = Math.max(0, Math.ceil(loadNominalSec - loadElapsedSec));
@@ -1606,6 +1629,14 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                     className="h-full rounded-full bg-white/70 transition-[width] duration-300"
                     style={{ width: `${Math.min(100, (loadElapsedSec / loadNominalSec) * 100)}%` }}
                   />
+                </div>
+              </div>
+            )}
+            {!ended && vimeoStarting && (
+              <div className="absolute inset-x-0 bottom-16 flex items-center justify-center pointer-events-none">
+                <div className="flex items-center gap-2 rounded-full bg-black/70 px-4 py-2">
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />
+                  <span className="text-xs text-white/80">Starting Vimeo&hellip;</span>
                 </div>
               </div>
             )}
