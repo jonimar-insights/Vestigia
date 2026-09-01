@@ -64,6 +64,14 @@ interface Cliplist {
   itemCount: number;
 }
 
+interface SavedImage {
+  id: number;
+  userId: string;
+  url: string;
+  label: string | null;
+  createdAt: string;
+}
+
 interface CliplistWithItems extends Cliplist {
   items: ClipItem[];
 }
@@ -203,6 +211,16 @@ export default function Home() {
   const [slideColor, setSlideColor] = useState("");
   const [slideImage, setSlideImage] = useState("");
   const [slideInsertIdx, setSlideInsertIdx] = useState(-1); // -1 = at end, else insert after items[idx]
+  // Saved-image pool: reusable slide backgrounds the user can pick from.
+  const [savedImages, setSavedImages] = useState<SavedImage[]>([]);
+  const [imagePickerOpen, setImagePickerOpen] = useState(false);
+  // "add" = fill slideImage; "edit" = fill editSlideImage.
+  const [imagePickerTarget, setImagePickerTarget] = useState<"add" | "edit">("add");
+  const [imagePoolLoading, setImagePoolLoading] = useState(false);
+  const [newImageUrl, setNewImageUrl] = useState("");
+  const [newImageLabel, setNewImageLabel] = useState("");
+  const [addingImage, setAddingImage] = useState(false);
+  const [imagePoolError, setImagePoolError] = useState<string | null>(null);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkStatus, setBulkStatus] = useState("");
@@ -436,6 +454,50 @@ export default function Home() {
       setCliplistsLoading(false);
     }
   }, []);
+
+  // ── Saved-image pool ──
+  const loadSavedImages = useCallback(async () => {
+    setImagePoolLoading(true);
+    try {
+      const res = await fetch("/api/saved-images");
+      if (res.ok) setSavedImages(await res.json());
+    } finally {
+      setImagePoolLoading(false);
+    }
+  }, []);
+
+  async function addSavedImage() {
+    const url = newImageUrl.trim();
+    if (!url || addingImage) return;
+    setAddingImage(true);
+    setImagePoolError(null);
+    try {
+      const res = await fetch("/api/saved-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url, label: newImageLabel }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setSavedImages((prev) => (prev.some((s) => s.url === created.url) ? prev : [...prev, created]));
+        setNewImageUrl("");
+        setNewImageLabel("");
+      } else {
+        setImagePoolError(t("savedImages.savedFailed"));
+      }
+    } catch {
+      setImagePoolError(t("savedImages.savedFailed"));
+    } finally {
+      setAddingImage(false);
+    }
+  }
+
+  async function removeSavedImage(id: number) {
+    try {
+      await fetch(`/api/saved-images?id=${id}`, { method: "DELETE" });
+      setSavedImages((prev) => prev.filter((s) => s.id !== id));
+    } catch {}
+  }
 
   const loadAllVideos = useCallback(async () => {
     setAllVideosLoading(true);
@@ -3508,6 +3570,14 @@ export default function Home() {
                               className="flex-1 min-w-[140px] rounded-lg border border-border bg-background px-2 py-1 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                             />
                             <button
+                              type="button"
+                              onClick={() => { setImagePickerTarget("add"); setImagePickerOpen(true); loadSavedImages(); }}
+                              className="shrink-0 rounded-lg border border-border px-2 py-1 text-[10px] text-muted hover:text-accent hover:border-accent/50 transition-all"
+                              title={t("savedImages.pickTitle")}
+                            >
+                              📁 {t("savedImages.pick")}
+                            </button>
+                            <button
                               type="submit"
                               disabled={!slideTitle.trim()}
                               className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all shrink-0"
@@ -3645,6 +3715,14 @@ export default function Home() {
                                     placeholder={t("cliplist.imageUrl")}
                                     className="flex-1 min-w-[140px] rounded-lg border border-border bg-background px-2 py-1 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
                                   />
+                                  <button
+                                    type="button"
+                                    onClick={() => { setImagePickerTarget("edit"); setImagePickerOpen(true); loadSavedImages(); }}
+                                    className="shrink-0 rounded-lg border border-border px-2 py-1 text-[10px] text-muted hover:text-accent hover:border-accent/50 transition-all"
+                                    title={t("savedImages.pickTitle")}
+                                  >
+                                    📁 {t("savedImages.pick")}
+                                  </button>
                                 </div>
                               </form>
                             ) : (
@@ -4266,6 +4344,97 @@ export default function Home() {
       {/* ── Video Playlist overlay ── */}
       {slideshowItems && (
         <VideoPlaylistPlayer items={slideshowItems} onClose={() => setSlideshowItems(null)} />
+      )}
+
+      {/* ── Saved-image picker ── */}
+      {imagePickerOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setImagePickerOpen(false)}>
+          <div className="w-full max-w-lg max-h-[80vh] flex flex-col rounded-xl border border-border bg-surface shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <h3 className="text-sm font-semibold">{t("savedImages.pickTitle")}</h3>
+              <button onClick={() => setImagePickerOpen(false)} className="text-muted hover:text-foreground transition-colors p-1 rounded" title={t("savedImages.close")}>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+              </button>
+            </div>
+
+            {/* Add-an-image form */}
+            <div className="px-5 py-3 border-b border-border">
+              <label className="text-[10px] font-medium text-muted uppercase tracking-wider mb-1 block">{t("savedImages.add")}</label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={newImageUrl}
+                  onChange={(e) => setNewImageUrl(e.target.value)}
+                  placeholder={t("savedImages.addHint")}
+                  className="flex-1 rounded-lg border border-border bg-background px-2 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                />
+                <input
+                  type="text"
+                  value={newImageLabel}
+                  onChange={(e) => setNewImageLabel(e.target.value)}
+                  placeholder={t("savedImages.labelPlaceholder")}
+                  className="w-28 rounded-lg border border-border bg-background px-2 py-1.5 text-xs focus:border-accent focus:ring-1 focus:ring-accent/20 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={addSavedImage}
+                  disabled={addingImage || !newImageUrl.trim()}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-[10px] font-medium text-white hover:bg-accent-hover disabled:opacity-50 transition-all shrink-0"
+                >
+                  {addingImage ? t("app.loading") : t("savedImages.addButton")}
+                </button>
+              </div>
+              {imagePoolError && <p className="text-[10px] text-danger mt-1">{imagePoolError}</p>}
+            </div>
+
+            {/* Image grid */}
+            <div className="flex-1 overflow-y-auto p-5">
+              {imagePoolLoading ? (
+                <p className="text-xs text-muted text-center py-8">{t("app.loading")}</p>
+              ) : savedImages.length === 0 ? (
+                <p className="text-xs text-muted text-center py-8">{t("savedImages.empty")}</p>
+              ) : (
+                <div className="grid grid-cols-3 gap-3">
+                  {savedImages.map((img) => (
+                    <div key={img.id} className="group relative rounded-lg border border-border overflow-hidden bg-background">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (imagePickerTarget === "add") setSlideImage(img.url);
+                          else setEditSlideImage(img.url);
+                          setImagePickerOpen(false);
+                        }}
+                        className="block w-full aspect-video"
+                        title={img.label || img.url}
+                      >
+                        <Image
+                          src={img.url}
+                          alt={img.label || "Saved image"}
+                          width={160}
+                          height={90}
+                          unoptimized={!isTrustedImageUrl(img.url)}
+                          className="w-full h-full object-cover"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.opacity = "0.2"; }}
+                        />
+                      </button>
+                      {img.label && (
+                        <div className="px-2 py-1 text-[9px] text-muted truncate">{img.label}</div>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeSavedImage(img.id)}
+                        className="absolute top-1 right-1 rounded bg-black/60 text-white/80 hover:text-white p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title={t("savedImages.remove")}
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Undo/redo history panel ── */}

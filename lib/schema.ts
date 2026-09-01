@@ -197,3 +197,17 @@ export const savedShareEmails = pgTable(
   },
   (t) => [uniqueIndex("saved_share_emails_user_email_unique").on(t.userId, t.email)]
 );
+
+export const savedImages = pgTable(
+  "saved_images",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    url: text("url").notNull(),
+    label: text("label"),
+    createdAt: text("created_at")
+      .notNull()
+      .$defaultFn(() => new Date().toISOString()),
+  },
+  (t) => [uniqueIndex("saved_images_user_url_unique").on(t.userId, t.url)]
+);
