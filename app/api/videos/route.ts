@@ -5,6 +5,36 @@ import { eq, count, desc, and, isNull } from "drizzle-orm";
 import { auth } from "@/auth";
 import { createVideo } from "@/lib/import-video";
 
+export async function getVideoCounts(db: ReturnType<typeof getDb>, videoId: number) {
+  const [annotation, scene, moment, transcript] = await Promise.allSettled([
+    db
+      .select({ value: count() })
+      .from(annotations)
+      .where(eq(annotations.videoId, videoId)),
+    db
+      .select({ value: count() })
+      .from(scenes)
+      .where(eq(scenes.videoId, videoId)),
+    db
+      .select({ value: count() })
+      .from(keyMoments)
+      .where(eq(keyMoments.videoId, videoId)),
+    db
+      .select()
+      .from(transcripts)
+      .where(eq(transcripts.videoId, videoId))
+      .limit(1),
+  ]);
+
+  const annotationCount =
+    annotation.status === "fulfilled" ? Number(annotation.value[0]?.value ?? 0) : 0;
+  const sceneCount = scene.status === "fulfilled" ? Number(scene.value[0]?.value ?? 0) : 0;
+  const momentCount = moment.status === "fulfilled" ? Number(moment.value[0]?.value ?? 0) : 0;
+  const hasTranscript = transcript.status === "fulfilled" ? transcript.value.length > 0 : false;
+
+  return { annotationCount, sceneCount, momentCount, hasTranscript };
+}
+
 export async function GET() {
   const session = await auth();
   if (!session?.user) {
@@ -24,16 +54,8 @@ export async function GET() {
 
   const enriched = await Promise.all(
     allVideos.map(async (v) => {
-      const annotationCount =
-        (await db.select({ value: count() }).from(annotations).where(eq(annotations.videoId, v.id)))[0]?.value ?? 0;
-      const sceneCount =
-        (await db.select({ value: count() }).from(scenes).where(eq(scenes.videoId, v.id)))[0]?.value ?? 0;
-      const momentCount =
-        (await db.select({ value: count() }).from(keyMoments).where(eq(keyMoments.videoId, v.id)))[0]?.value ?? 0;
-      const hasTranscript =
-        (await db.select().from(transcripts).where(eq(transcripts.videoId, v.id)).limit(1)).length > 0;
-
-      return { ...v, annotationCount, sceneCount, momentCount, hasTranscript };
+      const counts = await getVideoCounts(db, v.id);
+      return { ...v, ...counts };
     }),
   );
 
