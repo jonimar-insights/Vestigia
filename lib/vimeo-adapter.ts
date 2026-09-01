@@ -9,7 +9,7 @@
  * - Cache Vimeo state from SDK events.
  * - Never make readiness dependent on getDuration().
  * - Make autoplay resilient to browser/Vimeo startup stalls.
- * - Use muted autoplay as a fallback when unmuted autoplay stalls.
+ * - Keep audio unmuted: the playlist never auto-mutes a Vimeo clip.
  * - Never let an asynchronous Vimeo operation block the playlist forever.
  * - Protect against stale async loadVideo() operations.
  * - Clean up every timer and callback on destroy().
@@ -108,13 +108,7 @@ const READY_TIMEOUT_MS = 8000;
 const WATCHDOG_INTERVAL_MS = 500;
 
 /**
- * After this amount of real time without progress we force muted
- * autoplay to encourage Vimeo/browser buffering.
- */
-const WARM_MUTE_AFTER_MS = 2500;
-
-/**
- * Give Vimeo roughly 10 seconds to begin actual playback.
+ * Give Vimeo roughly 10 seconds to being actual playback.
  */
 const WATCHDOG_MAX_ATTEMPTS = 20;
 
@@ -219,12 +213,6 @@ export class VimeoAdapter implements SyncPlayerInterface {
   private stalledMs = 0;
 
   /**
-   * True when muted autoplay was automatically used to warm the
-   * Vimeo buffer.
-   */
-  private warmMuted = false;
-
-  /**
    * True when the user explicitly muted the player.
    *
    * The autoplay watchdog must never automatically unmute in this
@@ -293,7 +281,6 @@ export class VimeoAdapter implements SyncPlayerInterface {
     this.intendPlay = true;
     this.playTarget = this.time;
     this.stalledMs = 0;
-    this.warmMuted = false;
 
     this.clearResumeTimer();
     this.clearWatchdog();
@@ -337,59 +324,13 @@ export class VimeoAdapter implements SyncPlayerInterface {
         dbg("real playback progress detected", {
           time: this.time,
           target: this.playTarget,
-          warmMuted: this.warmMuted,
         });
-
-        /**
-         * If muted autoplay was only used as a warm-up mechanism,
-         * restore sound after actual playback begins.
-         */
-        if (this.warmMuted && !this.userMuted) {
-          this.warmMuted = false;
-
-          this.p
-            .setMuted?.(false)
-            .then(() => {
-              dbg("unmuted after playback progress");
-            })
-            .catch((error) => {
-              dbgWarn("failed to restore audio after muted autoplay", error);
-            });
-        }
 
         this.stopAutoPlay();
         return;
       }
 
       this.stalledMs += WATCHDOG_INTERVAL_MS;
-
-      /**
-       * After 2.5 seconds without actual progress, use muted autoplay.
-       *
-       * Browser autoplay policies generally allow muted playback even
-       * when unmuted autoplay is blocked.
-       */
-      if (
-        this.stalledMs >= WARM_MUTE_AFTER_MS &&
-        !this.warmMuted &&
-        !this.userMuted
-      ) {
-        this.warmMuted = true;
-
-        dbg("autoplay stalled; forcing muted Vimeo playback");
-
-        this.p
-          .setMuted?.(true)
-          .then(() => {
-            if (this.destroyed || !this.intendPlay) return;
-
-            dbg("Vimeo muted for autoplay warm-up");
-            this.issuePlay();
-          })
-          .catch((error) => {
-            dbgWarn("failed to mute Vimeo during autoplay warm-up", error);
-          });
-      }
 
       this.watchdogBudget -= 1;
 
@@ -398,7 +339,6 @@ export class VimeoAdapter implements SyncPlayerInterface {
           time: this.time,
           target: this.playTarget,
           state: this.state,
-          warmMuted: this.warmMuted,
         });
 
         this.stopAutoPlay();
@@ -411,7 +351,6 @@ export class VimeoAdapter implements SyncPlayerInterface {
         state: this.state,
         stalledMs: this.stalledMs,
         budget: this.watchdogBudget,
-        warmMuted: this.warmMuted,
       });
 
       this.issuePlay();
@@ -968,10 +907,9 @@ export class VimeoAdapter implements SyncPlayerInterface {
     /**
      * Audio should always come back on when the playlist moves to the
      * next clip, unless the user explicitly muted. A previous clip's
-     * muted-autoplay warm-up must never silence the new video.
+     * stale mute must never silence the new video.
      */
     if (!this.userMuted) {
-      this.warmMuted = false;
       this.p.setMuted?.(false).catch(() => {});
     }
 
@@ -1167,7 +1105,6 @@ export class VimeoAdapter implements SyncPlayerInterface {
     if (this.destroyed) return;
 
     this.userMuted = true;
-    this.warmMuted = false;
 
     dbg("user mute");
 
@@ -1190,13 +1127,12 @@ export class VimeoAdapter implements SyncPlayerInterface {
    * Explicit user unmute.
    *
    * Once the user unmutes, the adapter is again allowed to use
-   * its muted-autoplay warm-up strategy if required.
+   * its muted-autoplay strategy if required.
    */
   unMute(): void {
     if (this.destroyed) return;
 
     this.userMuted = false;
-    this.warmMuted = false;
 
     dbg("user unmute");
 
