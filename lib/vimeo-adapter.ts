@@ -135,6 +135,26 @@ const MUTED_FALLBACK_AFTER_MS = 1500;
  */
 const PROGRESS_EPSILON = 0.01;
 
+/**
+ * If a loadVideo() promise neither resolves nor rejects within this window
+ * (Vimeo's embed can go quiet during a video swap on a skipped clip), stop
+ * waiting: deliver the queued playback intent to the autoplay watchdog and
+ * schedule a bounded reload. Prevents a skipped-to Vimeo clip from sitting
+ * frozen forever waiting on a promise that never settles.
+ */
+const LOAD_RESOLVE_TIMEOUT_MS = 10000;
+
+/**
+ * How many full loadVideo() attempts may be made for a single requested
+ * clip (the initial attempt + retries) before giving up.
+ */
+const LOAD_MAX_RETRIES = 3;
+
+/**
+ * Backoff before re-issuing a rejected / stalled loadVideo().
+ */
+const LOAD_RETRY_DELAY_MS = 600;
+
 /* -------------------------------------------------------------------------- */
 /* Debugging                                                                  */
 /* -------------------------------------------------------------------------- */
@@ -227,6 +247,30 @@ export class VimeoAdapter implements SyncPlayerInterface {
    */
   private loadGeneration = 0;
 
+  /**
+   * When a loadVideo() is in flight, this fires if the promise does not
+   * settle in time so the adapter stops waiting (see LOAD_RESOLVE_TIMEOUT_MS).
+   * It is also reused as the retry backoff timer.
+   */
+  private loadTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * How many load attempts remain for the current requested clip.
+   */
+  private loadRetries = 0;
+
+  /**
+   * The video the current load/retry is trying to bring in. Used by the
+   * stall/retry machinery so a superseded pendingLoad can be recognized.
+   */
+  private pendingLoad: { videoId: string; startSeconds: number } | null = null;
+
+  /**
+   * How long the load watchdog waits for a settling loadVideo() promise.
+   * Configurable for tests; defaults to LOAD_RESOLVE_TIMEOUT_MS.
+   */
+  private readonly loadResolveTimeoutMs: number;
+
   /* Autoplay watchdog ------------------------------------------------------ */
 
   private intendPlay = false;
@@ -278,6 +322,44 @@ export class VimeoAdapter implements SyncPlayerInterface {
       clearTimeout(this.readyTimer);
       this.readyTimer = null;
     }
+  }
+
+  private clearLoadTimer() {
+    if (this.loadTimer) {
+      clearTimeout(this.loadTimer);
+      this.loadTimer = null;
+    }
+  }
+
+  /**
+   * Arm (or re-arm) the load watchdog for the given load generation.
+   *
+   * If the loadVideo() promise has still not settled by the time this fires,
+   * stop waiting, deliver the queued playback intent to the autoplay watchdog,
+   * and schedule a bounded reload. The generation guard makes a timer for a
+   * superseded video load a no-op.
+   */
+  private armLoadTimer(generation: number) {
+    this.clearLoadTimer();
+
+    this.loadTimer = setTimeout(() => {
+      this.loadTimer = null;
+
+      if (this.destroyed || generation !== this.loadGeneration) return;
+
+      this.loading = false;
+
+      dbgWarn("Vimeo loadVideo() stalled; forcing queued playback + retry", {
+        generation,
+      });
+
+      if (this.pendingPlay) {
+        this.pendingPlay = false;
+        this.beginPlay();
+      }
+
+      this.scheduleLoadRetry();
+    }, this.loadResolveTimeoutMs);
   }
 
   /**
@@ -665,8 +747,14 @@ export class VimeoAdapter implements SyncPlayerInterface {
   /* Constructor / readiness                                                  */
   /* ------------------------------------------------------------------------ */
 
-  constructor(player: MinimalVimeoPlayer, initialSpec?: string | null) {
+  constructor(
+    player: MinimalVimeoPlayer,
+    initialSpec?: string | null,
+    options?: { loadResolveTimeoutMs?: number }
+  ) {
     this.p = player;
+    this.loadResolveTimeoutMs =
+      options?.loadResolveTimeoutMs ?? LOAD_RESOLVE_TIMEOUT_MS;
 
     /**
      * When the player is created over an iframe whose src already boots a
@@ -1023,6 +1111,10 @@ export class VimeoAdapter implements SyncPlayerInterface {
         }
       );
 
+      this.clearLoadTimer();
+      this.loadRetries = 0;
+      this.pendingLoad = null;
+
       return;
     }
 
@@ -1036,6 +1128,10 @@ export class VimeoAdapter implements SyncPlayerInterface {
         parsedId: id,
         hash,
       });
+
+      this.clearLoadTimer();
+      this.loadRetries = 0;
+      this.pendingLoad = null;
 
       return;
     }
@@ -1061,6 +1157,14 @@ export class VimeoAdapter implements SyncPlayerInterface {
         videoId,
         startSeconds: start,
       });
+
+      /**
+       * The target video is already confirmed loaded, so any pending retry
+       * of a previous (failed) load for another video is pointless.
+       */
+      this.clearLoadTimer();
+      this.loadRetries = 0;
+      this.pendingLoad = null;
 
       if (start > 0) {
         this.p
@@ -1089,6 +1193,14 @@ export class VimeoAdapter implements SyncPlayerInterface {
       return;
     }
 
+    /**
+     * Fresh public request: reset the retry budget and record the target so
+     * the stall/retry machinery can recognize a superseded request.
+     */
+    this.loadRetries = 0;
+    this.pendingLoad = { videoId, startSeconds: start };
+    this.armLoadTimer(generation);
+
     this.loading = true;
 
     const spec: { id: number; h?: string } = {
@@ -1101,101 +1213,254 @@ export class VimeoAdapter implements SyncPlayerInterface {
 
     this.p
       .loadVideo(spec)
-      .then(() => {
-        /**
-         * Ignore completion from an old video load if a newer
-         * loadVideoById() has already started.
-         */
-        if (this.destroyed) return;
+      .then(() => this.onLoadResolved(generation, videoId, start))
+      .catch((error) => this.onLoadRejected(generation, videoId, start, error));
+  }
 
-        if (generation !== this.loadGeneration) {
-          dbg("ignoring stale Vimeo load resolution", {
-            generation,
-            currentGeneration: this.loadGeneration,
-          });
+  /* ------------------------------------------------------------------------ */
+  /* Load resolution / retry                                                   */
+  /* ------------------------------------------------------------------------ */
 
-          return;
-        }
+  /**
+   * Handle a successful loadVideo() for the current generation.
+   */
+  private onLoadResolved(generation: number, videoId: string, start: number) {
+    /**
+     * Ignore completion from an old video load if a newer
+     * loadVideoById() has already started.
+     */
+    if (this.destroyed) return;
 
-        dbg("Vimeo loadVideo() resolved", {
-          videoId,
-          startSeconds: start,
-          generation,
-        });
-
-        this.loading = false;
-
-        /**
-         * This video is now the one physically loaded in the player, so a
-         * later loadVideoById() for the SAME spec can skip the reload.
-         */
-        this.loadedSpec = videoId;
-
-        /**
-         * Keep the synchronous cache aligned with the requested
-         * clip start while Vimeo settles.
-         */
-        this.time = start;
-
-        /**
-         * Do NOT await this seek.
-         *
-         * Vimeo can leave setCurrentTime() pending immediately after
-         * loadVideo(). Awaiting it can prevent queued playback from
-         * ever starting.
-         */
-        if (start > 0) {
-          this.p
-            .setCurrentTime(start)
-            .then(() => {
-              if (this.destroyed) return;
-
-              dbg("post-load Vimeo seek resolved", start);
-            })
-            .catch((error) => {
-              dbgWarn("post-load Vimeo seek rejected", {
-                start,
-                error,
-              });
-            });
-        }
-
-        /**
-         * If the playlist requested playback while the video was
-         * loading, start the autoplay watchdog now.
-         */
-        if (this.pendingPlay) {
-          this.pendingPlay = false;
-
-          dbg("starting queued playback after Vimeo load");
-
-          this.beginPlay();
-        }
-      })
-      .catch((error) => {
-        if (this.destroyed) return;
-
-        if (generation !== this.loadGeneration) {
-          dbg("ignoring stale Vimeo load rejection", {
-            generation,
-            currentGeneration: this.loadGeneration,
-          });
-
-          return;
-        }
-
-        this.loading = false;
-        this.pendingPlay = false;
-
-        dbgError("Vimeo loadVideo() rejected", {
-          videoId,
-          startSeconds: start,
-          generation,
-          error,
-        });
-
-        this.stopAutoPlay();
+    if (generation !== this.loadGeneration) {
+      dbg("ignoring stale Vimeo load resolution", {
+        generation,
+        currentGeneration: this.loadGeneration,
       });
+
+      return;
+    }
+
+    dbg("Vimeo loadVideo() resolved", {
+      videoId,
+      startSeconds: start,
+      generation,
+    });
+
+    this.loading = false;
+    this.clearLoadTimer();
+    this.loadRetries = 0;
+    this.pendingLoad = null;
+
+    /**
+     * This video is now the one physically loaded in the player, so a
+     * later loadVideoById() for the SAME spec can skip the reload.
+     */
+    this.loadedSpec = videoId;
+
+    /**
+     * Keep the synchronous cache aligned with the requested
+     * clip start while Vimeo settles.
+     */
+    this.time = start;
+
+    /**
+     * Do NOT await this seek.
+     *
+     * Vimeo can leave setCurrentTime() pending immediately after
+     * loadVideo(). Awaiting it can prevent queued playback from
+     * ever starting.
+     */
+    if (start > 0) {
+      this.p
+        .setCurrentTime(start)
+        .then(() => {
+          if (this.destroyed) return;
+
+          dbg("post-load Vimeo seek resolved", start);
+        })
+        .catch((error) => {
+          dbgWarn("post-load Vimeo seek rejected", {
+            start,
+            error,
+          });
+        });
+    }
+
+    /**
+     * If the playlist requested playback while the video was
+     * loading, start the autoplay watchdog now.
+     */
+    if (this.pendingPlay) {
+      this.pendingPlay = false;
+
+      dbg("starting queued playback after Vimeo load");
+
+      this.beginPlay();
+    }
+  }
+
+  /**
+   * Handle a rejected loadVideo() for the current generation.
+   *
+   * Vimeo's promise can reject while the underlying embed is still
+   * bootstrapping the new video (or because a swapped load landed while
+   * the player was busy). The rejection therefore must NOT abandon the
+   * clip: any queued play intent is delivered to the autoplay watchdog
+   * (which retries and, under autoplay policy, falls back to muted
+   * playback), and a bounded reload is scheduled to bring the right
+   * video in properly.
+   */
+  private onLoadRejected(
+    generation: number,
+    videoId: string,
+    start: number,
+    error: unknown
+  ) {
+    if (this.destroyed) return;
+
+    if (generation !== this.loadGeneration) {
+      dbg("ignoring stale Vimeo load rejection", {
+        generation,
+        currentGeneration: this.loadGeneration,
+      });
+
+      return;
+    }
+
+    this.loading = false;
+    this.clearLoadTimer();
+
+    dbgError("Vimeo loadVideo() rejected", {
+      videoId,
+      startSeconds: start,
+      generation,
+      error,
+    });
+
+    /**
+     * Keep the autoplay intent alive: the watchdog may coax what is
+     * actually bootstrapping in the embed, even though the promise broke.
+     */
+    if (this.pendingPlay) {
+      this.pendingPlay = false;
+      this.beginPlay();
+    }
+
+    this.scheduleLoadRetry();
+  }
+
+  /**
+   * Re-issue a loadVideo() after a stalled/rejected attempt.
+   *
+   * A fresh autoplay intent is queued behind the retried load so playback
+   * resumes the moment the video is in, and the load watchdog is re-armed
+   * so a stuck retry can't leave the clip frozen.
+   */
+  private issueLoadRetry(spec: { videoId: string; startSeconds: number }) {
+    if (this.destroyed) return;
+
+    const { id, hash } = parseVimeoSpec(spec.videoId);
+
+    const numericId = Number(id);
+
+    if (!Number.isFinite(numericId) || numericId <= 0) return;
+
+    this.stopAutoPlay();
+
+    if (!this.p.loadVideo) {
+      dbgError("Vimeo player lost loadVideo() before the retry");
+      this.loading = false;
+      return;
+    }
+
+    /**
+     * A previous stalled attempt may have engaged the muted-autoplay
+     * fallback; the retried video must come back in unmuted (unless the
+     * user explicitly muted).
+     */
+    if (!this.userMuted) {
+      this.autoMuted = false;
+      this.p.setMuted?.(false).catch(() => {});
+    }
+
+    this.pendingPlay = true;
+    this.intendPlay = true;
+
+    const generation = ++this.loadGeneration;
+
+    this.pendingLoad = { ...spec };
+    this.loading = true;
+    this.armLoadTimer(generation);
+
+    dbgWarn("re-issuing Vimeo loadVideo()", {
+      videoId: spec.videoId,
+      startSeconds: spec.startSeconds,
+      generation,
+    });
+
+    const retrySpec: { id: number; h?: string } = { id: numericId };
+
+    if (hash) {
+      retrySpec.h = hash;
+    }
+
+    this.p
+      .loadVideo(retrySpec)
+      .then(() => this.onLoadResolved(generation, spec.videoId, spec.startSeconds))
+      .catch((error) =>
+        this.onLoadRejected(generation, spec.videoId, spec.startSeconds, error)
+      );
+  }
+
+  /**
+   * Schedule a bounded reload after a stalled/rejected loadVideo().
+   *
+   * The retry is skipped when it would be pointless or unwanted: the
+   * adapter was destroyed, a newer request superseded this one, the user
+   * cancelled autoplay (manual pause / skip), the media somehow started
+   * progressing, or the clip already ended.
+   */
+  private scheduleLoadRetry() {
+    const spec = this.pendingLoad;
+
+    if (!spec || this.destroyed) return;
+
+    if (this.loadRetries >= LOAD_MAX_RETRIES) {
+      dbgWarn("Vimeo loadVideo() retry budget exhausted", spec);
+      this.loadRetries = 0;
+      return;
+    }
+
+    this.loadRetries += 1;
+
+    this.clearLoadTimer();
+
+    dbg("scheduling Vimeo loadVideo() retry", {
+      videoId: spec.videoId,
+      attempt: this.loadRetries,
+    });
+
+    this.loadTimer = setTimeout(() => {
+      this.loadTimer = null;
+
+      if (this.destroyed || this.pendingLoad !== spec) return;
+
+      /**
+       * Retrying is only useful while we still intend to autoplay and the
+       * media is not already moving (or finished). A manual pause / skip
+       * cancels intendPlay, so no retry.
+       */
+      if (
+        !this.intendPlay ||
+        this.progressed() ||
+        this.state === PLAYER_ENDED
+      ) {
+        this.loadRetries = 0;
+        return;
+      }
+
+      this.issueLoadRetry(spec);
+    }, LOAD_RETRY_DELAY_MS);
   }
 
   cueVideoById(videoId: string, startSeconds: number): void {
@@ -1318,6 +1583,7 @@ export class VimeoAdapter implements SyncPlayerInterface {
     this.stopAutoPlay();
 
     this.clearReadyTimer();
+    this.clearLoadTimer();
 
     this.pendingPlay = false;
     this.loading = false;

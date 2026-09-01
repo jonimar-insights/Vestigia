@@ -254,6 +254,53 @@ async function main() {
   assert.equal(q12.length, beforeLen + 2, "fast path re-enabled after the reload completed");
   assert.equal(a12.getCurrentTime(), 50, "same-video fast path works after reloading");
 
+// ── 13. loadVideo() REJECT must NOT abandon a skipped clip: the queued play
+//       intent is delivered to the watchdog immediately (so play is re-issued
+//       and the muted fallback can engage) and a bounded reload re-issues
+//       loadVideo() to bring the right video in ──
+  const p13 = makeFakePlayer();
+  const a13 = new VimeoAdapter(p13);
+  p13.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  let plays13 = 0;
+  p13.play = async () => { plays13++; p13.emit("play"); };
+  const q13 = (p13 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  a13.loadVideoById("99999", 0); // full load
+  a13.playVideo();               // play queues behind the load
+  assert.equal(q13.length, 1, "load issued");
+  q13[0].reject(new Error("embed busy")); // load REJECTS mid-swap
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(plays13 > 0, "play attempts continue after load rejection (clip is not abandoned)");
+  assert.equal(q13.length, 1, "no immediate double load before the backoff");
+  await new Promise((r) => setTimeout(r, 700)); // > LOAD_RETRY_DELAY_MS
+  assert.ok(q13.length >= 2, "retry re-issues loadVideo after a rejected load");
+  q13[1].resolve(); // retried load succeeds
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(plays13 >= 2, "playback resumes after the retried load resolves");
+  assert.equal(q13.length, 2, "no further redundant loads after a successful retry");
+
+  // ── 14. loadVideo() HANG (never resolves nor rejects) must not freeze the
+  //       skipped clip forever: after the configurable stall timeout the
+  //       queued play is delivered and a bounded reload is scheduled ──
+  const p14 = makeFakePlayer();
+  const a14 = new VimeoAdapter(p14, undefined, { loadResolveTimeoutMs: 120 });
+  p14.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  let plays14 = 0;
+  p14.play = async () => { plays14++; p14.emit("play"); };
+  const q14 = (p14 as unknown as { _loadQueue: typeof loadQueue6 })._loadQueue;
+  a14.loadVideoById("55555", 0);
+  a14.playVideo();
+  assert.equal(q14.length, 1, "load issued");
+  // leave the load promise pending — it never settles
+  await new Promise((r) => setTimeout(r, 300)); // > 120ms stall timeout
+  assert.ok(plays14 > 0, "queued play is delivered after the load stall timeout");
+  await new Promise((r) => setTimeout(r, 700)); // > LOAD_RETRY_DELAY_MS
+  assert.ok(q14.length >= 2, "stalled load is retried");
+  q14[1].resolve();
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(plays14 >= 2, "playback resumes after the retried load resolves");
+
   // ── 8. loadVideoById with a privacy hash passes {id, h} to the SDK ──
   const p8 = makeFakePlayer();
   const a8 = new VimeoAdapter(p8);
