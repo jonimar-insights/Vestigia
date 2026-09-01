@@ -119,6 +119,17 @@ const WATCHDOG_MAX_ATTEMPTS = 20;
 const RESUME_DELAY_MS = 350;
 
 /**
+ * After this many ms without real playback progress, the watchdog
+ * falls back to MUTED autoplay. The browser always permits silent
+ * autoplay, so this coaxes a blocked (autoplay-policy) Vimeo video
+ * into actually buffering — then it unmutes once progress is seen.
+ *
+ * Happens well before WATCHDOG_MAX_ATTEMPTS (10s) so there is time
+ * left to detect progress and restore sound.
+ */
+const MUTED_FALLBACK_AFTER_MS = 1500;
+
+/**
  * Do not consider extremely tiny floating-point changes meaningful
  * playback progress.
  */
@@ -220,6 +231,15 @@ export class VimeoAdapter implements SyncPlayerInterface {
    */
   private userMuted = false;
 
+  /**
+   * True when the autoplay watchdog silenced the player via its
+   * muted-autoplay fallback (blocked unmuted autoplay).
+   *
+   * Unlike {@link userMuted}, this is never a user choice, so the
+   * adapter is free to unmute as soon as playback makes progress.
+   */
+  private autoMuted = false;
+
   /* ------------------------------------------------------------------------ */
   /* Timer management                                                         */
   /* ------------------------------------------------------------------------ */
@@ -259,6 +279,23 @@ export class VimeoAdapter implements SyncPlayerInterface {
 
     this.watchdogBudget = 0;
     this.stalledMs = 0;
+
+    /**
+     * If the muted-autoplay fallback had silenced the player, restore
+     * sound now that automatic playback attempt has ended (e.g. the
+     * user paused, the clip ended, or a new clip replaced it). A user
+     * mute is untouched.
+     */
+    if (this.autoMuted && !this.userMuted) {
+      this.autoMuted = false;
+      this.p
+        .setMuted?.(false)
+        .catch((error: unknown) => {
+          dbgWarn("auto-unmute after stop rejected", error);
+        });
+    } else {
+      this.autoMuted = false;
+    }
   }
 
   /* ------------------------------------------------------------------------ */
@@ -326,6 +363,21 @@ export class VimeoAdapter implements SyncPlayerInterface {
           target: this.playTarget,
         });
 
+        /**
+         * If the muted-autoplay fallback silenced this video, restore
+         * sound as soon as playback is actually moving. Never do this
+         * when the user muted.
+         */
+        if (this.autoMuted && !this.userMuted) {
+          this.autoMuted = false;
+          dbg("unmuting after muted-autoplay fallback produced progress");
+          this.p
+            .setMuted?.(false)
+            .catch((error: unknown) => {
+              dbgWarn("auto-unmute rejected", error);
+            });
+        }
+
         this.stopAutoPlay();
         return;
       }
@@ -352,6 +404,29 @@ export class VimeoAdapter implements SyncPlayerInterface {
         stalledMs: this.stalledMs,
         budget: this.watchdogBudget,
       });
+
+      /**
+       * Unmuted autoplay may be blocked by the browser's autoplay
+       * policy (the skipped-to clip has no user gesture). Once the
+       * clip has been silent-stalled long enough, fall back to MUTED
+       * autoplay — silent autoplay is always permitted — so the video
+       * actually buffers. Progress detection above then unmutes it.
+       *
+       * Never mutes a video the user explicitly silenced.
+       */
+      if (
+        !this.autoMuted &&
+        !this.userMuted &&
+        this.stalledMs >= MUTED_FALLBACK_AFTER_MS
+      ) {
+        this.autoMuted = true;
+        dbgWarn("autoplay blocked; falling back to muted autoplay");
+        this.p
+          .setMuted?.(true)
+          .catch((error: unknown) => {
+            dbgWarn("auto-mute rejected", error);
+          });
+      }
 
       this.issuePlay();
     }, WATCHDOG_INTERVAL_MS);

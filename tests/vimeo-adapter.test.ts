@@ -10,6 +10,8 @@ import { VimeoAdapter, type MinimalVimeoPlayer } from "../lib/vimeo-adapter";
 interface FakePlayer extends MinimalVimeoPlayer {
   emit(event: string, data?: unknown): void;
   resolveReady(): void;
+  _muted: boolean;
+  _mutedHistory: boolean[];
 }
 
 function makeFakePlayer() {
@@ -18,7 +20,10 @@ function makeFakePlayer() {
   // loadVideo is deferred so tests can play with the pendingPlay/auto-resume
   // settle race deterministically.
   const loadQueue: Array<{ id: number; h?: string; resolve: () => void; reject: (e?: unknown) => void }> = [];
+  const mutedHistory: boolean[] = [];
   const player: FakePlayer = {
+    _muted: false,
+    _mutedHistory: mutedHistory,
     on(event, cb) {
       if (!handlers.has(event)) handlers.set(event, []);
       handlers.get(event)!.push(cb);
@@ -37,6 +42,7 @@ function makeFakePlayer() {
     async loadVideo(spec: { id: number; h?: string }) {
       return new Promise<void>((resolve, reject) => { loadQueue.push({ id: spec.id, h: spec.h, resolve, reject }); });
     },
+    async setMuted(m: boolean) { mutedHistory.push(m); (player as unknown as { _muted: boolean })._muted = m; },
     emit(event, data) { for (const cb of handlers.get(event) ?? []) cb(data); },
     resolveReady() { readyResolve?.(); },
   };
@@ -172,6 +178,35 @@ async function main() {
   p10.emit("pause");
   await new Promise((r) => setTimeout(r, 450));
   assert.equal(plays10, stoppedAt, "no re-play after progress achieved + pause");
+
+  // ── 11. autoplay-policy fallback: when unmuted play is silently blocked, the
+  //       watchdog mutes to coax the browser into allowing playback, then
+  //       UNMUTES as soon as real progress is detected ──
+  const p11 = makeFakePlayer();
+  const a11 = new VimeoAdapter(p11);
+  p11.resolveReady();
+  await new Promise((r) => setTimeout(r, 10));
+  let plays11 = 0;
+  p11.play = async () => { plays11++; p11.emit("play"); };
+  const mutedHistory = p11._mutedHistory;
+  mutedHistory.length = 0; // ignore the initial per-load unmute (no load here)
+  a11.playVideo(); // beginPlay, target 0
+  // Stall long enough to cross MUTED_FALLBACK_AFTER_MS (500ms ticks, 1.5s floor)
+  await new Promise((r) => setTimeout(r, 2100));
+  assert.ok(mutedHistory.includes(true), `watchdog mutes after blocked stall (history=${mutedHistory.join(",")})`);
+  assert.ok(plays11 >= 1, `watchdog re-issues play during blocked autoplay (got ${plays11})`);
+  const mutedBefore = p11._muted;
+  assert.ok(mutedBefore, "player is muted during fallback");
+  // Now media actually progresses → watchdog must unmute and stop
+  p11.emit("timeupdate", { seconds: 2.5, duration: 62 });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(p11._muted, false, "auto-unmute once playback makes progress");
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.equal(p11._muted, false, "stays unmuted after progress");
+  // A manual pause must also keep the clip unmuted (fallback not sticky)
+  p11.emit("pause");
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(p11._muted, false, "manual pause does not re-mute");
 
   // ── 8. loadVideoById with a privacy hash passes {id, h} to the SDK ──
   const p8 = makeFakePlayer();
