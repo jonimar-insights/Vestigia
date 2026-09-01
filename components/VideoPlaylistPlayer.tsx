@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { isTrustedImageUrl } from "@/lib/image-host";
@@ -11,6 +11,7 @@ import {
   YouTubeAdapter,
   type YTPlayer,
   type YouTubeIFramePlayer,
+  type YouTubeSphericalProperties,
 } from "@/lib/youtube-adapter";
 
 declare global {
@@ -123,6 +124,13 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
   const [youtubeIs360, setYoutubeIs360] = useState(false);
+  // 360° camera interaction state (see the 360 layer below).
+  const [orientationSensor, setOrientationSensor] = useState(false);
+  // Last applied/known spherical values so a drag is relative to the current
+  // viewpoint instead of resetting to yaw=0/pitch=0 on every gesture.
+  const lastSphericalRef = useRef<YouTubeSphericalProperties>({});
+  const drag360Ref = useRef<{ pointerId: number; lastX: number; lastY: number; baseYaw: number; basePitch: number } | null>(null);
+  const sphericalLayerRef = useRef<HTMLDivElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -333,6 +341,62 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     if (videoIdsRef.current.get(cur.videoId)) return playerRef.current;
     if (html5SrcsRef.current.get(cur.videoId)) return html5PlayerRef.current;
     return null;
+  }
+
+  // ── 360° camera layer ───────────────────────────────────────────
+  // Vestigia drives the spherical camera (yaw/pitch via drag, FOV via
+  // wheel). YouTube still decodes/renders the 360 stream; we only steer
+  // the viewpoint through the official setSphericalProperties API.
+  function syncSpherical(patch: YouTubeSphericalProperties) {
+    const merged = { ...lastSphericalRef.current, ...patch };
+    lastSphericalRef.current = merged;
+    try {
+      playerRef.current?.setSphericalProperties(merged);
+      console.info("[Vestigia][YouTube]", { reason: "spherical-set", yaw: merged.yaw, pitch: merged.pitch, fov: merged.fov });
+    } catch {}
+  }
+
+  function handle360PointerDown(e: ReactPointerEvent<HTMLDivElement>) {
+    if (!youtubeIs360) return;
+    e.preventDefault();
+    const ap = playerRef.current;
+    if (!ap) return;
+    const current = ap.getSphericalProperties?.() ?? lastSphericalRef.current;
+    lastSphericalRef.current = { ...lastSphericalRef.current, ...current };
+    drag360Ref.current = {
+      pointerId: e.pointerId,
+      lastX: e.clientX,
+      lastY: e.clientY,
+      baseYaw: lastSphericalRef.current.yaw ?? 0,
+      basePitch: lastSphericalRef.current.pitch ?? 0,
+    };
+    try { (e.currentTarget as HTMLDivElement).setPointerCapture?.(e.pointerId); } catch {}
+  }
+
+  function handle360PointerMove(e: ReactPointerEvent<HTMLDivElement>) {
+    const d = drag360Ref.current;
+    if (!d) return;
+    const dx = e.clientX - d.lastX;
+    const dy = e.clientY - d.lastY;
+    if (dx === 0 && dy === 0) return;
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+    // Sensitivities chosen so a full drag ≈ multiple viewport rotations;
+    // drag right/up = yaw+/pitch+. The adapter clamps/normalizes ranges.
+    const yaw = d.baseYaw + dx * 0.35;
+    const pitch = d.basePitch - dy * 0.25;
+    syncSpherical({ yaw, pitch });
+  }
+
+  function handle360PointerUp(e: ReactPointerEvent<HTMLDivElement>) {
+    if (drag360Ref.current?.pointerId === e.pointerId) drag360Ref.current = null;
+    try { (e.currentTarget as HTMLDivElement).releasePointerCapture?.(e.pointerId); } catch {}
+  }
+
+  function toggleOrientationSensor() {
+    const next = !orientationSensor;
+    setOrientationSensor(next);
+    syncSpherical({ enableOrientationSensor: next });
   }
 
   // Pause both players whenever the current item can't play (slide, social,
@@ -712,6 +776,23 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     // effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoIds]);
+
+  // Native wheel listener for the 360° layer: React's onWheel is passive,
+  // so preventDefault (blocking page scroll while zooming the spherical
+  // camera) needs a non-passive native listener.
+  useEffect(() => {
+    const el = sphericalLayerRef.current;
+    if (!el || !youtubeIs360) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!youtubeIs360) return;
+      const currentFov = lastSphericalRef.current.fov ?? 100;
+      const fov = Math.min(120, Math.max(30, currentFov + (e.deltaY > 0 ? -5 : 5)));
+      syncSpherical({ fov });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [youtubeIs360]);
 
   // Load the current clip into the Vimeo player when it's a Vimeo video.
   useEffect(() => {
@@ -1206,8 +1287,33 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             <div className="absolute inset-0 overflow-hidden" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
               <div ref={playerContainerRef} className="w-full h-full" />
               {youtubeIs360 && (
-                <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+                <div className="pointer-events-none absolute right-2 top-2 z-20 rounded bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
                   360°
+                </div>
+              )}
+              {/* 360° camera layer: drag steers yaw/pitch, wheel zooms FOV.
+                  Leaves the bottom strip (~56px) clickable so YouTube's own
+                  playback controls (timeline, play/pause, settings, fullscreen)
+                  remain usable. */}
+              {youtubeIs360 && activeKind === "youtube" && !ended && (
+                <div
+                  ref={sphericalLayerRef}
+                  className="absolute inset-x-0 top-0 bottom-14 z-10 cursor-grab active:cursor-grabbing touch-none select-none"
+                  onPointerDown={handle360PointerDown}
+                  onPointerMove={handle360PointerMove}
+                  onPointerUp={handle360PointerUp}
+                  onPointerCancel={handle360PointerUp}
+                >
+                  <span className="pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white/80 transition-opacity whitespace-nowrap">
+                    {orientationSensor ? "gyro · drag to look · wheel to zoom" : "drag to look · wheel to zoom"}
+                  </span>
+                  <button
+                    onClick={toggleOrientationSensor}
+                    className="pointer-events-auto absolute left-2 top-2 rounded bg-black/50 px-2 py-0.5 text-[10px] font-medium text-white/60 hover:text-white hover:bg-black/70 transition-colors"
+                    title={orientationSensor ? "Disable device-orientation (gyroscope) control" : "Enable device-orientation (gyroscope) control on mobile"}
+                  >
+                    {orientationSensor ? "gyro: on" : "gyro: off"}
+                  </button>
                 </div>
               )}
             </div>

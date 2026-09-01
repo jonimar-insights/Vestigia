@@ -157,6 +157,17 @@ export interface YTPlayer {
   ): void;
 
   /**
+   * Toggle the device-orientation sensor for spherical videos.
+   *
+   * Supported mobile browsers use gyroscope data to steer the
+   * viewpoint; desktop devices simply ignore it. No-op for
+   * ordinary rectangular videos.
+   */
+  enableOrientationSensor(
+    enabled: boolean
+  ): void;
+
+  /**
    * Return the underlying YouTube URL when available.
    */
   getVideoUrl(): string | null;
@@ -666,6 +677,20 @@ export class YouTubeAdapter
     } catch {
       // Ignore unsupported-device errors.
     }
+  }
+
+  /**
+   * Toggle the device-orientation sensor.
+   *
+   * Delegates to setSphericalProperties, which the raw player
+   * accepts for spherical videos on capable devices.
+   */
+  enableOrientationSensor(
+    enabled: boolean
+  ): void {
+    this.setSphericalProperties({
+      enableOrientationSensor: enabled,
+    });
   }
 
   getVideoUrl(): string | null {
