@@ -97,6 +97,17 @@ async function main() {
   a5.pauseVideo();
   assert.deepEqual(seen, ["play", "pause"], "delegates to SDK play/pause");
 
+  // ── 5b. queued play before ready should start when the SDK becomes ready ──
+  const p5b = makeFakePlayer();
+  const a5b = new VimeoAdapter(p5b);
+  let readyPlayCount = 0;
+  p5b.play = async () => { readyPlayCount += 1; p5b.emit("play"); };
+  a5b.playVideo();
+  assert.equal(readyPlayCount, 0, "play is queued while the SDK is not ready");
+  p5b.resolveReady();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(readyPlayCount > 0, "queued play begins once the SDK is ready");
+
   // ── 6. loadVideoById + playVideo: play queued behind the load, and the
   //      settle race (Vimeo fires play → pause) is auto-resumed ──
   const p6 = makeFakePlayer();
@@ -192,8 +203,8 @@ async function main() {
   assert.deepEqual(detectSocialPlatform("https://vimeo.com/12133658"), { platform: "vimeo", platformId: "12133658" }, "no hash for public video");
   assert.equal(
     vimeoEmbedUrl("12133658?h=bfdbe1c46f"),
-    "https://player.vimeo.com/video/12133658?h=bfdbe1c46f?api=1",
-    "embed url includes hash + api"
+    "https://player.vimeo.com/video/12133658?h=bfdbe1c46f&api=1",
+    "embed url includes hash + api with a valid query separator"
   );
   assert.deepEqual(parseVimeoSpec("76979871?h=8272103f6e"), { id: "76979871", hash: "8272103f6e" }, "spec parse");
   const bare = parseVimeoSpec("12133658");

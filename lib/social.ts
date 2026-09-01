@@ -80,8 +80,9 @@ export function parseVimeoSpec(spec: string): { id: string; hash?: string } {
 export function vimeoEmbedUrl(platformId: string): string {
   const { id, hash } = parseVimeoSpec(platformId);
   const base = `https://player.vimeo.com/video/${id}`;
+  const separator = hash ? "&" : "?";
   const query = hash ? `?h=${hash}` : "";
-  return `${base}${query}?api=1`;
+  return `${base}${query}${separator}api=1`;
 }
 
 export function isSocialUrl(url: string): boolean {

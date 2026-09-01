@@ -708,6 +708,12 @@ export class VimeoAdapter implements SyncPlayerInterface {
 
     dbg("ready fired");
 
+    if (this.pendingPlay) {
+      this.pendingPlay = false;
+      dbg("starting queued playback after Vimeo ready");
+      this.beginPlay();
+    }
+
     const callbacks = this.readyCbs;
     this.readyCbs = [];
 
