@@ -5,7 +5,7 @@ import Image from "next/image";
 import { sanitizeHtml, tokenizeNoteLinks } from "@/lib/youtube";
 import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
-import { vimeoEmbedUrl } from "@/lib/social";
+import { vimeoEmbedUrl, parseVimeoSpec } from "@/lib/social";
 import { Html5Adapter } from "@/lib/html5-adapter";
 import {
   YouTubeAdapter,
@@ -111,6 +111,37 @@ export function formatTs(s: number) {
   const sec = Math.floor(s % 60);
   if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
   return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+/**
+ * Build the original media link for a clip so the user can open the source in
+ * a new tab. YouTube → watch URL, Vimeo → vimeo.com/<id> (hash preserved for
+ * unlisted), drive/upload → the stream proxy src (root-relative is resolved to
+ * an absolute URL here).
+ */
+function mediaLink(
+  item: ClipItem,
+  yt: Map<number, string>,
+  vim: Map<number, string>,
+  h5: Map<number, string>,
+): string | null {
+  if (!item || item.videoId <= 0) return null;
+  const ytId = yt.get(item.videoId);
+  if (ytId) return `https://www.youtube.com/watch?v=${encodeURIComponent(ytId)}`;
+  const vimSpec = vim.get(item.videoId);
+  if (vimSpec) {
+    const { id, hash } = parseVimeoSpec(vimSpec);
+    return hash ? `https://vimeo.com/${id}?h=${encodeURIComponent(hash)}` : `https://vimeo.com/${id}`;
+  }
+  const src = h5.get(item.videoId);
+  if (src) {
+    try {
+      return src.startsWith("/") ? new URL(src, window.location.origin).href : src;
+    } catch {
+      return src;
+    }
+  }
+  return null;
 }
 
 export default function VideoPlaylistPlayer({ items, onClose, preclassified }: { items: ClipItem[]; onClose: () => void; preclassified?: boolean }) {
@@ -1362,6 +1393,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   }, 0);
   const types = [...new Set(items.map((it) => it.type))];
   const listedIdxs = items.map((_, i) => i).filter((i) => !filter || items[i].type === filter);
+  const linkUrl = mediaLink(item, videoIds, vimeoIds, html5SrcsState);
 
   return (
     <div ref={rootRef} className="fixed inset-0 z-50 bg-black/95 flex flex-col" onClick={onClose}>
@@ -1393,6 +1425,13 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
                   <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 8v8a4.5 4.5 0 002.5-4zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" /></svg>
                 )}
               </button>
+              {linkUrl && (
+                <a href={linkUrl} target="_blank" rel="noopener noreferrer"
+                  className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                  title="Open media source in new tab">
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                </a>
+              )}
               <button onClick={() => setLoopOne((v) => !v)}
                 className={`p-1 rounded transition-colors ${loopOne ? "text-accent bg-accent/15" : "text-white/60 hover:text-white hover:bg-white/10"}`}
                 title={loopOne ? "Loop off" : "Loop this clip"}>
