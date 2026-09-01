@@ -1076,7 +1076,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
         // iframe already boots the FIRST Vimeo clip's embed URL, so tell the
         // adapter it's loaded (its same-video fast path seeks instead of
         // re-bootstrapping — the seeded clip never reloads its own video).
-        const seededSpec = firstVmItem ? vimeoIds.get(firstVmItem.videoId) : undefined;
+        const seededSpec = activeVmId ?? (firstVmItem ? vimeoIds.get(firstVmItem.videoId) : undefined);
         const p = new window.Vimeo.Player(container) as unknown as import("@/lib/vimeo-adapter").MinimalVimeoPlayer;
         const adapter = new VimeoAdapter(p, seededSpec);
         vimeoPlayerRef.current = adapter;
@@ -1440,13 +1440,15 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const ytId = videoIds.get(item.videoId);
   const vmId = vimeoIds.get(item.videoId);
   const h5Src = html5SrcsState.get(item.videoId);
+  const isSlide = item?.type === "slide";
+  const activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
   const firstVmItem = items.find((i) => i.videoId > 0 && vimeoIds.get(i.videoId));
   const firstVmId = firstVmItem ? vimeoIds.get(firstVmItem.videoId) : undefined;
+  const activeVmId = activeKind === "vimeo" ? vmId : firstVmId;
   // Drive/upload clips show a cover (audio-style) until the stream proves a
   // real video track; the cover then hides to reveal the video.
   const isHtml5Audio = !!h5Src && !html5IsVideo.get(item.videoId);
   const audioCoverSrc = isHtml5Audio ? (item.imageUrl || item.videoThumbnail) || "" : "";
-  const isSlide = item?.type === "slide";
   // Slides are presented full-bleed: the modal chrome (header, sidebar,
   // progress row, mobile strip, details) is hidden so the slide itself is the
   // whole screen. A slim floating bar keeps counter/fullscreen/close handy.
@@ -1456,7 +1458,6 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const fullBleedImage = isSlide && !!item?.imageUrl && !item?.detail;
   const playable = !!(ytId || vmId || h5Src);
   const readyNow = ytId ? playerReady : vmId ? vimeoReady : h5Src ? html5Ready : false;
-  const       activeKind: "youtube" | "vimeo" | "html5" | null = isSlide ? null : vmId ? "vimeo" : h5Src ? "html5" : ytId ? "youtube" : null;
   // Vimeo is "ready" once the SDK hands us the adapter, but the clip still
   // has to wait on Vimeo's own /config + CDN bootstrap before the first
   // frame actually renders — during that window currentTime stays pinned at
@@ -1578,7 +1579,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             <div className="absolute inset-0" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>
               <iframe
                 ref={vimeoContainerRef}
-                src={firstVmId ? vimeoEmbedUrl(firstVmId) : undefined}
+                src={activeVmId ? vimeoEmbedUrl(activeVmId) : undefined}
                 title="Vimeo player"
                 className="w-full h-full"
                 allow="autoplay; encrypted-media; picture-in-picture; clipboard-write"
