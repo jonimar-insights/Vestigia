@@ -37,6 +37,15 @@ export async function PATCH(
     if (!Array.isArray(order) || order.length === 0 || order.some((id: unknown) => !Number.isInteger(id))) {
       return NextResponse.json({ error: "order must be a non-empty array of item ids" }, { status: 400 });
     }
+
+    const uniqueOrder = new Set<number>();
+    for (const id of order as number[]) {
+      if (uniqueOrder.has(id)) {
+        return NextResponse.json({ error: "order contains duplicate item ids" }, { status: 400 });
+      }
+      uniqueOrder.add(id);
+    }
+
     const owned = await db
       .select({ id: clipItems.id })
       .from(clipItems)

@@ -120,6 +120,15 @@ async function main() {
       await fetch(`${BASE}/api/cliplists/${other.id}`, { method: "DELETE", headers: ownerHeaders });
     }
 
+    // duplicate ids in order -> 400
+    const duplicateOrder = await fetch(`${BASE}/api/cliplists/${list.id}/items`, {
+      method: "PATCH",
+      headers: ownerHeaders,
+      body: JSON.stringify({ order: [a.id, a.id] }),
+    });
+    assert.equal(duplicateOrder.status, 400);
+    console.log("duplicate order rejected: ok");
+
     // malformed order -> 400
     const malformed = await fetch(`${BASE}/api/cliplists/${list.id}/items`, {
       method: "PATCH",
