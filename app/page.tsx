@@ -221,6 +221,8 @@ export default function Home() {
   const [newImageLabel, setNewImageLabel] = useState("");
   const [addingImage, setAddingImage] = useState(false);
   const [imagePoolError, setImagePoolError] = useState<string | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkText, setBulkText] = useState("");
   const [bulkStatus, setBulkStatus] = useState("");
@@ -497,6 +499,31 @@ export default function Home() {
       await fetch(`/api/saved-images?id=${id}`, { method: "DELETE" });
       setSavedImages((prev) => prev.filter((s) => s.id !== id));
     } catch {}
+  }
+
+  async function handleUploadLocalImage(file: File) {
+    if (uploadingImage) return;
+    setUploadingImage(true);
+    setImagePoolError(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      if (newImageLabel.trim()) form.append("label", newImageLabel.trim());
+      const res = await fetch("/api/saved-images/upload", { method: "POST", body: form });
+      if (res.ok) {
+        const created = await res.json();
+        setSavedImages((prev) => (prev.some((s) => s.url === created.url) ? prev : [...prev, created]));
+        setNewImageLabel("");
+        setImagePoolError(null);
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setImagePoolError(err?.error || t("savedImages.savedFailed"));
+      }
+    } catch {
+      setImagePoolError(t("savedImages.savedFailed"));
+    } finally {
+      setUploadingImage(false);
+    }
   }
 
   const loadAllVideos = useCallback(async () => {
@@ -4384,6 +4411,26 @@ export default function Home() {
                   {addingImage ? t("app.loading") : t("savedImages.addButton")}
                 </button>
               </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif,image/avif"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) handleUploadLocalImage(f);
+                  e.target.value = "";
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploadingImage}
+                className="mt-2 flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-[10px] text-muted hover:text-accent hover:border-accent/50 transition-all"
+              >
+                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                {uploadingImage ? t("savedImages.uploading") : t("savedImages.upload")}
+              </button>
               {imagePoolError && <p className="text-[10px] text-danger mt-1">{imagePoolError}</p>}
             </div>
 
