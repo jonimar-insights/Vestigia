@@ -287,6 +287,37 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   });
 
   useEffect(() => {
+    // Start warming Vimeo connections + SDK from the moment the playlist opens,
+    // so a Vimeo clip (when it comes up) doesn't pay a cold DNS/TLS + script
+    // download cost. These run once on mount and overlap with the classification
+    // fetch for the first clip.
+    document.head
+      .querySelectorAll('link[rel="preconnect"][data-vimeo-warm]')
+      .forEach((el) => el.remove());
+
+    [
+      "https://player.vimeo.com", // SDK script + embed host
+      "https://i.vimeocdn.com", // thumbnail / player assets
+    ].forEach((origin) => {
+      const link = document.createElement("link");
+      link.rel = "preconnect";
+      link.href = origin;
+      link.dataset.vimeoWarm = "true";
+      document.head.appendChild(link);
+    });
+
+    const loadVimeoSdk = () => {
+      if (window.Vimeo?.Player || document.querySelector('script[src*="player.vimeo.com/api/player.js"]')) return;
+      const s = document.createElement("script");
+      s.src = "https://player.vimeo.com/api/player.js";
+      s.async = true;
+      document.head.appendChild(s);
+    };
+
+    loadVimeoSdk();
+  }, []);
+
+  useEffect(() => {
     const preclassifiedIds = new Set<number>();
     if (preclassified) {
       for (const it of items) {
