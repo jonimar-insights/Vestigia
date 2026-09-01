@@ -7,13 +7,46 @@ import { isTrustedImageUrl } from "@/lib/image-host";
 import { VimeoAdapter } from "@/lib/vimeo-adapter";
 import { vimeoEmbedUrl } from "@/lib/social";
 import { Html5Adapter } from "@/lib/html5-adapter";
+import {
+  YouTubeAdapter,
+  type YTPlayer,
+  type YouTubeIFramePlayer,
+} from "@/lib/youtube-adapter";
 
 declare global {
   interface Window {
-    // New property only — YT/onYouTubeIframeAPIReady are declared by the
-    // video/shared pages with their local YTPlayer symbol and must not
-    // be redeclared here with a different identity.
-    Vimeo?: { Player: new (element: HTMLElement, options?: Record<string, unknown>) => unknown };
+    YT?: {
+      Player: new (
+        element: HTMLElement,
+        options: {
+          videoId?: string;
+          playerVars?: Record<string, unknown>;
+          events?: {
+            onReady?: (event: {
+              target: YouTubeIFramePlayer;
+            }) => void;
+
+            onStateChange?: (event: {
+              target: YouTubeIFramePlayer;
+              data: number;
+            }) => void;
+
+            onError?: (event: {
+              target: YouTubeIFramePlayer;
+              data: number;
+            }) => void;
+          };
+        }
+      ) => YouTubeIFramePlayer;
+    };
+
+    Vimeo?: {
+      Player: new (
+        element: HTMLElement,
+        options?: Record<string, unknown>
+      ) => unknown;
+    };
+
     __VIMEO_DEBUG?: boolean;
   }
 }
@@ -40,20 +73,6 @@ function renderNoteHtml(text: string): string {
     .replace(/`(.+?)`/g, '<code class="bg-white/10 rounded px-1 font-mono text-[11px]">$1</code>')
     .replace(/\n/g, "<br>");
   return s.replace(/\u0000(\d+)\u0000/g, (_, i: string) => anchors[Number(i)] ?? "");
-}
-
-export interface YTPlayer {
-  getCurrentTime(): number;
-  getDuration(): number;
-  seekTo(seconds: number, allowSeekAhead: boolean): void;
-  playVideo(): void;
-  pauseVideo(): void;
-  getPlayerState(): number;
-  loadVideoById(videoId: string, startSeconds: number): void;
-  cueVideoById(videoId: string, startSeconds: number): void;
-  setPlaybackRate?(rate: number): void;
-  mute?(): void;
-  unMute?(): void;
 }
 
 const SPEEDS = [1, 1.25, 1.5] as const;
@@ -103,6 +122,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   const playerRef = useRef<YTPlayer | null>(null);
   const playerContainerRef = useRef<HTMLDivElement>(null);
   const [playerReady, setPlayerReady] = useState(false);
+  const [youtubeIs360, setYoutubeIs360] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -304,7 +324,9 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
   // The player backing the current clip (Vimeo adapter, YouTube iframe, or
   // native HTML5 for drive/upload). Returns null for slides and unplayable
   // items so controls never act on a hidden player from the previous clip.
-  function getActivePlayer(): YTPlayer | null {
+  // YTPlayer is the lib's rich surface (360° helpers on YouTubeAdapter);
+  // Vimeo/Html5 implement the same sync controls the playlist needs.
+  function getActivePlayer(): YTPlayer | VimeoAdapter | Html5Adapter | null {
     const cur = itemsRef.current[currentIdxRef.current];
     if (!cur) return null;
     if (vimeoIdsRef.current.get(cur.videoId)) return vimeoPlayerRef.current;
@@ -326,17 +348,6 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     try { html5PlayerRef.current?.pauseVideo(); } catch {}
     setPlaying(false);
   }, [currentIdx, item?.type, videoIds, vimeoIds, html5SrcsState]);
-
-  function applyYoutubeIframePermissions(container: HTMLElement | null) {
-    const iframe = container?.querySelector?.("iframe");
-    if (!iframe) return;
-    iframe.setAttribute(
-      "allow",
-      "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-    );
-    iframe.setAttribute("allowfullscreen", "");
-    iframe.setAttribute("referrerPolicy", "strict-origin-when-cross-origin");
-  }
 
   function startTimePolling() {
     if (timeIntervalRef.current) clearInterval(timeIntervalRef.current);
@@ -365,90 +376,340 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
     lastVideoIdRef.current = ytId;
 
     try {
-      playerRef.current.loadVideoById(ytId, cur.timestamp);
-      playerRef.current.playVideo();
-      // loadVideoById resets playback rate — re-apply the chosen speed
-      if (speedRef.current !== 1) playerRef.current.setPlaybackRate?.(speedRef.current);
-    } catch {}
+      const player = playerRef.current;
+      player.loadVideoById(ytId, cur.timestamp);
+      if (speedRef.current !== 1) player.setPlaybackRate?.(speedRef.current);
+      player.playVideo();
+    } catch (error) {
+      console.error("[Vestigia][YouTube] clip load failed:", {
+        videoId: ytId,
+        timestamp: cur.timestamp,
+        error,
+      });
+    }
   }, [currentIdx, playerReady, item?.videoId, item?.timestamp, item?.type, videoIds]);
 
+  // ─────────────────────────────────────────────────────────────
+  // YouTube IFrame Player
+  //
+  // One shared YouTube player is used for all YouTube clips.
+  // Vestigia swaps videoId + timestamp inside that player.
+  //
+  // 360° rendering is performed by YouTube itself. The adapter exposes
+  // getSphericalProperties()/setSphericalProperties() so Vestigia can
+  // detect and control the spherical camera when YouTube exposes it.
+  // ─────────────────────────────────────────────────────────────
   useEffect(() => {
     const container = playerContainerRef.current;
-    if (!container || playerRef.current) return;
-    // Create the player from the first item that is actually playable on YT
-    const firstPlayable = itemsRef.current.find((i) => i.videoId > 0 && videoIds.get(i.videoId));
+
+    if (!container || playerRef.current) {
+      return;
+    }
+
+    // Create from the first YouTube item that is actually playable.
+    const firstPlayable = itemsRef.current.find(
+      (i) => i.videoId > 0 && videoIds.get(i.videoId)
+    );
+
     const firstYtId = firstPlayable ? videoIds.get(firstPlayable.videoId) : undefined;
-    if (!firstYtId) return;
+
+    if (!firstYtId) {
+      return;
+    }
+
     lastVideoIdRef.current = firstYtId;
+
     let destroyed = false;
+    let poll: ReturnType<typeof setInterval> | null = null;
+
+    function applyIframePermissions(player: YouTubeIFramePlayer) {
+      try {
+        /*
+         * The IFrame API replaces our mount <div> with an iframe.
+         *
+         * These permissions do not turn a rectangular video into 360°.
+         * They allow YouTube's spherical player to use the capabilities
+         * it needs when the video is actually 360°.
+         */
+        const el = container as HTMLDivElement | null;
+        const iframe = el?.querySelector("iframe") as HTMLIFrameElement | null;
+
+        if (!iframe) {
+          return;
+        }
+
+        iframe.setAttribute(
+          "allow",
+          [
+            "accelerometer",
+            "autoplay",
+            "clipboard-write",
+            "encrypted-media",
+            "gyroscope",
+            "picture-in-picture",
+            "web-share",
+            "fullscreen",
+          ].join("; ")
+        );
+
+        iframe.setAttribute("allowfullscreen", "");
+        iframe.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
+
+        iframe.style.width = "100%";
+        iframe.style.height = "100%";
+        iframe.style.border = "0";
+
+        /*
+         * Keep the raw player reference only long enough to apply the
+         * iframe permissions. All subsequent playback operations go
+         * through YouTubeAdapter.
+         */
+        void player;
+      } catch {
+        // DOM permissions are best-effort.
+      }
+    }
+
+    function reportSphericalState(adapter: YouTubeAdapter, reason: string) {
+      if (destroyed) {
+        return;
+      }
+
+      const spherical = adapter.getSphericalProperties();
+      const is360 = spherical !== null;
+
+      setYoutubeIs360(is360);
+
+      console.info(
+        "[Vestigia][YouTube]",
+        {
+          reason,
+          videoId: adapter.getVideoId(),
+          is360,
+          spherical,
+        }
+      );
+    }
 
     function createPlayer() {
-      if (destroyed || playerRef.current || !container) return;
+      if (destroyed || playerRef.current || !container || !window.YT?.Player) {
+        return;
+      }
+
       try {
-        playerRef.current = new window.YT.Player(container, {
-          videoId: firstYtId,
-          playerVars: { autoplay: 0, modestbranding: 1, rel: 0, controls: 1, enablejsapi: 1, playsinline: 1, fs: 1 },
-          events: {
-            onReady: () => {
-              if (destroyed) return;
-              // Set the interaction/permission surface on the iframe the IFrame
-              // API created. Permissions beyond the defaults are required for
-              // certain media: gyroscope/accelerometer power device-orientation
-              // 360° viewing, autoplay/encrypted-media for playback in an embed,
-              // and web-share/fullscreen for the player chrome.
-              applyYoutubeIframePermissions(container);
-              setPlayerReady(true);
+        const rawPlayer = new window.YT.Player(
+          container,
+          {
+            videoId: firstYtId,
+
+            playerVars: {
+              autoplay: 0,
+              controls: 1,
+              modestbranding: 1,
+              rel: 0,
+              enablejsapi: 1,
+              playsinline: 1,
+
+              /*
+               * YouTube recommends supplying origin when using
+               * enablejsapi. This also makes the embed safer.
+               */
+              origin: window.location.origin,
             },
-            onStateChange: (e: { data: number }) => {
-              if (destroyed) return;
-              const curItem = itemsRef.current[currentIdxRef.current];
-              // Ignore YouTube events while a Vimeo or drive/upload
-              // (html5) clip is active — pausing the hidden YT player must
-              // not flip shared UI state or stop the html5 clip's time poll.
-              if (curItem && (vimeoIdsRef.current.get(curItem.videoId) || html5SrcsRef.current.get(curItem.videoId))) return;
-              const state = e.data;
-              const pl = state === 1;
-              setPlaying(pl);
-              if (pl) startTimePolling();
-              else clearTimeInterval();
-              if (state === 0) {
-                if (loopOneRef.current) {
-                  const it = itemsRef.current[currentIdxRef.current];
-                  try {
-                    playerRef.current?.seekTo(it.timestamp, true);
-                    playerRef.current?.playVideo();
-                  } catch {}
-                } else if (advancedRef.current) {
-                  advancedRef.current = false;
-                } else {
-                  advanceOrEnd();
+
+            events: {
+              onReady: (event) => {
+                if (destroyed) {
+                  return;
                 }
-              }
+
+                const adapter = new YouTubeAdapter(event.target);
+                playerRef.current = adapter;
+
+                /*
+                 * The IFrame has now been inserted by YouTube.
+                 */
+                applyIframePermissions(event.target);
+                setPlayerReady(true);
+
+                /*
+                 * This is the authoritative runtime 360° test.
+                 *
+                 * If this returns properties such as:
+                 *   { yaw, pitch, roll, fov }
+                 *
+                 * YouTube is exposing the video as spherical.
+                 */
+                reportSphericalState(adapter, "onReady");
+              },
+
+              onStateChange: (event) => {
+                if (destroyed) {
+                  return;
+                }
+
+                const curItem = itemsRef.current[currentIdxRef.current];
+
+                /*
+                 * Ignore YouTube events while Vimeo or HTML5 is
+                 * the active source.
+                 */
+                if (
+                  curItem &&
+                  (vimeoIdsRef.current.get(curItem.videoId) || html5SrcsRef.current.get(curItem.videoId))
+                ) {
+                  return;
+                }
+
+                const adapter = playerRef.current;
+                const state = event.data;
+                const isPlaying = state === 1;
+
+                setPlaying(isPlaying);
+
+                if (isPlaying) {
+                  startTimePolling();
+                } else {
+                  clearTimeInterval();
+                }
+
+                /*
+                 * A video may change from rectangular → spherical
+                 * when loadVideoById swaps the active YouTube source,
+                 * so inspect spherical state when playback starts.
+                 */
+                if (state === 1 && adapter instanceof YouTubeAdapter) {
+                  reportSphericalState(adapter, "playing");
+                }
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * Normal Cliplist boundaries are handled by the
+                 * currentTime/endTimestamp watchdog below.
+                 *
+                 * We only process YouTube's native ENDED event when
+                 * the actual underlying YouTube video reaches its end.
+                 */
+                if (state === 0) {
+                  if (loopOneRef.current) {
+                    const it = itemsRef.current[currentIdxRef.current];
+                    try {
+                      adapter?.seekTo(it.timestamp, true);
+                      adapter?.playVideo();
+                    } catch {}
+                  } else if (advancedRef.current) {
+                    advancedRef.current = false;
+                  } else {
+                    advanceOrEnd();
+                  }
+                }
+              },
+
+              onError: (event) => {
+                if (destroyed) {
+                  return;
+                }
+
+                console.error(
+                  "[Vestigia][YouTube] player error",
+                  {
+                    videoId: firstYtId,
+                    code: event.data,
+                  }
+                );
+              },
             },
-          },
-        });
+          }
+        );
+
+        /*
+         * The adapter is installed from onReady rather than immediately
+         * because YouTube needs to finish constructing the iframe/player.
+         */
+        void rawPlayer;
       } catch (err) {
         console.error("[YT Player] createPlayer failed:", err);
       }
     }
 
-    if (window.YT && window.YT.Player) {
+    /*
+     * API already available.
+     */
+    if (window.YT?.Player) {
       createPlayer();
-      return () => { destroyed = true; clearTimeInterval(); };
+
+      return () => {
+        destroyed = true;
+
+        if (poll) {
+          clearInterval(poll);
+          poll = null;
+        }
+
+        clearTimeInterval();
+
+        try {
+          playerRef.current?.destroy();
+        } catch {}
+
+        playerRef.current = null;
+        setPlayerReady(false);
+      };
     }
 
+    /*
+     * Load YouTube's IFrame API exactly once.
+     */
     if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-      const s = document.createElement("script");
-      s.src = "https://www.youtube.com/iframe_api";
-      document.head.appendChild(s);
+      const script = document.createElement("script");
+      script.src = "https://www.youtube.com/iframe_api";
+      script.async = true;
+      document.head.appendChild(script);
     }
-    const poll = setInterval(() => {
-      if (!destroyed && window.YT && window.YT.Player) { clearInterval(poll); createPlayer(); }
+
+    /*
+     * Poll until the global API has finished initializing.
+     *
+     * This preserves your existing behavior and avoids depending on
+     * another component's onYouTubeIframeAPIReady handler.
+     */
+    poll = setInterval(() => {
+      if (destroyed) {
+        return;
+      }
+
+      if (window.YT?.Player) {
+        if (poll) {
+          clearInterval(poll);
+          poll = null;
+        }
+
+        createPlayer();
+      }
     }, 100);
 
-    return () => { destroyed = true; clearInterval(poll); clearTimeInterval(); };
-    // Deps narrowed to their trigger (metadata map): startTimePolling closes
-    // over refs only, and recreating the YT player per render would be wrong.
+    return () => {
+      destroyed = true;
+
+      if (poll) {
+        clearInterval(poll);
+        poll = null;
+      }
+
+      clearTimeInterval();
+
+      try {
+        playerRef.current?.destroy();
+      } catch {}
+
+      playerRef.current = null;
+      setPlayerReady(false);
+    };
+
+    // Deliberately only recreate the YT player when the YouTube map
+    // changes. currentIdx/timestamp are handled by the separate clip-load
+    // effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoIds]);
 
@@ -942,8 +1203,13 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
           <div className={isFullscreen ? "flex-1 min-h-0 w-full bg-black relative" : "aspect-video mx-auto w-full max-w-4xl bg-black relative"}>
             {/* SDK players replace their mount node (YT swaps the div for an
                 iframe), so visibility is toggled on these React-owned wrappers */}
-            <div className="absolute inset-0" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
+            <div className="absolute inset-0 overflow-hidden" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
               <div ref={playerContainerRef} className="w-full h-full" />
+              {youtubeIs360 && (
+                <div className="pointer-events-none absolute right-2 top-2 rounded bg-black/60 px-2 py-0.5 text-[11px] font-medium text-white">
+                  360°
+                </div>
+              )}
             </div>
 
             <div className="absolute inset-0" style={{ display: activeKind === "vimeo" && !ended ? undefined : "none" }}>

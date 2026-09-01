@@ -84,8 +84,6 @@ interface YTPlayer {
 
 declare global {
   interface Window {
-    YT: { Player: new (id: string | HTMLElement, config: Record<string, unknown>) => YTPlayer };
-    onYouTubeIframeAPIReady: () => void;
     Vimeo?: { Player: new (element: HTMLElement, options?: Record<string, unknown>) => unknown };
   }
 }
@@ -457,7 +455,7 @@ export default function SharedFolderPage({
     let destroyed = false;
 
     function createPlayer() {
-      if (destroyed || playerRef.current || !container) return;
+      if (destroyed || playerRef.current || !container || !window.YT?.Player) return;
       try {
         new window.YT.Player(container, {
           videoId: ytId,
