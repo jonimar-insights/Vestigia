@@ -1525,7 +1525,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             </div>
           </div>
 
-          <div className={isFullscreen ? "flex-1 min-h-0 w-full bg-black relative" : "aspect-video mx-auto w-full max-w-4xl bg-black relative"}>
+          <div className={isFullscreen || isSlide ? "flex-1 min-h-0 w-full bg-black relative" : "aspect-video mx-auto w-full max-w-4xl bg-black relative"}>
             {/* SDK players replace their mount node (YT swaps the div for an
                 iframe), so visibility is toggled on these React-owned wrappers */}
             <div className="absolute inset-0 overflow-hidden" style={{ display: activeKind === "youtube" && !ended ? undefined : "none" }}>
@@ -1646,7 +1646,7 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
             )}
             {!ended && isSlide && (
               <div
-                className="absolute inset-0 flex items-end justify-center px-12 pt-10 pb-14 bg-black"
+                className="absolute inset-0 flex items-center justify-center px-12 py-10 bg-black"
                 style={item?.color ? { backgroundColor: item.color } : undefined}
               >
                 <div className="text-center max-w-2xl w-full max-h-full flex flex-col items-center">
