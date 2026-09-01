@@ -1427,9 +1427,10 @@ export default function VideoPlaylistPlayer({ items, onClose, preclassified }: {
               </button>
               {linkUrl && (
                 <a href={linkUrl} target="_blank" rel="noopener noreferrer"
-                  className="p-1 rounded text-white/60 hover:text-white hover:bg-white/10 transition-colors"
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-white/70 hover:text-white hover:bg-white/10 transition-colors"
                   title="Open media source in new tab">
-                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                  <span>Open source</span>
                 </a>
               )}
               <button onClick={() => setLoopOne((v) => !v)}
