@@ -90,10 +90,18 @@ function buildRawMessage(params: {
 }
 
 async function refreshAccessToken(gmail: GmailOAuth): Promise<string> {
+  if (!gmail.refreshToken && gmail.accessToken) {
+    return gmail.accessToken;
+  }
+
+  if (!gmail.refreshToken) {
+    throw new Error("No refresh token available for Gmail OAuth");
+  }
+
   const params = new URLSearchParams({
     client_id: GOOGLE_CLIENT_ID!,
     client_secret: GOOGLE_CLIENT_SECRET!,
-    refresh_token: gmail.refreshToken!,
+    refresh_token: gmail.refreshToken,
     grant_type: "refresh_token",
   });
   const res = await fetch(GMAIL_TOKEN_URL, {
@@ -148,13 +156,13 @@ export async function sendShareInviteEmail(
     permission: params.permission,
   });
 
-  // Prefer the signed-in user's own Gmail via the Gmail API (gmail.send scope).
-  // Only used when GMAIL_SEND_VIA_USER=true — the scope is sensitive and
-  // triggers Google's unverified-app warning when not requested.
+  // Prefer the signed-in user's own Gmail via the Gmail API when the app has
+  // a valid stored token. The feature flag only controls whether we requested
+  // the sensitive scope during Google sign-in; it should not block sending when
+  // the account already has a stored refresh token and the app can use it.
   const viaOAuth =
-    GMAIL_SEND_VIA_USER &&
     !!gmail?.user &&
-    !!gmail?.refreshToken &&
+    (!!gmail?.refreshToken || !!gmail?.accessToken) &&
     !!GOOGLE_CLIENT_ID &&
     !!GOOGLE_CLIENT_SECRET;
   if (viaOAuth) {
